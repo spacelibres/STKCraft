@@ -38,4 +38,4 @@ pub mod chebyshev;
 pub mod daf;
 pub mod spk;
 
-pub use spk::{Ephemeris, KernelEphemeris, StateVector};
+pub use spk::{Ephemeris, EphemerisSet, KernelEphemeris, StateVector};

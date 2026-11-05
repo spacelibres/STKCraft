@@ -272,9 +272,10 @@ fn task_assets() -> Result<(), String> {
     let attribution = fs::read_to_string(root.join("ATTRIBUTION.md"))
         .map_err(|e| format!("could not read ATTRIBUTION.md: {e}"))?;
 
+    let skip_directories = ignored_directories(&root);
     let mut missing = Vec::new();
     let mut counted = 0_usize;
-    collect_assets(&root, &mut |path| {
+    collect_assets(&root, &skip_directories, &mut |path| {
         counted += 1;
         let name = path
             .file_name()
@@ -336,8 +337,9 @@ fn task_assets() -> Result<(), String> {
 }
 
 fn collect_asset_names(root: &Path) -> Result<Vec<String>, String> {
+    let skip = ignored_directories(root);
     let mut names = Vec::new();
-    collect_assets(root, &mut |path| {
+    collect_assets(root, &skip, &mut |path| {
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
             names.push(name.to_owned());
         }
@@ -345,7 +347,24 @@ fn collect_asset_names(root: &Path) -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-fn collect_assets(dir: &Path, visit: &mut dyn FnMut(&Path)) -> Result<(), String> {
+/// The directory names a `.gitignore` at the workspace root tells git to ignore.
+///
+/// Only plain entries are read — a line with no wildcard and a trailing slash, e.g. `plan/`. A
+/// pattern with a wildcard could match anything and is left to git; this is not a `.gitignore`
+/// implementation, it is enough to keep local scratch directories out of the asset table.
+fn ignored_directories(root: &Path) -> Vec<String> {
+    let Ok(text) = fs::read_to_string(root.join(".gitignore")) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter(|line| line.ends_with('/') && !line.contains('*') && !line.contains('!'))
+        .map(|line| line.trim_end_matches('/').to_owned())
+        .collect()
+}
+
+fn collect_assets(dir: &Path, skip: &[String], visit: &mut dyn FnMut(&Path)) -> Result<(), String> {
     let entries =
         fs::read_dir(dir).map_err(|e| format!("could not read {}: {e}", dir.display()))?;
     for entry in entries {
@@ -367,8 +386,17 @@ fn collect_assets(dir: &Path, visit: &mut dyn FnMut(&Path)) -> Result<(), String
             continue;
         }
 
+        // A directory git is told to ignore is not part of the repository, so its contents are not
+        // this repository's assets: `plan/` is the local scratch area `AGENTS.md` describes, and a
+        // file parked there is the author's business, not the release's. Skipping them keeps the
+        // gate about what ships. The check is on the directory name against `.gitignore`'s own
+        // entries rather than its full pattern language, which is all this repository uses.
+        if path.is_dir() && skip.iter().any(|entry| entry == name.as_ref()) {
+            continue;
+        }
+
         if path.is_dir() {
-            collect_assets(&path, visit)?;
+            collect_assets(&path, skip, visit)?;
         } else if let Some(ext) = path.extension().and_then(|e| e.to_str())
             && ASSET_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
         {

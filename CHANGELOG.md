@@ -9,6 +9,21 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.4] — Several kernels, one ephemeris, and an asset gate that means what it says
+
+A planetary kernel carries the system barycentres and a satellite-system kernel carries a planet
+and its moons about one of them, so `Mars → Mars barycentre → SSB` spans two files. `EphemerisSet`
+reads any number of kernels as one ephemeris and walks each chain across them, which is what makes
+"ask for any planet" a single call rather than a question about which file to open.
+
+### Added
+
+- **`EphemerisSet`** — several SPK kernels behind the one `Ephemeris` trait, with the chain lookup
+  crossing files. A body no loaded kernel holds is still refused by NAIF identifier.
+- **`cargo xtask assets` now ignores directories git ignores.** `plan/` is the local scratch area
+  `AGENTS.md` describes, and a file parked there was failing the gate as though it were shipping. A
+  directory named by a plain `.gitignore` entry no longer counts as an asset of this repository.
+
 ## [0.1.3] — The ephemeris reads a trajectory
 
 The SPK reader evaluates type-2 segments, and `stkcraft-ephemeris` now answers the question it was

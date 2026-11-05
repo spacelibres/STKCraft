@@ -344,6 +344,90 @@ fn whole_number(value: f64) -> Result<i32> {
     })
 }
 
+/// Several kernels read as one ephemeris.
+///
+/// No single JPL kernel carries the whole solar system at the body level: the planetary file has
+/// the barycentres and the satellite-system files have a planet and its moons about that
+/// barycentre. A chain like `Mars → Mars barycentre → SSB` therefore spans two files, and this type
+/// walks it across them rather than forcing a caller to know which file holds which step.
+#[derive(Debug)]
+pub struct EphemerisSet {
+    kernels: Vec<KernelEphemeris>,
+}
+
+impl EphemerisSet {
+    /// Read every kernel in `paths` as one ephemeris.
+    ///
+    /// # Errors
+    ///
+    /// The first file that cannot be read or parsed, named, so a mistyped path is not a bare
+    /// "not found".
+    pub fn from_paths(paths: &[std::path::PathBuf]) -> Result<Self> {
+        if paths.is_empty() {
+            return Err(Error::invalid("ephemeris set", "no kernel was given"));
+        }
+        let mut kernels = Vec::with_capacity(paths.len());
+        for path in paths {
+            kernels.push(KernelEphemeris::from_path(path)?);
+        }
+        Ok(Self { kernels })
+    }
+
+    /// The kernel that holds a segment for `target`, if one does.
+    fn kernel_for(&self, target: i32) -> Option<&KernelEphemeris> {
+        self.kernels
+            .iter()
+            .find(|kernel| kernel.segment_for(target).is_some())
+    }
+
+    /// Walk the chain from `target` to the barycentre, taking each step from whichever kernel
+    /// holds it.
+    fn chained_state(&self, target: i32, et: f64) -> Result<StateVector> {
+        let mut state = StateVector::ZERO;
+        let mut current = target;
+        for _ in 0..MAX_CHAIN {
+            if current == 0 {
+                return Ok(state);
+            }
+            let Some(kernel) = self.kernel_for(current) else {
+                return Err(Error::NotFound {
+                    what: format!(
+                        "a segment for NAIF {current} in any loaded kernel (a planetary kernel                          alone carries only the system barycentres)"
+                    ),
+                });
+            };
+            let Some(segment) = kernel.segment_for(current) else {
+                return Err(Error::NotFound {
+                    what: format!("a segment for NAIF {current}"),
+                });
+            };
+            state = state.plus(kernel.segment_state(segment, et)?);
+            current = segment.center;
+        }
+        Err(Error::invalid(
+            "SPK file",
+            "the segment chain does not reach the barycentre",
+        ))
+    }
+}
+
+impl Ephemeris for EphemerisSet {
+    fn state(&self, body: Body, t: Epoch) -> Result<StateVector> {
+        if t.scale() != TimeScale::Tdb {
+            return Err(Error::invalid(
+                "ephemeris epoch",
+                format!(
+                    "a kernel's time argument is TDB, not {}; convert the epoch first",
+                    t.scale().id()
+                ),
+            ));
+        }
+        let julian = t.julian();
+        let et = ((julian.day - JD_J2000) + julian.fraction) * 86_400.0;
+        self.chained_state(body.naif_id(), et)
+    }
+}
+
 /// What an ephemeris must be able to answer.
 ///
 /// The contract is deliberately narrow: position and velocity in the ICRF, relative to the
@@ -695,5 +779,80 @@ mod tests {
         let tt = Epoch::from_jd(JD_J2000, TimeScale::Tt);
         let error = kernel.state(Body::Earth, tt).expect_err("TT is not TDB");
         assert!(matches!(error, Error::Invalid { .. }), "{error:?}");
+    }
+
+    /// A one-record type-2 kernel: `position_km` at every epoch of a ±1000 s interval.
+    ///
+    /// The records come first and the four-word directory last, which is the layout the module
+    /// documentation describes; the segment is twelve words, exactly like DE440's degenerate
+    /// velocity-free segments.
+    #[allow(clippy::indexing_slicing)]
+    fn one_record_kernel(target: i32, center: i32, position_km: [f64; 3]) -> Vec<u8> {
+        const ROWS: usize = crate::daf::RECORD_BYTES;
+        let interval = 2_000.0_f64;
+        let first_word = 257_i32;
+        let mut bytes = vec![0_u8; ROWS * 3];
+        bytes[0..8].copy_from_slice(b"DAF/SPK ");
+        bytes[8..12].copy_from_slice(&2_i32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&6_i32.to_le_bytes());
+        bytes[76..80].copy_from_slice(&2_i32.to_le_bytes());
+        bytes[80..84].copy_from_slice(&2_i32.to_le_bytes());
+        bytes[88..96].copy_from_slice(b"LTL-IEEE");
+
+        // The summary: this segment covers ±1000 s about J2000.
+        let record = &mut bytes[ROWS..ROWS * 2];
+        record[16..24].copy_from_slice(&1.0_f64.to_le_bytes());
+        record[24..32].copy_from_slice(&(-1_000.0_f64).to_le_bytes());
+        record[32..40].copy_from_slice(&1_000.0_f64.to_le_bytes());
+        let fields = [target, center, 1, 2, first_word, first_word + 11];
+        for (index, value) in fields.iter().enumerate() {
+            let at = 40 + index * 4;
+            record[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+
+        // The record: midpoint, half-width, two coefficients per axis, then the directory.
+        let words = [
+            0.0,
+            interval * 0.5,
+            position_km[0],
+            0.0,
+            position_km[1],
+            0.0,
+            position_km[2],
+            0.0,
+            -1_000.0,
+            interval,
+            8.0,
+            1.0,
+        ];
+        for (index, value) in words.iter().enumerate() {
+            let at = ROWS * 2 + index * 8;
+            bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn several_kernels_are_read_as_one_ephemeris() {
+        // The reason this type exists: no single JPL kernel carries the whole solar system at the
+        // body level. Two kernels that each hold a different body must both be answerable, and a
+        // body neither holds must still be refused by name.
+        let directory =
+            std::env::temp_dir().join(format!("stkcraft-ephemeris-set-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("a temporary directory");
+        let first = directory.join("first.bsp");
+        let second = directory.join("second.bsp");
+        std::fs::write(&first, one_record_kernel(499, 0, [1.0, 2.0, 3.0]))
+            .expect("write the first kernel");
+        std::fs::write(&second, one_record_kernel(599, 0, [4.0, 5.0, 6.0]))
+            .expect("write the second kernel");
+        let set = EphemerisSet::from_paths(&[first, second]).expect("two readable kernels");
+        let mars = set
+            .state(Body::Mars, tdb(0.0))
+            .expect("Mars is in the first kernel");
+        assert!((mars.position_km[0] - 1.0).abs() < 1e-12);
+        let moon = set.state(Body::Moon, tdb(0.0));
+        assert!(moon.is_err(), "a body in neither kernel must be refused");
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }
