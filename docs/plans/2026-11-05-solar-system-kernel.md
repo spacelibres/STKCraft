@@ -1,73 +1,101 @@
-# 太阳系内核
+# The solar-system kernel
 
-**目标：** 让 STKCraft 的数值内核不只懂地球——时间尺度覆盖 TDB，天体参数与自转模型按 IAU 决议，
-行星/月球位置有可验证的来源，场景能指定中心天体，于是"切换到任何一颗行星"是内核的能力而不是
-界面上的假象。
+**Goal:** make the numerical kernel understand more than the Earth. Time scales reach TDB, body
+constants and rotation models follow IAU resolutions, planet and Moon positions come from a
+verifiable source, and a scenario can name its central body — so "switch to another planet" is a
+capability of the kernel rather than a display illusion.
 
-**主张（与 `AGENTS.md` 同一标准）：** 每个数值层都要对上公开参考。参考优先级：原始决议与标准
-（IAU、IERS、NAIF、USNO）> 标准参考实现（IAU SOFA / ERFA、JPL Horizons、NAIF 内核）> 论文。
-"看起来对"不是证据。
+**The standard is the one in `AGENTS.md`:** every numerical layer is finished only when it matches
+a published reference. Sources in order of preference: the primary resolution or standard (IAU,
+IERS, NAIF, USNO), then a reference implementation of it (IAU SOFA / ERFA, JPL Horizons, NAIF
+kernels), then the paper. "It looks right" is not evidence.
 
-## 实现来源与许可
+## Provenance and licensing
 
-- **自己实现**：不依赖 `nyx-space/anise`、`nyx-space/hifitime`（两者 MPL-2.0）或 `nyx`
-  （AGPL-3.0），也不拷贝其源码。它们只作为设计参考阅读。
-- **数据来源**：NAIF 的公开文本内核（`pck00011.tpc`、`gm_de440.tpc`）与 IAU/WGCCRE 报告。
-  数值以生成式表格进源码，每张表带 `出处 + 版本` 注释。
-- **验证来源**：ERFA（BSD，IAU SOFA 派生）与 JPL Horizons。测试向量带查询条件与日期。
+- **Implemented here.** No dependency on `nyx-space/anise` or `nyx-space/hifitime` (both MPL-2.0)
+  or `nyx` (AGPL-3.0), and no copying of their source. They are read as design references only.
+- **Data** comes from NAIF's public text kernels (`pck00011.tpc`, `gm_de440.tpc`) and the
+  IAU/WGCCRE report. Values enter the source as tables that carry `source + version` in a comment.
+- **Verification** uses ERFA (BSD, derived from IAU SOFA) and JPL Horizons. Every test vector
+  states the query that produced it and the date it was taken.
 
-## 五个阶段
+## Five phases
 
-每段独立通过 `cargo xtask ci` 并单独提交。
+Each phase passes `cargo xtask ci` on its own and lands as its own commit.
 
-### 段 1 — 时间层补全 TDB（`stkcraft-time`）
+### Phase 1 — TDB (`stkcraft-time`) — **done**
 
-- `TDB − TT` 用 Fairhead & Bretagnon (1990) 的前七项截断级数，系数见 Kaplan (2005) USNO
-  Circular 179；文档给的范围是 1600–2200 年优于 10 µs。
-- 方向：`TT → TDB` 直接加；`TDB → TT` 因修正量依赖于 TT，用一次不动点迭代（收敛到亚微秒）。
-- 与现有 `to_scale` 的"经 TAI 中转"结构一致：`Tdb` 不再等同 `Tt`。
-- **验收**：8 个纪元（1985…2025）对 ERFA `eraDtdb` 的差 < 20 µs；振幅界 < 1.7 ms；往返误差 < 1 µs。
+- `TDB − TT` uses the seven largest terms of the Fairhead & Bretagnon (1990) series in the
+  truncated form given by Kaplan (2005), USNO Circular 179; documented as better than 10 µs over
+  AD 1600–2200.
+- `TT → TDB` is a direct evaluation; `TDB → TT` is a two-iteration fixed-point inversion, because
+  the series argument is a TT quantity that is not known until the correction is.
+- `TimeScale::Tdb` no longer aliases `Tt` inside `Epoch::to_scale` and `Epoch::as_tai`.
+- **Acceptance, measured:** agreement with ERFA's full series (`eraDtdb`) at eight epochs from
+  1985 to 2025 within 20 µs — worst case 5.2 µs; the 1.7 ms amplitude envelope is enforced and
+  required to be approached; the inverse recovers TT to better than 1 ns; the `UTC → TAI → TT →
+  TDB` chain reproduces the ERFA value at 2023-01-01.
 
-### 段 2 — 新建 `stkcraft-body`（L1，位于 time 与 frames 之间）
+Why this is not optional: `pck00011.tpc` states that the independent variable of the IAU 2015
+rotation formulas is TDB and that the frame is the ICRF. Phase 2's rotation models and phase 3's
+ephemerides both take TDB, so a kernel that treats TDB as TT contaminates all of them.
 
-- `Body`：Sun、Mercury、Venus、Earth、Moon、Mars、Jupiter、Saturn、Uranus、Neptune；NAIF ID 与
-  IAU 名双键（为段 3 的内核后端留接口）。
-- **GM**：DE440 数值（`gm_de440.tpc`，Park et al. 2021, AJ 161:105），单位 km³/s²。
-- **半径与椭球**：IAU WGCCRE 2015（Archinal et al. 2018, CMDA 130:22），来源
-  `pck00011.tpc` 的 `BODYnnn_RADII`。
-- **自转模型**：IAU 2015 —— 极轴 α₀、δ₀ 与主经线 W 的多项式（每世纪多项式，J2000 起算），
-  月球含天平动周期项；由此得到 `body_fixed ↔ ICRF` 的 3-1-3 旋转。
-- **行星心 / 行星大地**：每体用自己的扁率椭球，不用 WGS-84 硬编码。
-- **验收**：Archinal et al. 2018 表格在 J2000 的 W 与极点值；旋转矩阵正交性与往返；椭球上的
-  点位往返误差 < 1 m。
+### Phase 2 — `stkcraft-body` (L1, between `time` and `frames`)
 
-### 段 3 — 新建 `stkcraft-ephemeris`（L2）
+- `Body`: Sun, Mercury, Venus, Earth, Moon, Mars, Jupiter, Saturn, Uranus, Neptune, keyed by both
+  NAIF ID and IAU name (the NAIF key is what phase 3's kernel backend will need).
+- **GM** from DE440 (`gm_de440.tpc`, Park et al. 2021, AJ 161:105), km³/s².
+- **Radii and ellipsoids** from IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22), via
+  `pck00011.tpc`'s `BODYnnn_RADII`.
+- **Rotation models** from IAU 2015: pole α₀, δ₀ and prime meridian W as polynomials in TDB
+  centuries from J2000, with the periodic (`NUT_PREC_*`) terms the kernel carries for Mercury,
+  the Moon, Jupiter and Neptune. `r_fixed = R₃(W)·R₁(90° − δ)·R₃(90° + α)·r_icrf`.
+- **Planetocentric / planetographic** conversion per body's own ellipsoid; no hard-coded WGS-84.
+- Known limitation to state in the code, not to hide: the text kernel carries only the linear
+  terms of the Moon's model. The full librational model needs a binary PCK, which is phase 3
+  work; until then the omission is documented with its magnitude (about 0.01°, a few hundred
+  metres on the surface).
+- **Acceptance:** the model reproduces the kernel's constants at J2000 for the bodies without
+  periodic terms; rotation matrices are orthonormal with determinant +1 at several epochs;
+  icrf → fixed → icrf returns the input to machine precision; planetodetic ↔ planetocentric
+  round-trips inside 1 m.
 
-- `trait Ephemeris { fn state(&self, body: Body, t: Epoch) -> Result<StateVector>; }`
-  返回 ICRF 位置/速度，时间参数 TDB。
-- **后端 A（内置，离线）**：VSOP87 截断（Bretagnon & Francou 1988）给行星日心黄道位置；
-  ELP2000-82B 截断给月球；用 IAU 2006 黄赤交角转到 ICRF。表是生成式小表，不含数据文件。
-- **后端 B（可选）**：自实现 NAIF DAF/SPK 读取器（Type 2/3），吃 `de440s.bsp`（32 MB）与
-  JPL 卫星内核。数据不进仓库，按固定 SHA-256 拉取；离线 CI 跳过且不失败。
-- **验收**：两后端对 JPL Horizons 的公开查询值；A 与 B 的互差要在 A 的标称精度内。
+### Phase 3 — `stkcraft-ephemeris` (L2)
 
-### 段 4 — 引擎的中心天体（`stkcraft-engine`）
+- `trait Ephemeris { fn state(&self, body: Body, t: Epoch) -> Result<StateVector>; }` returning
+  ICRF position and velocity, with a TDB time argument.
+- **Backend A (built in, offline):** truncated VSOP87 (Bretagnon & Francou 1988) for the planets
+  and truncated ELP2000-82B for the Moon, rotated to the ICRF with the IAU 2006 obliquity. Small
+  generated tables, no data files.
+- **Backend B (optional):** a NAIF DAF/SPK reader implemented here (Type 2 and 3) over
+  `de440s.bsp` (32 MB) and the JPL satellite kernels. Data is not committed: it is fetched with a
+  pinned SHA-256, and CI skips the backend offline without failing.
+- **Acceptance:** both backends against JPL Horizons for several epochs and every body; A against
+  B within A's stated accuracy. Horizons' sub-observer planetographic latitude and longitude are
+  used to cross-check phase 2's body-fixed frames against an independent source.
 
-- `Scenario` 增加 `central_body`；卫星除 TLE（仅地球）外支持行星中心二体 + J2/J4；站点按该天体
-  椭球与固连系；遮蔽用该天体半径；命令与场景文档同步。
-- **验收**：手算 Kepler 解；固连系往返；地球路径结果逐位不变（回归）。
+### Phase 4 — central body in the engine (`stkcraft-engine`)
 
-### 段 5 — 行星系统（卫星）
+- `Scenario` gains `central_body`; satellites support planet-centred two-body plus J2/J4 in
+  addition to Earth TLEs; sites sit on the body's ellipsoid in its body-fixed frame; occultation
+  uses that body's radius; commands and the scenario document follow.
+- **Acceptance:** hand-computed Kepler solutions, body-fixed round-trips, and the Earth path
+  unchanged bit for bit (regression).
 
-- 火卫、伽利略四星、Titan 等，中心天体为其母行星，精度取自内核；解析后端对其返回
-  `Error::Unsupported`，不猜。
+### Phase 5 — planetary systems
 
-## 不做的事
+- Moons (Phobos, Deimos, the Galileans, Titan and the rest) as second-level bodies whose central
+  body is their planet, with accuracy taken from the kernels. The analytic backend returns
+  `Error::Unsupported` for them rather than guessing.
 
-- 不做行星际转移轨道设计与行星摄动；行星范围内二体 + J2/J4，不假装能做混沌积分。
-- 不把 ET/UT1 之外的地球定向参数补齐到 IERS 全量（那是独立的一段）。
+## Not in scope
 
-## 每段的错误处理
+- Interplanetary transfer design and planetary perturbations. Two-body plus J2/J4 is what this
+  kernel claims; it does not pretend to integrate a chaotic regime.
+- Full IERS Earth-orientation data beyond what the existing EOP path already carries; that is its
+  own piece of work.
 
-沿用 `AGENTS.md`：无 panic，未实现的能力返回 `Error::Unsupported`，输入先校验，NaN 用 `Option`
-表达。GPU 与天文数值同样对待。
+## Error handling
+
+The rules from `AGENTS.md` apply unchanged: no panics, `Error::Unsupported` for what is not built
+yet, input validated before use, and NaN expressed as `Option` rather than as a value.
