@@ -138,6 +138,13 @@ use.
 test a change, link an existing `craft-common-actions` issue or open one; do not add a
 local job.
 
+**Known upstream failure.** `Packaging lint` fails at its PowerShell step because that step
+runs `Get-ChildItem packaging/windows/*.ps1` without an existence guard and this repository
+has no Windows packaging yet. Tracked as
+[craft-common-actions#145](https://github.com/storytold/craft-common-actions/issues/145);
+the fix belongs there, not here. Until it lands, a red `Packaging lint` on a change that
+touches nothing under `packaging/` is that issue and not a regression.
+
 ## Contributor credits (About window)
 
 `contributors/contributors.json` is generated and never hand-edited;
