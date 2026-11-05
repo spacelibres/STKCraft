@@ -101,6 +101,15 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   numbers]`, and no assignment of the last five to `(A, B, C, S, K)` that was tried reproduces
   CSPICE for Mercury at J2000 — the best was 657 000 km, three orders off the truncation error. The
   next step is the published record description, not more guessing at columns.
+- **ELP2000 attempted, not landed.** The three main-problem files (`ELP1` longitude, `ELP2` latitude,
+  `ELP3` distance) parse and evaluate: at J2000 the prototype agrees with CSPICE to about 20″ of
+  longitude, 3″ of latitude and 2 km of distance — the accuracy the main problem alone should have.
+  Five years away it is out by 1.3°, which is a coefficient problem, not truncation: the leading
+  latitude term is stored with a second-column value of 412 529 where a linear-in-`T` term cannot
+  be that large, so ELP's polynomial columns carry a scaling this reading does not apply. Nothing
+  was shipped: a Moon off by a degree is worse than a Moon refused by name, which is what the
+  VSOP87 backend already does. The next step is the ELP2000 file description from the same
+  distribution before the columns are read again.
 - **VSOP87 landed: 0.1.14.** `Vsop87Ephemeris` reads the published Poisson series (9 537 terms
   truncated at 1e-7 au, in `generated_vsop.rs` with its provenance) and agrees with CSPICE to under
   an arcsecond over fifteen heliocentric states — Mercury at 0.04″. The Moon needs ELP2000 and is
