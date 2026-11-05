@@ -1,7 +1,14 @@
+# shellcheck shell=bash
+#
 # Shared values for the packaging scripts.
 #
 # Sourced by packaging/macos/package.sh, packaging/linux/package.sh and the web build. The
 # display name is what users see; every file name, binary and identifier stays lowercase.
+#
+# Bash, not POSIX sh, because `stkcraft_version` is exported as a function (`export -f`) for the
+# per-platform scripts to call. Shellcheck is told so explicitly: without a directive it reports
+# SC2148 ("shell type unknown"), which was the first CI failure this repository ever had — the
+# packaging workflow had never run, because it was gated on a branch that did not exist.
 
 # The lowercase program name, used for binaries, file names and folders.
 APP_NAME=stkcraft
