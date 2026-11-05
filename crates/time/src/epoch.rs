@@ -362,14 +362,17 @@ impl Epoch {
         let tai_jd = self.as_tai(dut1)?;
         let converted = match target {
             TimeScale::Tai => tai_jd,
-            // TT, TDB, TCG and TCB all track TAI at this level of approximation: TT differs
-            // from TAI by the defining constant 32.184 s, TDB differs from TT by under 2 ms
-            // (below this layer's scope), and TCG/TCB differ from TT by rates that only
-            // matter over decades. A future revision that adds the periodic TDB term or the
-            // TCG rate belongs here, where the offset is applied.
-            TimeScale::Tt | TimeScale::Tdb | TimeScale::Tcg | TimeScale::Tcb => {
-                tai_jd.plus_seconds(TT_MINUS_TAI)
+            // TDB is the time argument of the JPL ephemerides, so it is not "TT with a rounding
+            // difference": the periodic term reaches 1.7 ms, which is metres on the ground and
+            // tens of metres between the planets. See `crate::tdb`.
+            TimeScale::Tdb => {
+                let tt = tai_jd.plus_seconds(TT_MINUS_TAI);
+                tai_jd.plus_seconds(TT_MINUS_TAI + crate::tdb::tdb_minus_tt(tt))
             }
+            // TCG and TCB differ from TT by rates that only matter over decades, so they stay at
+            // the defining offset here; a layer that integrates ephemerides over centuries is the
+            // one that should add them.
+            TimeScale::Tt | TimeScale::Tcg | TimeScale::Tcb => tai_jd.plus_seconds(TT_MINUS_TAI),
             TimeScale::Gps => tai_jd.plus_seconds(-19.0),
             TimeScale::Ut1 => {
                 // UT1 = TAI - (TAI - UTC) + DUT1. The `TAI - UTC` offset at this instant is
@@ -442,7 +445,8 @@ impl Epoch {
         let _ = dut1;
         match self.scale {
             TimeScale::Tai => Ok(self.julian),
-            TimeScale::Tt | TimeScale::Tdb | TimeScale::Tcg | TimeScale::Tcb => {
+            TimeScale::Tdb => Ok(crate::tdb::tt_from_tdb(self.julian).plus_seconds(-TT_MINUS_TAI)),
+            TimeScale::Tt | TimeScale::Tcg | TimeScale::Tcb => {
                 Ok(self.julian.plus_seconds(-TT_MINUS_TAI))
             }
             TimeScale::Gps => Ok(self.julian.plus_seconds(19.0)),
@@ -783,5 +787,61 @@ mod tests {
         assert!(!JulianDate::from_parts(f64::NAN, 0.0).is_finite());
         assert!(!JulianDate::from_parts(0.0, f64::INFINITY).is_finite());
         assert!(JulianDate::J2000.is_finite());
+    }
+    #[test]
+    fn tdb_is_not_tt_and_the_difference_survives_a_round_trip() {
+        // The correction is what makes an epoch usable as a JPL ephemeris argument. A TDB epoch
+        // must differ from the same instant in TT by the periodic term, not by zero, and the trip
+        // back to TT must return the instant it started from.
+        let tt = Epoch::from_jd(
+            2_457_113.5 + 36.0 / 86_400.0 + 32.184 / 86_400.0,
+            TimeScale::Tt,
+        );
+        let tdb = tt
+            .to_scale(TimeScale::Tdb, None)
+            .expect("TT -> TDB needs no data");
+        // This epoch is one of the ERFA cross-check values: +1.644 ms.
+        let offset = (tdb.julian().sum() - tt.julian().sum()) * 86_400.0;
+        assert!(
+            (offset - 0.001_644_072).abs() < 20e-6,
+            "TT -> TDB was {offset:.9} s, expected +1.644072 ms"
+        );
+        let back = tdb.to_scale(TimeScale::Tt, None).expect("TDB -> TT");
+        assert!(
+            ((back.julian().sum() - tt.julian().sum()) * 86_400.0).abs() < 1e-9,
+            "TDB -> TT did not return the original instant"
+        );
+    }
+
+    #[test]
+    fn utc_to_tdb_carries_the_leap_offset_and_the_periodic_term() {
+        // The full chain a scenario uses: a UTC calendar instant becomes a TDB argument for an
+        // ephemeris. `from_utc` stores the instant on the TAI scale, so the TDB argument is TAI
+        // plus 32.184 s plus the periodic term.
+        let tai = Epoch::from_utc(naive_from_ymd_hms(2023, 1, 1, 0, 0, 0).expect("a valid date"))
+            .expect("2023 is inside the leap table");
+        let tt = tai.to_scale(TimeScale::Tt, None).expect("TAI -> TT");
+        let tdb = tai.to_scale(TimeScale::Tdb, None).expect("TAI -> TDB");
+        // The TT and TDB epochs differ by the periodic term for this instant, which ERFA's full
+        // series gives as -0.118548 ms. 50 µs of tolerance covers the rounding of a Julian Date to
+        // a double (about 47 µs of granularity at JD 2 459 945); the term itself is 118 µs, so a
+        // chain that ignored it would miss by far more than that.
+        let offset = (tdb.julian().sum() - tt.julian().sum()) * 86_400.0;
+        assert!(
+            (offset - -0.000_118_548).abs() < 50e-6,
+            "TT -> TDB at 2023-01-01 was {offset:.9} s, expected -0.000118548 s"
+        );
+        // TAI -> TT remains the defining 32.184 s, and TAI -> TDB is that offset plus the term, so
+        // the chain is consistent as well as individually correct.
+        let tai_to_tt = (tt.julian().sum() - tai.julian().sum()) * 86_400.0;
+        assert!(
+            (tai_to_tt - TT_MINUS_TAI).abs() < 50e-6,
+            "TAI -> TT was {tai_to_tt:.9} s, expected the defining {TT_MINUS_TAI} s"
+        );
+        let from_tai = (tdb.julian().sum() - tai.julian().sum()) * 86_400.0;
+        assert!(
+            (from_tai - TT_MINUS_TAI - offset).abs() < 50e-6,
+            "TAI -> TDB was {from_tai:.9} s, which is not 32.184 s plus the {offset:.9} s term"
+        );
     }
 }

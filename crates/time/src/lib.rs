@@ -26,10 +26,12 @@
 pub mod epoch;
 pub mod leaps;
 pub mod scales;
+pub mod tdb;
 
 pub use epoch::{Epoch, JulianDate, julian_to_utc_naive, naive_from_ymd_hms, utc_from_ymd_hms};
 pub use leaps::{LeapSecondTable, UTC_INTRODUCED, tai_minus_utc};
 pub use scales::{TimeScale, TimeScaleConversion};
+pub use tdb::{MAX_TDB_MINUS_TT_SECONDS, tdb_minus_tt, tt_from_tdb};
 
 /// Seconds per day, on the SI scale.
 pub const SECONDS_PER_DAY: f64 = 86_400.0;
