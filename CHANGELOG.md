@@ -9,6 +9,18 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.13] — Planet-centred access from the command line
+
+`stkcraft planet --body Mars --radius 4000 --inclination 30 --lat 0 --lon 0 --mask 10` runs the same
+engine command the window would, and prints the passes. The option parsing lives in the CLI, the
+answer comes from the registry, and nothing in the binary propagates or intersects anything itself.
+
+### Added
+
+- **`stkcraft planet`**, with every option documented in `--help` and a test that parses all of
+  them. An unknown body is refused by name, and a value that is not a number names the option it
+  was given for.
+
 ## [0.1.12] — Planet-centred access is a command
 
 `planet.access` runs a satellite's passes over a station on any body the body crate models, from one

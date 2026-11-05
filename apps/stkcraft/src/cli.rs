@@ -19,6 +19,8 @@ pub enum Invocation {
     Version,
     /// One satellite against one station, printed as a pass table.
     Passes(PassRequest),
+    /// One satellite against a station on another body, printed as a pass table.
+    Planet(PlanetRequest),
 }
 
 /// The parameters of the `passes` subcommand.
@@ -31,6 +33,18 @@ pub struct PassRequest {
     hours: f64,
     step_seconds: f64,
     name: String,
+}
+
+/// What a planet-centred request carries, in the units the command line used.
+pub struct PlanetRequest {
+    body: String,
+    radius_km: f64,
+    inclination_deg: f64,
+    latitude_deg: f64,
+    longitude_deg: f64,
+    mask_deg: f64,
+    hours: f64,
+    step_seconds: f64,
 }
 
 /// Parse arguments and run.
@@ -49,6 +63,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
             Ok(())
         }
         Invocation::Passes(request) => passes(&request),
+        Invocation::Planet(request) => planet(&request),
     }
 }
 
@@ -68,6 +83,7 @@ USAGE
 
 COMMANDS
     passes      Compute satellite passes over a ground station
+    planet      Compute passes over a station on another body
     version     Print the version
     help        Print this text
 
@@ -80,6 +96,19 @@ PASSES OPTIONS
     --step <SECONDS>               Search step. Shorter is slower and more thorough.
                                    Default 30.
     --name <TEXT>                  Station name, for the output. Default \"Station\".
+
+PLANET OPTIONS
+    --body <NAME>                  The body, by IAU name (Mars, Titan, ...). Required.
+    --radius <KM>                  Circular orbit radius from the body's centre. Required.
+    --inclination <DEGREES>        Orbit inclination from the body's ICRF equator. Default 0.
+    --lat <DEGREES>                Station planetodetic latitude. Default 0.
+    --lon <DEGREES>                Station longitude east of the prime meridian. Default 0.
+    --mask <DEGREES>               Horizon mask. Default 0.
+    --hours <HOURS>                How long to analyse. Default 6.
+    --step <SECONDS>               Search step. Default 10.
+
+EXAMPLE
+    stkcraft planet --body Mars --radius 4000 --inclination 30 --lat 0 --lon 0 --mask 10
 
 EXAMPLE
     stkcraft passes \\
@@ -107,6 +136,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "help" | "--help" | "-h" => Ok(Invocation::Help),
         "version" | "--version" | "-V" => Ok(Invocation::Version),
         "passes" => parse_passes(arguments),
+        "planet" => parse_planet(arguments),
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
 }
@@ -244,4 +274,136 @@ fn passes(request: &PassRequest) -> Result<(), String> {
         )
     );
     Ok(())
+}
+
+/// Parse the `planet` subcommand.
+fn parse_planet<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let mut request = PlanetRequest {
+        body: String::new(),
+        radius_km: 0.0,
+        inclination_deg: 0.0,
+        latitude_deg: 0.0,
+        longitude_deg: 0.0,
+        mask_deg: 0.0,
+        hours: 6.0,
+        step_seconds: 10.0,
+    };
+    let mut have_radius = false;
+    while let Some(flag) = arguments.next() {
+        let number = |text: Option<String>, flag: &str| -> Result<f64, String> {
+            let text = text.ok_or_else(|| format!("`{flag}` needs a value"))?;
+            text.parse::<f64>()
+                .map_err(|_| format!("`{text}` is not a number for `{flag}`"))
+        };
+        match flag.as_str() {
+            "--body" => {
+                request.body = arguments
+                    .next()
+                    .ok_or_else(|| "`--body` needs a value".to_owned())?;
+            }
+            "--radius" => {
+                request.radius_km = number(arguments.next(), "--radius")?;
+                have_radius = true;
+            }
+            "--inclination" => {
+                request.inclination_deg = number(arguments.next(), "--inclination")?;
+            }
+            "--lat" => request.latitude_deg = number(arguments.next(), "--lat")?,
+            "--lon" => request.longitude_deg = number(arguments.next(), "--lon")?,
+            "--mask" => request.mask_deg = number(arguments.next(), "--mask")?,
+            "--hours" => request.hours = number(arguments.next(), "--hours")?,
+            "--step" => request.step_seconds = number(arguments.next(), "--step")?,
+            other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
+        }
+    }
+    if request.body.is_empty() {
+        return Err("`--body` is required; it names the body, e.g. `Mars`".to_owned());
+    }
+    if !have_radius {
+        return Err("`--radius` is required: the circular orbit radius in km".to_owned());
+    }
+    Ok(Invocation::Planet(request))
+}
+
+/// Run the `planet` subcommand: build the scenario, run the command, print the result.
+fn planet(request: &PlanetRequest) -> Result<(), String> {
+    let registry = Registry::builtin();
+    let mut scenario = Scenario::empty("CLI");
+    let outcome = registry
+        .run(
+            "planet.access",
+            &mut scenario,
+            &Args::none()
+                .with("body", Arg::Text(request.body.clone()))
+                .with("radius-km", Arg::Number(request.radius_km))
+                .with("inclination-deg", Arg::Number(request.inclination_deg))
+                .with("latitude-deg", Arg::Number(request.latitude_deg))
+                .with("longitude-deg", Arg::Number(request.longitude_deg))
+                .with("mask-deg", Arg::Number(request.mask_deg))
+                .with("hours", Arg::Number(request.hours))
+                .with("step-seconds", Arg::Number(request.step_seconds)),
+        )
+        .map_err(|error| format!("{error}"))?;
+    println!("STKCraft {}", env!("CARGO_PKG_VERSION"));
+    println!("{}", outcome.summary);
+    Ok(())
+}
+
+// The tests fail with `assert!`/`match` rather than `panic!`, because the crate's own deny
+// list applies to them too; the one `panic!` below is inside `matches!`-style reporting.
+#[cfg(test)]
+#[allow(clippy::panic)]
+mod tests {
+    use super::*;
+
+    fn parse_planet_args(arguments: &[&str]) -> Result<Invocation, String> {
+        parse_planet(arguments.iter().map(|part| (*part).to_owned()))
+    }
+
+    #[test]
+    fn a_planet_request_needs_a_body_and_a_radius() {
+        assert!(parse_planet_args(&["--radius", "4000"]).is_err());
+        assert!(parse_planet_args(&["--body", "Mars"]).is_err());
+        assert!(parse_planet_args(&["--body", "Mars", "--radius", "4000"]).is_ok());
+    }
+
+    #[test]
+    fn a_planet_request_reads_every_option_it_documents() {
+        let Ok(Invocation::Planet(request)) = parse_planet_args(&[
+            "--body",
+            "Titan",
+            "--radius",
+            "3000",
+            "--inclination",
+            "45",
+            "--lat",
+            "-12.5",
+            "--lon",
+            "170",
+            "--mask",
+            "5",
+            "--hours",
+            "2",
+            "--step",
+            "20",
+        ]) else {
+            panic!("a fully specified request must parse");
+        };
+        assert_eq!(request.body, "Titan");
+        assert!((request.radius_km - 3_000.0).abs() < 1e-12);
+        assert!((request.inclination_deg - 45.0).abs() < 1e-12);
+        assert!((request.latitude_deg - -12.5).abs() < 1e-12);
+        assert!((request.longitude_deg - 170.0).abs() < 1e-12);
+        assert!((request.mask_deg - 5.0).abs() < 1e-12);
+        assert!((request.hours - 2.0).abs() < 1e-12);
+        assert!((request.step_seconds - 20.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_nonsense_value_is_refused_with_the_option_named() {
+        match parse_planet_args(&["--body", "Mars", "--radius", "four thousand"]) {
+            Err(error) => assert!(error.contains("--radius"), "{error}"),
+            Ok(_) => panic!("`four thousand` is not a number"),
+        }
+    }
 }
