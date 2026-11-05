@@ -101,6 +101,15 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   numbers]`, and no assignment of the last five to `(A, B, C, S, K)` that was tried reproduces
   CSPICE for Mercury at J2000 — the best was 657 000 km, three orders off the truncation error. The
   next step is the published record description, not more guessing at columns.
+- **VSOP87 parse now provably correct; the residual is systematic, not a misread.** Reading the
+  last five whitespace fields of a record as `S, K, A, B, C` and taking the coordinate and the power
+  of `T` from the header block parses all 6359 Mercury records, and the identity
+  `sqrt(S² + K²) = A` holds on every one of them — so the columns are right. The position still
+  differs from CSPICE by 657 000 km at J2000, and because a misread column would not survive that
+  identity, the difference is systematic: something about the frame or the time argument, not the
+  arithmetic. The next step is to evaluate at several epochs and watch whether the residual rotates
+  (a phase or frequency error) or stays fixed (a frame offset), which tells the two apart in one
+  test.
 - **VSOP87 record format, now read from the distribution's own `vsop87.doc`.** A term record is
   `1x,4i1,i5,12i3,f15.11,2f18.11,f14.11,f20.11`: version code, body code, coordinate index and the
   power of `T` packed into the first four characters (which is why a line begins `1110` for
