@@ -13,6 +13,89 @@ yet.
 
 Nothing yet.
 
+## [0.0.6] — The engine: from a TLE to an access report
+
+The four numerical layers are now joined into something that runs. A new crate,
+`stkcraft-engine`, holds a scenario document, turns each satellite's two-line element set into
+an Earth-fixed position through the frame chain, runs access over the timeline, and exposes
+every user-visible action as a command.
+
+**The product can now answer its central question end to end.** Give it a TLE and a station;
+it reports when the satellite is visible and for how long.
+
+### Added
+
+- **`stkcraft-engine` at L4**, above `stkcraft-access`:
+  - `scenario` — the document: satellites with their element sets, stations with their sites
+    and sensors, a start epoch and a duration. Data, not behaviour, so a saved scenario never
+    changes meaning when the physics improves.
+  - `propagate` — the join that had no home: TLE → SGP4 → TEME → ITRF/GCRF. It belongs here
+    because `stkcraft-sgp4` and `stkcraft-frames` are both L2 and cannot depend on each other.
+  - `analysis` — access over a scenario, one satellite-to-station pair at a time or all pairs.
+  - `commands` — the command table: seven commands, each with an id, label, menu path,
+    documented parameters, an `enabled` predicate and a `run` function.
+- **`Epoch::now()` and `Epoch::j2000()`** in `stkcraft-time`.
+- **`docs/plans/2026-11-05-engine.md`** records the arc.
+
+### Fixed
+
+- **A satellite above a mid- or high-latitude station was never visible.** The occultation
+test asked whether the line of sight's closest approach to the geocentre was inside a sphere of
+volumetric radius, `6371.0 km`. That is right for an equatorial station, whose own radius is
+`6378.1 km`. But WGS-84 puts a station at 45° at `6367.5 km`, at 60° at `6362.1` and at the
+pole at `6356.8` — every station above about 40° latitude sits *inside* that sphere, so the
+closest approach of any line of sight from it was its own radius, every line was reported
+occulted, and those stations could see nothing at all.
+
+  Every existing occultation test used an equatorial station, so all of them passed. The bug
+  surfaced only when a low-Earth satellite over a 45° station found zero passes in a day. The
+  test now covers 45°, 60°, 75° and 89° for both an overhead satellite and the antipode.
+- **`Epoch` did not survive JSON.** `serde_json`'s shortest-decimal formatting returned some
+  values one unit in the last place away — a 20-nanosecond error that only an equality
+  assertion notices. `Epoch` now serialises as `"<scale>:<day>+<fraction>"`, two exact decimal
+  numbers, which also makes a scenario file legible to a human.
+- **Satellite and station ids could be reused** after removal, because the next id was
+  `max(existing) + 1`. Removing the last object freed its id and the next object took it,
+  silently rebinding any reference still held. Ids now come from a monotonic counter.
+
+### Correctness
+
+Every claim names the test that holds it.
+
+- **A high-latitude station can see its satellites.** Checked at four latitudes for an
+  overhead satellite and its antipode. (`a_high_latitude_station_can_still_see_its_satellites`)
+- **The published case 00005 reproduces its TEME state through the engine join,** so the join
+  is verified before any frame conversion is involved.
+  (`a_near_earth_element_set_reproduces_its_published_teme_state`)
+- **A geostationary element set stays within 100 km of one Earth-fixed point over a day,** which
+  is the end-to-end check that SGP4, precession, nutation and sidereal time agree.
+  (`a_geostationary_satellite_stays_near_one_earth_fixed_point`)
+- **A low-Earth satellite gives 3 to 8 passes a day** over a station, each lasting 1 to 30
+  minutes. Bounded rather than pinned, so the test means something without failing on an
+  element-set edit. (`a_low_earth_satellite_has_several_passes_a_day`)
+- **Raising the horizon mask strictly reduces total access.**
+  (`raising_the_horizon_mask_reduces_the_total_access`)
+- **Commands dispatch by id,** and a missing or wrongly typed argument is refused by name.
+  (`commands_dispatch_by_id`, `a_missing_required_argument_is_named`,
+  `an_argument_of_the_wrong_type_is_refused`)
+- **A broken two-line element set never reaches the scenario.** (`an_invalid_element_set_is_refused_by_the_command`)
+
+### Verification
+
+- `cargo xtask ci --offline` passes all six gates: fmt, clippy `-D warnings`, **208 tests**
+  workspace-wide, assets, layers, and the wasm build of all six portable crates.
+
+### Known limitations
+
+- **No transports.** Nothing yet calls the command registry from a menu, a shortcut, a CLI or
+  a socket. The table is built and tested through the same dispatch path they will use.
+- **No persistence beyond serde.** There is no project file format, no undo and no recent-file
+  list.
+- **Earth orientation parameters still default to negligible.** They are validated and can be
+  supplied, but nothing loads them from an IERS file.
+- **No inter-satellite access and no coverage grid** — only satellite-to-ground.
+- **Still no viewport and no UI.** The `stkcraft` binary prints its version and exits.
+
 ## [0.0.5] — When can this satellite see that station
 
 The product's central question is now answerable. A new crate, `stkcraft-access`, turns a
@@ -380,7 +463,8 @@ These are the properties the numerical layers guarantee, each with a regression 
 - **Converting a uniform-scale epoch back to UTC is not implemented** and returns
   `Error::Unsupported`, because it needs the leap offset at that instant.
 
-[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/spacelibres/STKCraft/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/spacelibres/STKCraft/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/spacelibres/STKCraft/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/spacelibres/STKCraft/compare/v0.0.2...v0.0.3
