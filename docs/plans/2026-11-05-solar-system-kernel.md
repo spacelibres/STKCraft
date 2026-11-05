@@ -113,7 +113,10 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   with Delaunay arguments as polynomials in TDB centuries — but it does not state the term-record
   column layout, and the latitude file's second column is where the reading breaks. The next step is
   the record layout in the original 1983/1988 papers (A&A 124, 50 and A&A 190, 342), not the
-  distribution notice.
+  distribution notice. CDS (`VI/79`), which the README names as the catalogue copy that documents the
+  format, is unreachable from this machine, and the distribution carries no Fortran source to read
+  the layout out of. That is the concrete blocker: three rounds (10, 11, 12) have stopped at the same
+  place for the same reason, and the Moon is placed by the SPK backend in the meantime.
 - **VSOP87 landed: 0.1.14.** `Vsop87Ephemeris` reads the published Poisson series (9 537 terms
   truncated at 1e-7 au, in `generated_vsop.rs` with its provenance) and agrees with CSPICE to under
   an arcsecond over fifteen heliocentric states — Mercury at 0.04″. The Moon needs ELP2000 and is
