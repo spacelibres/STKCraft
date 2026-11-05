@@ -101,6 +101,10 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   numbers]`, and no assignment of the last five to `(A, B, C, S, K)` that was tried reproduces
   CSPICE for Mercury at J2000 — the best was 657 000 km, three orders off the truncation error. The
   next step is the published record description, not more guessing at columns.
+- **VSOP87 landed: 0.1.14.** `Vsop87Ephemeris` reads the published Poisson series (9 537 terms
+  truncated at 1e-7 au, in `generated_vsop.rs` with its provenance) and agrees with CSPICE to under
+  an arcsecond over fifteen heliocentric states — Mercury at 0.04″. The Moon needs ELP2000 and is
+  refused by name; that is the remaining half of this item.
 - **VSOP87 parse now provably correct; the residual is systematic, not a misread.** Reading the
   last five whitespace fields of a record as `S, K, A, B, C` and taking the coordinate and the power
   of `T` from the header block parses all 6359 Mercury records, and the identity
