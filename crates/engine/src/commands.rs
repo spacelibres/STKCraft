@@ -22,6 +22,8 @@ use stkcraft_core::{Angle, Duration, Error, Result};
 use stkcraft_sgp4::TwoLineElement;
 
 use crate::analysis::{SatelliteAccess, compute_all_access};
+use crate::central::PlanetOrbit;
+use crate::planet_access::find_passes;
 use crate::scenario::{Scenario, StationId};
 
 /// One documented parameter of a command.
@@ -251,7 +253,7 @@ type Builtin = (
 
 const ALWAYS: fn(&Scenario) -> bool = |_| true;
 
-const BUILTIN: [Builtin; 7] = [
+const BUILTIN: [Builtin; 8] = [
     (
         CommandDescriptor {
             id: "scenario.rename",
@@ -467,6 +469,122 @@ const BUILTIN: [Builtin; 7] = [
                 ),
                 access: Some(results),
             })
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "planet.access",
+            label: "Planet-Centred Access",
+            menu_path: "Access",
+            shortcut: None,
+            parameters: &[
+                Parameter {
+                    name: "body",
+                    description: "The body the station stands on and the orbit is about, by IAU name                                   (e.g. Mars, Titan).",
+                    required: true,
+                },
+                Parameter {
+                    name: "radius-km",
+                    description: "Circular orbit radius from the body's centre, km.",
+                    required: true,
+                },
+                Parameter {
+                    name: "inclination-deg",
+                    description: "Orbit inclination from the body's ICRF equator, degrees.",
+                    required: true,
+                },
+                Parameter {
+                    name: "latitude-deg",
+                    description: "Station planetodetic latitude on that body, degrees.",
+                    required: true,
+                },
+                Parameter {
+                    name: "longitude-deg",
+                    description: "Station longitude east of the body's prime meridian, degrees.",
+                    required: true,
+                },
+                Parameter {
+                    name: "mask-deg",
+                    description: "Sensor horizon mask, degrees above the local horizon.",
+                    required: false,
+                },
+                Parameter {
+                    name: "hours",
+                    description: "How long to search, hours.",
+                    required: false,
+                },
+                Parameter {
+                    name: "step-seconds",
+                    description: "Search step: shorter is more thorough and slower.",
+                    required: false,
+                },
+            ],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let body_name = args
+                .get("body")
+                .ok_or_else(|| Error::invalid("body", "required: the IAU name of a body"))?
+                .as_text("body")?;
+            let body = stkcraft_body::Body::ALL
+                .into_iter()
+                .find(|candidate| candidate.name().eq_ignore_ascii_case(body_name))
+                .ok_or_else(|| Error::NotFound {
+                    what: format!("a body named `{body_name}`"),
+                })?;
+            let radius_km = args
+                .get("radius-km")
+                .ok_or_else(|| Error::invalid("radius-km", "required"))?
+                .as_number("radius-km")?;
+            let inclination = Angle::from_deg(
+                args.get("inclination-deg")
+                    .ok_or_else(|| Error::invalid("inclination-deg", "required"))?
+                    .as_number("inclination-deg")?,
+            );
+            let latitude = Angle::from_deg(
+                args.get("latitude-deg")
+                    .ok_or_else(|| Error::invalid("latitude-deg", "required"))?
+                    .as_number("latitude-deg")?,
+            );
+            let longitude = Angle::from_deg(
+                args.get("longitude-deg")
+                    .ok_or_else(|| Error::invalid("longitude-deg", "required"))?
+                    .as_number("longitude-deg")?,
+            );
+            let mask_deg = match args.get("mask-deg") {
+                Some(argument) => argument.as_number("mask-deg")?,
+                None => 0.0,
+            };
+            let hours = match args.get("hours") {
+                Some(argument) => argument.as_number("hours")?,
+                None => 24.0,
+            };
+            let step_seconds = match args.get("step-seconds") {
+                Some(argument) => argument.as_number("step-seconds")?,
+                None => 30.0,
+            };
+
+            // The body's rotation model takes TDB, and the scenario's epoch is on whatever scale
+            // its document used; converting once here keeps the conversion out of the sampler.
+            let epoch_tdb = scenario
+                .epoch
+                .to_scale(stkcraft_time::TimeScale::Tdb, None)?;
+            let orbit = PlanetOrbit::circular(body, radius_km, inclination.as_rad(), epoch_tdb)?;
+            let access = stkcraft_access::PlanetAccess {
+                body,
+                site: stkcraft_access::GroundSite::new(latitude, longitude, 0.0)?,
+                sensor: Sensor::above_horizon(Angle::from_deg(mask_deg)),
+            };
+            let passes = find_passes(&orbit, &access, epoch_tdb, hours, step_seconds)?;
+            let total: f64 = passes
+                .iter()
+                .map(crate::planet_access::PlanetPass::duration_seconds)
+                .sum();
+            Ok(CommandOutcome::new(format!(
+                "{body}: {} pass(es) in {hours:.1} h, {} min in view",
+                passes.len(),
+                (total / 60.0).round() as i64
+            )))
         },
     ),
 ];
@@ -725,5 +843,52 @@ mod tests {
             )
             .expect_err("must fail");
         assert!(matches!(error, Error::NotFound { .. }), "got {error:?}");
+    }
+    #[test]
+    fn a_planet_centred_access_run_goes_through_the_registry() {
+        // The property `AGENTS.md` asks for: a user-visible capability is a command, so an agent
+        // and a menu click take the same path. Mars, a 4 000 km orbit, a station on its equator.
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("Mars");
+        let outcome = registry
+            .run(
+                "planet.access",
+                &mut scenario,
+                &Args::none()
+                    .with("body", Arg::Text("Mars".to_owned()))
+                    .with("radius-km", Arg::Number(4_000.0))
+                    .with("inclination-deg", Arg::Number(0.0))
+                    .with("latitude-deg", Arg::Number(0.0))
+                    .with("longitude-deg", Arg::Number(0.0))
+                    .with("mask-deg", Arg::Number(10.0))
+                    .with("hours", Arg::Number(6.0))
+                    .with("step-seconds", Arg::Number(10.0)),
+            )
+            .expect("the command runs");
+        assert!(
+            outcome.summary.contains("pass(es)"),
+            "the summary does not report passes: {}",
+            outcome.summary
+        );
+        assert!(outcome.summary.starts_with("Mars:"), "{}", outcome.summary);
+    }
+
+    #[test]
+    fn an_unknown_body_name_is_refused_by_name() {
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("nowhere");
+        let error = registry
+            .run(
+                "planet.access",
+                &mut scenario,
+                &Args::none()
+                    .with("body", Arg::Text("Vulcan".to_owned()))
+                    .with("radius-km", Arg::Number(4_000.0))
+                    .with("inclination-deg", Arg::Number(0.0))
+                    .with("latitude-deg", Arg::Number(0.0))
+                    .with("longitude-deg", Arg::Number(0.0)),
+            )
+            .expect_err("Vulcan is not a body");
+        assert!(error.to_string().contains("Vulcan"), "{error}");
     }
 }

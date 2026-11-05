@@ -9,6 +9,21 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.12] — Planet-centred access is a command
+
+`planet.access` runs a satellite's passes over a station on any body the body crate models, from one
+registry entry, so the CLI, a menu and an agent all reach the same code. It builds a circular orbit
+about the body, samples it, bisects each visibility boundary to a second, and reports the passes.
+
+### Added
+
+- **`planet.access`** — parameters `body`, `radius-km`, `inclination-deg`, `latitude-deg`,
+  `longitude-deg` and optionally `mask-deg`, `hours`, `step-seconds`. The body is named as the IAU
+  names it (`Mars`, `Titan`); an unknown name is refused by name rather than defaulted.
+- **`find_passes`** in the engine: the timeline half of the planetary access question, with the
+  bisection tolerance and the sampler's one honest limitation — a step long enough to step over a
+  short pass — stated in the module rather than left to be discovered.
+
 ## [0.1.11] — A station on Mars can see a satellite
 
 Phase 4's last piece: `PlanetAccess` answers "does this station see that target" on any body the
