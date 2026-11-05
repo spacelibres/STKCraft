@@ -9,6 +9,27 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.7] — An ephemeris with no data file
+
+JPL publishes Keplerian elements and rates for the eight major planets, with the algorithm and the
+accuracy they reach. That table is now a backend: `KeplerianEphemeris` places every planet with no
+kernel, no download and no build step, which is what a wasm build, a test and an offline machine
+need.
+
+### Added
+
+- **`KeplerianEphemeris`**, transcribed from JPL Solar System Dynamics' *Keplerian Elements for
+  Approximate Positions of the Major Planets* (Table 1, 1800–2050) with the published accuracy
+  stated in the module: from 15 arcseconds for Mercury to 600 for Saturn. The tests hold it to
+  those figures over three epochs per planet against CSPICE, and the measured errors are recorded
+  beside the bounds.
+- **`Origin`** on the `Ephemeris` trait. The Keplerian elements are heliocentric and a kernel is
+  barycentric, so a backend now says which it is instead of a caller assuming; the Keplerian one
+  reports the Sun and names the Earth as the Earth-Moon barycentre, which is what JPL's table
+  actually describes.
+- **The Moon is refused by name** in that backend rather than given a Keplerian guess: the table
+  carries the planets, and the Moon's motion needs the lunar theory.
+
 ## [0.1.6] — Every planet, checked against NASA's own numbers
 
 The reader places Mars, Jupiter and Saturn as bodies, not only as barycentres, and the regression

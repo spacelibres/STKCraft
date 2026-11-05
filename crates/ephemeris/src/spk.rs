@@ -438,6 +438,10 @@ impl EphemerisSet {
 }
 
 impl Ephemeris for EphemerisSet {
+    fn origin(&self) -> Origin {
+        Origin::Barycentre
+    }
+
     fn state(&self, body: Body, t: Epoch) -> Result<StateVector> {
         if t.scale() != TimeScale::Tdb {
             return Err(Error::invalid(
@@ -452,6 +456,20 @@ impl Ephemeris for EphemerisSet {
         let et = ((julian.day - JD_J2000) + julian.fraction) * 86_400.0;
         self.chained_state(body.naif_id(), et)
     }
+}
+
+/// What an ephemeris' coordinates are relative to.
+///
+/// The ICRF's origin is the solar-system barycentre, so a barycentric backend is the default and
+/// the honest answer for a kernel. An analytic model built on heliocentric elements cannot report
+/// barycentric positions without the Sun's own offset, so it says so instead of quietly shifting
+/// every answer by up to a million kilometres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The solar-system barycentre, which is the ICRF origin.
+    Barycentre,
+    /// The centre of the Sun.
+    Sun,
 }
 
 /// What an ephemeris must be able to answer.
@@ -469,9 +487,16 @@ pub trait Ephemeris {
     /// An error when the epoch is outside the ephemeris' coverage, outside its time scale, or when
     /// the backend cannot place the body at all.
     fn state(&self, body: Body, t: Epoch) -> Result<StateVector>;
+
+    /// What [`Self::state`]'s coordinates are relative to.
+    fn origin(&self) -> Origin;
 }
 
 impl Ephemeris for KernelEphemeris {
+    fn origin(&self) -> Origin {
+        Origin::Barycentre
+    }
+
     fn state(&self, body: Body, t: Epoch) -> Result<StateVector> {
         if t.scale() != TimeScale::Tdb {
             return Err(Error::invalid(

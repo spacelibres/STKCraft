@@ -36,6 +36,8 @@
 
 pub mod chebyshev;
 pub mod daf;
+pub mod kepler;
 pub mod spk;
 
-pub use spk::{Ephemeris, EphemerisSet, KernelEphemeris, StateVector};
+pub use kepler::KeplerianEphemeris;
+pub use spk::{Ephemeris, EphemerisSet, KernelEphemeris, Origin, StateVector};
