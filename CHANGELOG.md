@@ -11,7 +11,20 @@ yet.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **A command line that does something.** `stkcraft passes --tle <L1> <L2> --lat --lon --mask
+  --hours --step --name` prints a pass table with absolute UTC times, durations and the total
+  as a percentage of the window. Every subcommand dispatches through the engine's command
+  registry by id, so the CLI is a transport rather than a second implementation.
+
+### Fixed
+
+- **Times were displayed 37 seconds early.** `Epoch::from_utc` stores the instant on the TAI
+  scale, and the display path asked for a UTC conversion that `to_scale` deliberately refuses
+  (a TAI Julian Date does not carry the leap offset). The refusal was swallowed, so the
+  unconverted value was printed as UTC — exactly the TAI−UTC offset. The new `Epoch::to_utc()`
+  reads the leap table instead of guessing.
 
 ## [0.0.6] — The engine: from a TLE to an access report
 
