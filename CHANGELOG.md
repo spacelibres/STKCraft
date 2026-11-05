@@ -13,6 +13,73 @@ yet.
 
 Nothing yet.
 
+## [0.0.3] — Deep-space propagation made exact
+
+Deep-space (SDP4) propagation was the one known-wrong numerical layer in 0.0.2: worst case
+about 85 km over the published verification suite. It is now exact — every one of the 33
+verification cases reproduces the reference output to within `4e-9 km`, the limit of the eight
+decimals that table prints. The tolerance in the test was tightened from the measured 100 km
+to 1 mm, so the old error could not survive unnoticed a second time.
+
+### Fixed
+
+Each item names the defect, because the diagnostics that found them are reusable.
+
+- **The epoch passed to `dscom` was the fraction of a day, not the day count.**
+  `Elements::sgp4_epoch` computes the whole days since 1950 January 0.0 and the fraction of
+the day, but `sgp4init` read only the first return value and used it as `epoch`. The lunar and
+solar arguments `day` therefore had no multi-decade ramp: `zmol`/`zmos` were wrong in their
+first digit, and every deep-space secular rate built from them drifted. This was the root cause
+of the 85 km error. Regression test:
+`the_sgp4_epoch_counts_whole_days_from_the_1950_zero`.
+- **`JulianDate` held a half-day inside `day`.** `day` was `X.5` for a UTC midnight, so
+  subtracting the SGP4 epoch zero from it could not be exact and the whole-day count came out
+  half-integral. `day` is now always an integral day count from JD 0, with all fractional and
+  half-day content in `fraction`. That invariant is what makes the fix above possible, and it is
+  now documented on the type and asserted in `the_epoch_lands_on_the_stated_day`.
+- **`dsinit` derived `inclm` as `asin(sin(i))` instead of using the perturbation.** The
+  reference assigns the epoch inclination before calling `dsinit`; recomputing it from the
+  sine folds every orbit above 90° of inclination into the wrong quadrant, which silently
+  disables or mis-applies the 180° guard that drops the node terms.
+- **`dspace` negated the Euler–Maclaurin `step2` term for negative time.** The reference uses
+  `+259200` in both directions; only the first-order `delt` changes sign. `xni` was therefore
+  wrong by twice the second-order term when stepping backwards.
+- **`xfact` used the Kozai mean motion instead of the un-Kozai'd one,** for both resonances.
+- **The Kepler iteration clamped at 1.0 rather than 0.95,** and used `signum()` where the
+  reference chooses `+0.95`/`-0.95` with an explicit comparison. The published case 23333
+  exists to exercise this clamp.
+- **The lunar secular terms read the wrong `z` set.** `didt`, `dmdt`, `sghl` and `shll` must
+  use the lunar `z` values that `dscom` leaves after its second pass, while `sis` uses the
+  solar `sz` capture from the first. The reference implementation's parameter names are
+  misleading here, so each term is now checked against the reference's own printed values
+  rather than against its naming.
+
+### Changed
+
+- **`DEEP_SPACE_TOLERANCE_KM` is `1e-6 km`,** matching the near-Earth bound. A single named
+exception (`NEAR_PARABOLIC_TOLERANCE_KM`, `1e-5 km`) covers case 23333, whose `e = 0.97`
+multiplies the round-off by a near-unity `1/(1 - e cos E)` while converting to position.
+- **The verification test is renamed** from `deep_space_cases_stay_within_the_documented_tolerance`
+to `deep_space_cases_reproduce_the_published_output`, since it now asserts accuracy rather
+than a bound.
+
+### Verification
+
+- All 33 published cases, near-Earth and deep-space, match `tforverf.out` to `4e-9 km`.
+- `cargo xtask ci --offline` passes all six gates: fmt, clippy `-D warnings`, 97 tests,
+  assets, layers, and the wasm build of all four portable crates.
+
+The defect localisation used a small C++ harness compiled against the published reference
+source to print intermediate `dscom`/`dsinit`/`dspace` values, and compared them term by term
+with the Rust implementation. That harness was scratch work and is not committed.
+
+### Known limitations
+
+- **TEME only.** The output frame is still the one SGP4 is defined in; conversion to ICRF and
+to an Earth-fixed frame is the next arc.
+- **Two error codes differ from the published file, deliberately** — unchanged from 0.0.2 and
+documented in that section.
+
 ## [0.0.2] — SGP4 and SDP4 propagation
 
 The first version that can compute where a satellite is. It reads a two-line element set and
@@ -158,6 +225,7 @@ These are the properties the numerical layers guarantee, each with a regression 
 - **Converting a uniform-scale epoch back to UTC is not implemented** and returns
   `Error::Unsupported`, because it needs the leap offset at that instant.
 
-[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/spacelibres/STKCraft/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/spacelibres/STKCraft/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/spacelibres/STKCraft/releases/tag/v0.0.1

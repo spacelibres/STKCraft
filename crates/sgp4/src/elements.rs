@@ -123,21 +123,17 @@ impl Elements {
     /// The epoch expressed as the two numbers SGP4 actually uses.
     ///
     /// Returns the fraction of a day since the epoch's midnight in `[0, 1)`, and the number
-    /// of days from 1950 January 0.0 to that same midnight.
+    /// of whole days from 1950 January 0.0 to that same midnight.
     ///
     /// The reference implementation computes both from a single `epoch` variable that counts
-    /// days from 1950 January 0.0, and takes the fraction with `epoch - trunc(epoch)`. Doing
-    /// the same here keeps the deep-space lunar and solar arguments identical to it.
+    /// days from 1950 January 0.0, and takes the fraction with `epoch - trunc(epoch)`. The two
+    /// numbers added together are that `epoch`, which is what `dscom` wants; the sidereal-time
+    /// routine wants them apart. Returning them apart keeps both exact.
     #[must_use]
     pub fn sgp4_epoch(self) -> (f64, f64) {
-        // The element set's Julian Date is kept as a day-of-year fraction at build time, so
-        // the fraction of the day is read back from that rather than recovered by arithmetic
-        // on a large Julian Date, which would lose the last digits.
-        //
-        // Julian Date of 1950 January 0.0 is 2433281.5.
         let jd = self.epoch.julian();
-        let epoch_days = (jd.day - crate::constants::JD_1950_JAN_0) + jd.fraction;
-        (self.fraction_of_day, epoch_days)
+        let whole_days = jd.day - crate::constants::JD_1950_JAN_0_DAY;
+        (self.fraction_of_day, whole_days)
     }
 
     /// The semi-major axis implied by the un-Kozai'd mean motion, in Earth radii.
@@ -300,6 +296,33 @@ mod tests {
         assert!(
             relative.abs() < 1e-2,
             "correction was suspiciously large: {relative}"
+        );
+    }
+
+    #[test]
+    fn the_sgp4_epoch_counts_whole_days_from_the_1950_zero() {
+        // Regression: `sgp4_epoch` once returned only the fraction of a day, because the whole
+        // day count sat in a variable nobody read. `dscom` builds `day` from it, so the lunar
+        // and solar arguments lost their multi-decade ramp and deep-space positions drifted by
+        // tens of kilometres. Checked against a hand computation rather than against the
+        // function itself.
+        //
+        // 2000 day 179.78495062 is 2000-06-28, which is JD 2451722.5 at midnight. The SGP4
+        // zero is JD 2433281.5, so the whole-day difference is 2451722 - 2433281 = 18441.
+        let (fraction, whole_days) = elements_of(L1, L2).sgp4_epoch();
+        assert_eq!(
+            whole_days, 18_441.0,
+            "whole day count from 1950 January 0.0"
+        );
+        assert!(
+            (fraction - 0.784_950_62).abs() < 1e-9,
+            "fraction of day was {fraction}"
+        );
+        // The two together are the reference implementation's `epoch` argument.
+        assert!(
+            ((whole_days + fraction) - 18_441.784_950_62).abs() < 1e-6,
+            "epoch was {}",
+            whole_days + fraction
         );
     }
 }

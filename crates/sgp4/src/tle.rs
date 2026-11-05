@@ -263,6 +263,10 @@ fn epoch_from_tle(two_digit_year: u8, day_of_year: f64) -> Epoch {
     // days after January 1 00:00 -- that is, `floor(D)` days, since `D >= 1`. The whole days
     // are split out of the fraction so a Julian Date read back from the epoch always carries
     // the half-day part on `day`, which is the boundary the sidereal-time formula relies on.
+    // A TLE day of year counts from January 1 00:00 as day 1.0, so day `D` is `D - 1` whole
+    // days after January 1 00:00. The whole days stay on `day`, which must be integral; the
+    // half-day that separates a civil midnight from the Julian-day boundary, and the time of
+    // day, both go on the fraction.
     let whole_days = (day_of_year - 1.0).floor();
     let day_fraction = (day_of_year - 1.0) - whole_days;
     let jd = JulianDate::from_parts(
@@ -286,9 +290,11 @@ fn january_first_jd(year: u16) -> JulianDate {
     let days = i64::from(year) - 2_000;
     let leaps = count_leap_days(2_000, year);
     let total = days * 365 + leaps;
+    // Whole days go on `day` so it stays integral. J2000 is noon on 2000 January 1, so
+    // January 1 00:00 of that year is one whole day earlier and half a day into the day.
     JulianDate::from_parts(
-        JulianDate::J2000.day - 0.5,
-        JulianDate::J2000.fraction + f64::from(i32::try_from(total).unwrap_or(0)),
+        JulianDate::J2000.day - 1.0 + f64::from(i32::try_from(total).unwrap_or(0)),
+        0.5,
     )
 }
 
@@ -641,9 +647,14 @@ mod tests {
         // 2000-06-28 18:50:19.733568.
         let tle = TwoLineElement::parse(L1, L2).expect("parses");
         let jd = tle.epoch.julian();
-        // 2000-06-28 00:00 is JD 2451722.5.
-        assert!((jd.day - 2_451_722.5).abs() < 1e-9, "day {}", jd.day);
-        let seconds = jd.fraction * 86_400.0;
+        // `day` is a whole day count from JD 0, so it is integral by construction; the
+        // half-day and the time of day both sit in `fraction`. Getting this wrong is
+        // invisible until a deep-space satellite drifts, so it is asserted directly.
+        assert!((jd.day - 2_451_722.0).abs() < 1e-9, "day {}", jd.day);
+        assert_eq!(jd.day.fract(), 0.0, "the day part must be integral");
+        // The instant itself, which is what callers actually mean.
+        assert!((jd.sum() - 2_451_722.5 - 67_819.733_568 / 86_400.0).abs() < 1e-9);
+        let seconds = (jd.fraction - 0.5) * 86_400.0;
         assert!(
             (seconds - 67_819.733_568).abs() < 1e-4,
             "fraction of day gave {seconds} s"

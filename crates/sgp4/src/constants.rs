@@ -186,12 +186,16 @@ pub const MINUTES_PER_DAY: f64 = 1_440.0;
 /// published output rather than for any physical reason.
 pub const MINUTES_PER_REVOLUTION: f64 = MINUTES_PER_DAY / (2.0 * core::f64::consts::PI);
 
-/// Julian Date of 1950 January 0.0, the zero of the reference implementation's `epoch`.
+/// Day number of the reference implementation's `epoch` zero, 1950 January 0.0.
 ///
 /// Its `epoch` variable counts days from this instant: `twoline2rv` computes
-/// `jdsatepoch - 2433281.5`. `2433281.5` is the Julian Date of 1949 December 31.0, so a civil
-/// midnight falls on the same `day` part the sidereal-time formula expects.
-pub const JD_1950_JAN_0: f64 = 2_433_281.5;
+/// `jdsatepoch - 2433281.5`. That scalar is JD 2433281.5 = 1949 December 31 12:00, so the
+/// zero sits half a day into day 2433281. Splitting it into the integral day and the half
+/// lets the day difference be taken exactly; the half is added back to the fraction.
+pub const JD_1950_JAN_0_DAY: f64 = 2_433_281.0;
+
+/// The fractional day of the 1950 January 0.0 zero within [`JD_1950_JAN_0_DAY`].
+pub const JD_1950_JAN_0_FRACTION: f64 = 0.5;
 
 #[cfg(test)]
 #[allow(
@@ -238,8 +242,13 @@ mod tests {
 
     #[test]
     fn the_1950_epoch_is_the_documented_julian_date() {
-        // 1949 December 31.0; the reference implementation subtracts exactly this.
-        assert_eq!(JD_1950_JAN_0, 2_433_281.5);
+        // 2433281.5: the reference implementation subtracts exactly this.
+        assert_eq!(JD_1950_JAN_0_DAY + JD_1950_JAN_0_FRACTION, 2_433_281.5);
+        assert_eq!(
+            JD_1950_JAN_0_DAY.fract(),
+            0.0,
+            "the day part must be integral"
+        );
     }
 
     #[test]

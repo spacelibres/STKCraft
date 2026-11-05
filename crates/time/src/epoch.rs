@@ -21,27 +21,37 @@ use crate::{DAYS_PER_JULIAN_CENTURY, JD_MJD_ZERO, SECONDS_PER_DAY, TT_MINUS_TAI}
 
 /// A Julian Date held as two parts for precision.
 ///
-/// `day` holds the whole days and `fraction` the remainder, in days. Sum for the scalar:
+/// `day` holds the whole days counted from JD 0 and `fraction` the remainder, in days. Sum for
+/// the scalar:
 ///
 /// ```
 /// # use stkcraft_time::JulianDate;
-/// // J2000.0 is JD 2451545.0, i.e. 2451544 whole days plus half a day.
-/// let jd = JulianDate::from_parts(2_451_544.5, 0.5);
+/// // J2000.0 is JD 2451545.0 = 2451545 whole days + 0.0 day.
+/// let jd = JulianDate::from_parts(2_451_545.0, 0.0);
 /// assert!((jd.sum() - 2_451_545.0).abs() < 1e-12);
 /// ```
 ///
-/// The parts are not normalised: any split whose sum is the right instant is valid, which
-/// lets a caller keep a whole-day part fixed while varying the fraction.
+/// **`day` is always a whole number**, which is what makes the split worth having: an
+/// integral `f64` below 2^53 is exact, so day arithmetic never rounds, and only the fraction
+/// carries rounding. The day may still run into the following day through `fraction` — the
+/// two parts are not normalised — so a caller can hold `day` fixed and vary the fraction.
+///
+/// Keeping `day` integral is a rule, not an accident: downstream code that subtracts a
+/// whole-day epoch from `day` relies on getting an exact integer back.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct JulianDate {
-    /// The whole-day part.
+    /// The whole-day part, counted from JD 0. Always integral.
     pub day: f64,
-    /// The fractional-day part, in days.
+    /// The remainder in days, normally in `[0, 1)`.
     pub fraction: f64,
 }
 
 impl JulianDate {
     /// The J2000.0 reference epoch, `2000-01-01T12:00:00 TT`, JD 2451545.0.
+    ///
+    /// JD 2451545.0 is 2451545 whole days exactly, so [`Self::day`] is 2451545 and the
+    /// fraction is zero. The fraction is normally in `[0, 1)`; the constant keeps it there so
+    /// that subtracting it from another value stays exact.
     pub const J2000: Self = Self {
         day: 2_451_545.0,
         fraction: 0.0,
@@ -56,10 +66,12 @@ impl JulianDate {
     /// Build from a single scalar Julian Date.
     ///
     /// The whole days go to [`Self::day`] and the remainder to [`Self::fraction`], which
-    /// keeps the fraction small and therefore precise.
+    /// keeps the fraction small and therefore precise. The whole days are computed from the
+    /// *sum*, so a value whose fraction has run past one day still lands on an integral
+    /// `day`.
     #[must_use]
     pub fn from_scalar(jd: f64) -> Self {
-        let day = jd.trunc();
+        let day = jd.floor();
         Self {
             day,
             fraction: jd - day,
@@ -351,16 +363,14 @@ impl fmt::Display for Epoch {
 pub fn utc_naive_to_julian(datetime: NaiveDateTime) -> Option<JulianDate> {
     let unix_seconds = datetime.and_utc().timestamp();
     let nanos = f64::from(datetime.and_utc().timestamp_subsec_nanos());
-    // MJD of the Unix epoch is 40587. The whole days and the time of day are kept apart so
-    // the fraction stays small and precise, which is the whole point of the split form.
-    //
-    // The day part must keep the half-day that MJD 0 (1858-11-17T00:00) sits at inside the
-    // Julian day, so it is the Julian Date of the *start* of the UTC day, not a truncation
-    // of the instant.
+    // The day part is the whole days, which puts MJD 0 (1858-11-17T00:00) at fraction 0.5
+    // inside the Julian day; that half goes in the fraction, keeping `day` integral.
     let whole_days = unix_seconds.div_euclid(SECONDS_PER_DAY as i64);
     let seconds_of_day = unix_seconds.rem_euclid(SECONDS_PER_DAY as i64) as f64;
+    // The Julian Date of a UTC midnight is `X.5`: the day counter is integral and the half
+    // day plus the time of day make up the fraction.
     let day = 40_587.0 + whole_days as f64 + JD_MJD_ZERO;
-    let fraction = (seconds_of_day + nanos / 1e9) / SECONDS_PER_DAY;
+    let fraction = 0.5 + (seconds_of_day + nanos / 1e9) / SECONDS_PER_DAY;
     Some(JulianDate::from_parts(day, fraction))
 }
 
@@ -371,8 +381,9 @@ pub fn utc_naive_to_julian(datetime: NaiveDateTime) -> Option<JulianDate> {
 #[must_use]
 pub fn julian_to_utc_naive(jd: JulianDate) -> Option<NaiveDateTime> {
     // Work in whole seconds and nanoseconds so rounding can carry into the next second
-    // instead of being discarded.
-    let total_seconds = jd.fraction * SECONDS_PER_DAY;
+    // instead of being discarded. The half day is removed first because a UTC midnight is
+    // JD `X.5`, not `X.0`.
+    let total_seconds = (jd.fraction - 0.5) * SECONDS_PER_DAY;
     let mut whole_seconds = total_seconds.floor();
     let mut nanos = ((total_seconds - whole_seconds) * 1e9).round();
     if nanos >= 1_000_000_000.0 {
@@ -380,9 +391,8 @@ pub fn julian_to_utc_naive(jd: JulianDate) -> Option<NaiveDateTime> {
         whole_seconds += 1.0;
     }
 
-    // Julian Date -> days since the Unix epoch. The `day` part is the Julian Date at the
-    // start of a UTC day and the fraction is the time of day within it, so the day
-    // difference already lands on a whole number of days.
+    // Julian Date -> days since the Unix epoch. `day` is the whole day number and `fraction`
+    // is the time of day, so the day difference already lands on a whole number of days.
     let unix_days = (jd.day - JD_MJD_ZERO - 40_587.0) as i64;
     let unix_seconds = unix_days * SECONDS_PER_DAY as i64 + whole_seconds as i64;
     let datetime = DateTime::from_timestamp(unix_seconds, nanos as u32)?;

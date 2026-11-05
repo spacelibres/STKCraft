@@ -20,9 +20,9 @@ use stkcraft_core::{Distance, Error, Result, Velocity};
 use crate::constants::{
     ATMOSPHERE_Q0_KM, ATMOSPHERE_S_FLOOR_KM, DEEP_SPACE_PERIOD_MINUTES, EARTH_ROTATION_RAD_PER_MIN,
     HALF_DAY_ECCENTRICITY_MIN, HALF_DAY_MEAN_MOTION_MAX, HALF_DAY_MEAN_MOTION_MIN,
-    LYDDANE_INCLINATION_RAD, MINUTES_PER_DAY, PERIGEE_HEIGHT_FLOOR_KM, PERIGEE_HEIGHT_LIMIT_KM,
-    RESONANCE_STEP_MINUTES, RESONANCE_STEP2, SIMPLIFIED_DRAG_RADIUS, SYNCHRONOUS_MEAN_MOTION_MAX,
-    SYNCHRONOUS_MEAN_MOTION_MIN,
+    JD_1950_JAN_0_FRACTION, LYDDANE_INCLINATION_RAD, MINUTES_PER_DAY, PERIGEE_HEIGHT_FLOOR_KM,
+    PERIGEE_HEIGHT_LIMIT_KM, RESONANCE_STEP_MINUTES, RESONANCE_STEP2, SIMPLIFIED_DRAG_RADIUS,
+    SYNCHRONOUS_MEAN_MOTION_MAX, SYNCHRONOUS_MEAN_MOTION_MIN,
 };
 use crate::elements::Elements;
 use crate::error::PropagationError;
@@ -290,7 +290,16 @@ impl Satellite {
         let mo = elements.mean_anomaly.as_rad();
         let no_kozai = elements.mean_motion;
         let bstar = elements.bstar;
-        let (fraction_of_day, epoch_days) = elements.sgp4_epoch();
+        // `dscom` is defined in days since 1950 January 0.0, so it needs the whole day count
+        // *plus* the fraction. Taking only the fraction is the classic mistake: the lunar and
+        // solar arguments `day` then lose their decade-scale ramp and the deep-space secular
+        // rates drift by kilometres.
+        //
+        // `whole_days` already counts civil midnights from the 1950 January 0.0 zero, i.e.
+        // from JD 2433281.5, so this sum is exactly the reference implementation's `epoch`.
+        // Adding half a day here to "reach" the Julian day boundary would double-count it.
+        let (fraction_of_day, whole_days) = elements.sgp4_epoch();
+        let epoch_days = whole_days + fraction_of_day;
 
         // ---- initl: auxiliary epoch quantities -------------------------------------------
         let eccsq = ecco * ecco;
@@ -317,7 +326,7 @@ impl Satellite {
 
         // Greenwich sidereal time at epoch. Source: AIAA 2006-6753 `initl`, the "modern
         // approach" branch, which is what `opsmode = 'i'` selects.
-        let gsto = sidereal_time_at_epoch(epoch_days, fraction_of_day);
+        let gsto = sidereal_time_at_epoch(whole_days, fraction_of_day);
 
         // A perigee inside the Earth means there is no orbit to propagate.
         //
@@ -464,16 +473,21 @@ impl Satellite {
         // ---- deep space initialization ---------------------------------------------------
         if TWO_PI / no_unkozai >= DEEP_SPACE_PERIOD_MINUTES {
             let dscom = dscom(epoch_days, ecco, argpo, 0.0, inclo, nodeo, no_unkozai);
+            // `inclm` here is the *unperturbed* epoch inclination, which is what the reference
+            // `sgp4init` assigns to it immediately before calling `dsinit`. It matters: the
+            // 180-degree guard in `dsinit` compares against it and drops the node terms, so
+            // recomputing it as `asin(sin(i))` would fold every orbit above 90 degrees into
+            // the wrong half.
             let dsinit = dsinit(
                 &dscom,
                 0.0,
                 cosio,
                 sinio,
+                inclo,
                 eccsq,
                 ecco,
                 argpo,
                 mo,
-                no_kozai,
                 no_unkozai,
                 nodeo,
                 gsto,
@@ -724,8 +738,10 @@ impl Satellite {
             let coseo1 = eo1.cos();
             tem5 = 1.0 - coseo1 * axnl - sineo1 * aynl;
             tem5 = (u - aynl * coseo1 + axnl * sineo1 - eo1) / tem5;
-            if tem5.abs() > 1.0 {
-                tem5 /= tem5.abs();
+            // `if (fabs(tem5) >= 0.95) tem5 = tem5 > 0.0 ? 0.95 : -0.95;` — note `>=` and a
+            // three-way choice, so a correction of exactly zero stays zero.
+            if tem5.abs() >= 0.95 {
+                tem5 = if tem5 > 0.0 { 0.95 } else { -0.95 };
             }
             eo1 += tem5;
         }
@@ -820,7 +836,7 @@ impl Satellite {
 fn sidereal_time_at_epoch(epoch_days: f64, fraction_of_day: f64) -> f64 {
     let _ = fraction_of_day;
     // 2433281.5 is the Julian Date of the SGP4 epoch zero, so `temp` is the Julian Date.
-    let temp = epoch_days + crate::constants::JD_1950_JAN_0;
+    let temp = epoch_days + crate::constants::JD_1950_JAN_0_DAY + JD_1950_JAN_0_FRACTION;
     // The whole-day part: the .5 boundary of the Julian Date is half a day after the SGP4
     // epoch zero, so the civil midnight of the element set's day is `temp - 0.5` truncated.
     let whole = (temp - 0.5).trunc();
@@ -1118,11 +1134,11 @@ fn dsinit(
     tc: f64,
     cosim: f64,
     sinim: f64,
+    inclm: f64,
     eccsq: f64,
     ecco: f64,
     argpo: f64,
     mo: f64,
-    no_kozai: f64,
     no_unkozai: f64,
     nodeo: f64,
     gsto: f64,
@@ -1144,8 +1160,6 @@ fn dsinit(
     const ZNS: f64 = 1.194_59e-5;
 
     let emsq = ds.emsq;
-    let inclm = (ds.sinim).asin();
-    let _ = inclm;
 
     let mut resonance = Resonance::None;
     if no_unkozai < SYNCHRONOUS_MEAN_MOTION_MAX && no_unkozai > SYNCHRONOUS_MEAN_MOTION_MIN {
@@ -1165,14 +1179,14 @@ fn dsinit(
     // verification output was produced by exactly that argument list, so it is reproduced
     // here rather than reinterpreted.
     let ses = ds.ss1 * ZNS * ds.ss5;
-    let sis = ds.ss2 * ZNS * (ds.z11_final + ds.z13_final);
+    // `sis` reads the *solar* `sz` capture, unlike the lunar block below.
+    let sis = ds.ss2 * ZNS * (ds.sz11 + ds.sz13);
     let sls = -ZNS * ds.ss3 * (ds.sz1 + ds.sz3 - 14.0 - 6.0 * emsq);
     let sghs = ds.ss4 * ZNS * (ds.sz31 + ds.sz33 - 6.0);
     let mut shs = -ZNS * ds.ss2 * (ds.sz21 + ds.sz23);
     // `sgp4fix for 180 deg incl`: near 0 or 180 degrees the node terms are singular, and the
     // reference implementation drops them rather than dividing by sin(i) ≈ 0.
-    let inclo = (ds.sinim).clamp(-1.0, 1.0).asin();
-    if inclo < 5.235_987_7e-2 || inclo > core::f64::consts::PI - 5.235_987_7e-2 {
+    if inclm < 5.235_987_7e-2 || inclm > core::f64::consts::PI - 5.235_987_7e-2 {
         shs = 0.0;
     }
     if sinim != 0.0 {
@@ -1182,17 +1196,17 @@ fn dsinit(
 
     // Lunar secular terms.
     //
-    // The C++ `sgp4init` passes `s5`, `z1`, `z3`, `z31`, `z33`, `z21` and `z23` -- the
-    // values `dscom` left after its second iteration, which are the lunar ones. The `s`
-    // values it passes as `s1`..`s5` are likewise the lunar set, and only the `ss`/`sz`
-    // arguments are the solar capture. Getting this split wrong shifts the node and
-    // argument-of-perigee rates by a few per cent.
+    // These use the `s` and `z` values `dscom` leaves after its second iteration — the lunar
+    // set — while the solar block above uses the `ss`/`sz` capture from its first. Mixing the
+    // two up is easy because the reference implementation's `dsinit` prototype names its
+    // parameters `sz11`, `z11` and so on in the opposite order to how it uses them; the
+    // values below are the ones that reproduce its published output.
     let dedt = ses + ds.s1 * ZNL * ds.s5;
     let didt = sis + ds.s2 * ZNL * (ds.z11_final + ds.z13_final);
     let dmdt = sls - ZNL * ds.s3 * (ds.z1_final + ds.z3_final - 14.0 - 6.0 * emsq);
     let sghl = ds.s4 * ZNL * (ds.z31_final + ds.z33_final - 6.0);
     let mut shl = -ZNL * ds.s2 * (ds.z21_final + ds.z23_final);
-    if inclo < 5.235_987_7e-2 || inclo > core::f64::consts::PI - 5.235_987_7e-2 {
+    if inclm < 5.235_987_7e-2 || inclm > core::f64::consts::PI - 5.235_987_7e-2 {
         shl = 0.0;
     }
     let mut domdt = sgs + sghl;
@@ -1319,7 +1333,7 @@ fn dsinit(
             result.d5433 = temp * f543 * g533;
             result.xlamo = (mo + nodeo + nodeo - theta - theta) % TWO_PI;
             result.xfact =
-                mdot + dmdt + 2.0 * (nodedot + dnodt - EARTH_ROTATION_RAD_PER_MIN) - no_kozai;
+                mdot + dmdt + 2.0 * (nodedot + dnodt - EARTH_ROTATION_RAD_PER_MIN) - no_unkozai;
         }
         Resonance::Synchronous => {
             let g200 = 1.0 + emsq * (-2.5 + 0.8125 * emsq);
@@ -1335,7 +1349,7 @@ fn dsinit(
             result.del1 = del1 * f311 * g310 * Q31 * aonv;
             result.xlamo = (mo + nodeo + argpo - theta) % TWO_PI;
             result.xfact =
-                mdot + xpidot - EARTH_ROTATION_RAD_PER_MIN + dmdt + domdt + dnodt - no_kozai;
+                mdot + xpidot - EARTH_ROTATION_RAD_PER_MIN + dmdt + domdt + dnodt - no_unkozai;
         }
     }
 
@@ -1493,7 +1507,7 @@ fn dspace(
     t: f64,
     gsto: f64,
     no_unkozai: f64,
-    eccm: f64,
+    em: f64,
     argpm: f64,
     inclm: f64,
     mm: f64,
@@ -1510,11 +1524,13 @@ fn dspace(
     const G52: f64 = 1.050_833_0;
     const G54: f64 = 4.410_889_8;
 
-    let mut eccm = eccm + ds.dedt * t;
-    let theta = (gsto + t * EARTH_ROTATION_RAD_PER_MIN) % TWO_PI;
+    let eccm = em + ds.dedt * t;
+    // `sgp4fix for negative inclinations` is deliberately *not* applied here: the reference
+    // keeps it commented out, and the flip belongs after the periodics instead.
     let inclm = inclm + ds.didt * t;
     let argpm = argpm + ds.domdt * t;
-    let _ = inclm;
+    // `t` is `tc`, which `sgp4` sets to the elapsed time before calling this.
+    let theta = (gsto + t * EARTH_ROTATION_RAD_PER_MIN) % TWO_PI;
     let nodem = nodem + ds.dnodt * t;
     let mut mm = mm + ds.dmdt * t;
     let mut xn = xn;
@@ -1537,11 +1553,7 @@ fn dspace(
         } else {
             -RESONANCE_STEP_MINUTES
         };
-        let step2 = if t > 0.0 {
-            RESONANCE_STEP2
-        } else {
-            -RESONANCE_STEP2
-        };
+        let step2 = RESONANCE_STEP2;
 
         #[allow(unused_assignments)]
         let (mut xndt, mut xldot, mut xnddt) = (0.0, 0.0, 0.0);
@@ -1613,7 +1625,6 @@ fn dspace(
         state.xni = xni;
     }
 
-    let _ = &mut eccm;
     DeepSpaceSecular {
         eccm,
         argpm,
