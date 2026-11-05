@@ -13,6 +13,8 @@ stkcraft-time.workspace = true
 stkcraft-frames.workspace = true
 stkcraft-sgp4.workspace = true
 stkcraft-access.workspace = true
+# A scenario names its central body, and a planet-centred orbit needs that body's GM and size.
+stkcraft-body.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

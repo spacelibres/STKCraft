@@ -83,7 +83,12 @@ pub(crate) struct BodyData {
 }
 
 /// A body of the solar system that this kernel models.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Serialises as its IAU name (`"Mars"`), not as an index: a document written today must load in a
+/// build whose table has grown a body, and an index would silently point at the wrong planet.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Body {
     /// The Sun.
     Sun,

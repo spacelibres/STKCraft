@@ -9,6 +9,31 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.9] — A scenario can be about another planet
+
+The engine's document now names its central body, and an orbit about Mars, Jupiter or Titan has a
+propagator: the exact two-body solution about that body's own gravitational parameter, in ICRF axes
+with the body's centre as the origin. SGP4 remains what it is — an Earth model — and the two are not
+confused for one another.
+
+### Added
+
+- **`Scenario::central_body`**, defaulting to the Earth and serialising by name, so every scenario
+  written before the field existed still loads and still means what it meant.
+- **`PlanetOrbit`**: classical elements about any body the body crate knows, with
+  `state_at(epoch)` returning position and velocity from the two-body solution. Checked against
+  `v = sqrt(mu/r)` for a circular orbit, against the conserved energy and angular momentum
+  `E = −mu/2a` and `h = sqrt(mu·a·(1−e²))`, and against the antipode a circular orbit reaches after
+  half a period. An element set inside the body, an eccentricity of one, a non-finite angle and an
+  epoch on the wrong time scale are all refused by name.
+
+### Not built yet
+
+- **`PlanetOrbit` is two-body.** No J2, no third body, no drag: for a low orbit about a real planet
+  that is a kilometre-per-minute error along the track, which is why it is stated in the module
+  rather than discovered later.
+- **Moons are not in `Body` yet**, so an orbit about Titan or Io has no central body to name.
+
 ## [0.1.8] — All eight planets, and the kernels to reach them
 
 Uranus and Neptune are in the regression table: thirty CSPICE reference states now cover every

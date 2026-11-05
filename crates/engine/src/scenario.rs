@@ -7,9 +7,15 @@
 
 use serde::{Deserialize, Serialize};
 use stkcraft_access::{GroundSite, Sensor};
+use stkcraft_body::Body;
 use stkcraft_core::{Error, Result};
 use stkcraft_sgp4::TwoLineElement;
 use stkcraft_time::Epoch;
+
+/// The central body a scenario without one is about.
+const fn default_central_body() -> Body {
+    Body::Earth
+}
 
 /// A satellite's identifier within one scenario.
 ///
@@ -56,6 +62,12 @@ pub struct Station {
 pub struct Scenario {
     /// The scenario's name.
     pub name: String,
+    /// The body the analysis is about: the centre every orbit and every site is measured from.
+    ///
+    /// Earth unless the document says otherwise, so every scenario written before this field
+    /// existed still loads and still means what it meant.
+    #[serde(default = "default_central_body")]
+    pub central_body: Body,
     /// The satellites.
     pub satellites: Vec<Satellite>,
     /// The ground stations.
@@ -88,6 +100,7 @@ impl Scenario {
     pub fn empty(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            central_body: Body::Earth,
             satellites: Vec::new(),
             stations: Vec::new(),
             // `Epoch::now` cannot fail for a well-formed system clock; when it does, the J2000
@@ -97,6 +110,20 @@ impl Scenario {
             next_satellite: 1,
             next_station: 1,
         }
+    }
+
+    /// The body this analysis is measured from.
+    #[must_use]
+    pub const fn central_body(&self) -> Body {
+        self.central_body
+    }
+
+    /// Move the analysis to another body.
+    ///
+    /// The document is not validated here: whether the orbits and sites still make sense about a
+    /// different body is a question for [`Self::validate`] and for whoever placed them.
+    pub const fn set_central_body(&mut self, body: Body) {
+        self.central_body = body;
     }
 
     /// Check the document is internally consistent.
