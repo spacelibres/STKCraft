@@ -36,8 +36,11 @@
 
 pub mod chebyshev;
 pub mod daf;
+mod generated_vsop;
 pub mod kepler;
 pub mod spk;
+pub mod vsop87;
 
 pub use kepler::KeplerianEphemeris;
 pub use spk::{Ephemeris, EphemerisSet, KernelEphemeris, Origin, StateVector};
+pub use vsop87::Vsop87Ephemeris;

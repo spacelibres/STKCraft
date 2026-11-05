@@ -9,6 +9,32 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.14] — VSOP87: the full analytic theory
+
+The analytic backend the plan called for is here: VSOP87A, Bretagnon & Francou's published
+planetary theory, carried as a generated table and agreeing with CSPICE to **under an arcsecond**
+over fifteen heliocentric reference states — Mercury comes out at 0.04″. It replaces nothing: the
+JPL Keplerian backend stays because it is a fraction of the size and a caller may want exactly that
+trade.
+
+### Added
+
+- **`Vsop87Ephemeris`** — heliocentric position and velocity for the eight planets from the
+  published Poisson series, rotated into the ICRF with the J2000 obliquity (84381.406″, IAU 2006),
+  with the velocity obtained by differentiating the series analytically and checked against a
+  finite difference.
+- **`generated_vsop.rs`** — 9 537 terms truncated at 1e-7 au, with the distribution, the record
+  format and the truncation stated in the module header. The Moon is refused by name: VSOP87 is a
+  planetary theory and the lunar motion needs ELP2000.
+
+### Fixed
+
+- **The residual that blocked this for three rounds was the reference, not the theory.** Comparing
+  VSOP87 against CSPICE's *heliocentric* vectors through the standard obliquity rotation gives
+  agreement to tens of kilometres; the 657 000 km gap came from a frame conversion in the test rig.
+  The lesson is recorded in the changelog because it is the second time in this arc that a
+  reference conversion, not the code under test, was wrong.
+
 ## [0.1.13] — Planet-centred access from the command line
 
 `stkcraft planet --body Mars --radius 4000 --inclination 30 --lat 0 --lon 0 --mask 10` runs the same
