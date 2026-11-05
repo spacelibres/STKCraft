@@ -127,6 +127,16 @@ pub fn format_epoch(epoch: Epoch) -> String {
     }
 }
 
+/// Format an instant for the viewport's clock, to the second.
+///
+/// The same recovery as [`format_epoch`], with a `UTC` suffix so a screenshot carries its own
+/// time scale. Kept separate from the table formatter because a clock that changes width as the
+/// seconds tick would make the overlay jitter.
+#[must_use]
+pub fn format_instant(epoch: Epoch) -> String {
+    format!("{} UTC", format_epoch(epoch))
+}
+
 /// Format a duration in seconds as hours, minutes and seconds.
 #[must_use]
 pub fn format_duration(seconds: f64) -> String {

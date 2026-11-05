@@ -14,7 +14,17 @@ stkcraft-frames.workspace = true
 stkcraft-sgp4.workspace = true
 stkcraft-access.workspace = true
 stkcraft-engine.workspace = true
+stkcraft-viewport.workspace = true
 log.workspace = true
+
+# The window. `default-features = false` plus explicit features because the default set pulls in
+# backends this app never uses (accesskit, glow) and every one of them has to be reviewed for
+# licensing and for wasm hostility before it may ship.
+eframe = { workspace = true }
+egui = { workspace = true }
+pollster = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
 
 [lints]
 workspace = true

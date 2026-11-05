@@ -98,11 +98,37 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 
 ```sh
 cargo run --release -p stkcraft                # the desktop app
+cargo run --release -p stkcraft -- --help      # the command line
 cargo xtask ci                                 # the full gate
 ```
 
-Once the viewport and control channel land, this section gains the `--control <port>`
-recipe and the screenshot workflow the siblings use.
+### Looking at the viewport without a window
+
+A build machine has no window system, so the app can render one frame offscreen through the
+same `wgpu` pipelines the window will use and write it as a PNG:
+
+```sh
+STKCRAFT_SCREENSHOT=/tmp/frame.png cargo run --release -p stkcraft
+```
+
+This is a verification path, not a feature. It prints the adapter it chose, so a software
+Vulkan fallback is visible rather than hidden. It is how the viewport image in `CHANGELOG.md`
+was produced.
+
+**A passing test is not evidence that the drawing is right.** Five defects in the 0.1.0
+viewport — an invisible star field, an invisible graticule, a ground track hidden behind the
+Earth, a track sampled over the wrong period, and an infinity rendered as black — passed their
+unit tests while producing a wrong image. Render, look at the pixels, and only then claim the
+viewport works. That is the same standard as the numerical layers, applied to drawing.
+
+### Display environment
+
+On Wayland, `eframe` picks an X11 client through XWayland and there is no portable screenshot
+tool: the GNOME screenshot portal prompts for permission and the X11 root window shows nothing.
+That is why the offscreen path above exists.
+
+Once the control channel lands, this section gains the `--control <port>` recipe the siblings
+use.
 
 ## CI workflows
 

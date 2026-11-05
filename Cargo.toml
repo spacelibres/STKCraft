@@ -7,12 +7,13 @@ members = [
     "crates/sgp4",
     "crates/access",
     "crates/engine",
+    "crates/viewport",
     "apps/stkcraft",
     "xtask",
 ]
 
 [workspace.package]
-version = "0.0.7"
+version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -21,12 +22,13 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-core = { path = "crates/core", version = "0.0.7" }
-stkcraft-time = { path = "crates/time", version = "0.0.7" }
-stkcraft-frames = { path = "crates/frames", version = "0.0.7" }
-stkcraft-sgp4 = { path = "crates/sgp4", version = "0.0.7" }
-stkcraft-access = { path = "crates/access", version = "0.0.7" }
-stkcraft-engine = { path = "crates/engine", version = "0.0.7" }
+stkcraft-core = { path = "crates/core", version = "0.1.0" }
+stkcraft-time = { path = "crates/time", version = "0.1.0" }
+stkcraft-frames = { path = "crates/frames", version = "0.1.0" }
+stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.0" }
+stkcraft-access = { path = "crates/access", version = "0.1.0" }
+stkcraft-engine = { path = "crates/engine", version = "0.1.0" }
+stkcraft-viewport = { path = "crates/viewport", version = "0.1.0" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.
@@ -35,6 +37,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 log = "0.4"
+
+# The user interface. `eframe` owns the window and the egui context; the viewport draws
+# through the `wgpu` version that `eframe` itself links, so the two cannot drift apart.
+# Versions are pinned by hand rather than by a caret range because a wgpu major bump
+# changes the pipeline descriptors and the WGSL entry-point surface.
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
+egui = "0.37"
+wgpu = "30"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

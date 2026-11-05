@@ -11,6 +11,10 @@ L0  core      units (Angle, Distance, Duration, EpochOffset), the Error type, Ve
 L1  time      time scales, the IERS leap-second table, Julian dates and epochs
 L2  frames    reference frames and rotations
 L2  sgp4      SGP4/SDP4 propagation from a two-line element set
+L3  access    line of sight, elevation masks, occultation, access windows
+L4  engine    scenario, propagation, analysis, the command registry
+L4  viewport  the 3D viewport: GPU rendering and generated geometry
+    apps      stkcraft (window and CLI)
 ```
 
 Planned, in the order they will land:
@@ -20,20 +24,31 @@ L0  geom      conic sections, coordinate transforms on the sphere, intersection 
 L1  astro     low-precision Sun, Moon and planet positions
 L2  ephemeris SP3 and CCSDS OEM/OPM/OMM readers
 L2  atmos     neutral atmosphere density
-L3  access    line of sight, elevation masks, eclipse and interference geometry
 L3  coverage  grids and grids-of-figures over time
-L4  scenario  the document model: scenario, objects, links, time intervals
-L5  engine    Session, the command registry, history, caches
-L6  render    the wgpu 3D and 2D viewports (no egui)
-L6  ui-egui   the egui shell (thin; every action is a command)
-L6  mcp       the MCP server
-    apps      stkcraft (desktop), stkcraft-cli, stkcraft-web
+    mcp       the MCP server, dispatching the same command ids
 ```
 
 `cargo xtask layers` enforces that a crate depends only on a strictly lower layer, and that
-nothing at or below `LAST_NON_UI_LAYER` touches egui, eframe, winit or rfd. Every new crate
-must be registered in `xtask/src/layers.rs`; the task fails for a workspace member that is
-missing from the table.
+nothing at or below `LAST_NON_UI_LAYER` touches egui, eframe, wgpu, winit or rfd. Every new
+crate must be registered in `xtask/src/layers.rs`; the task fails for a workspace member that
+is missing from the table.
+
+The viewport sits above `LAST_NON_UI_LAYER` because it *is* the user interface's drawing code,
+but it depends only on `stkcraft-core`: it takes a `Frame` of already-computed positions and
+knows nothing about satellites, elements or access. That is the boundary that makes it
+replaceable — see below.
+
+## Why the viewport never computes
+
+The other Craft apps recreate what a user can see, and a screenshot is a valid acceptance test.
+STKCraft computes physics, where a plausible-looking wrong answer is worse than a crash because
+nobody notices it. If the viewport derived an orbit from the current elements — an osculating
+ellipse, for instance — it would disagree with the engine the moment drag or J2 mattered, and
+the disagreement would be invisible.
+
+So the rule is structural rather than a convention: the viewport's whole input is a `Frame` of
+positions the engine produced, and it has no access to an element set. Replacing it cannot
+change an answer.
 
 ## Why units and time are separate crates
 

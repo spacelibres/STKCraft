@@ -4,7 +4,12 @@
 //! id in the engine's registry, so what the CLI can do, a menu and an agent can do too — the
 //! CLI is not a separate implementation.
 //!
+//! With no arguments it opens the window; with a subcommand it runs the command line. The
+//! distinction is the one `AGENTS.md` draws: an interactive sequence starts only from a person
+//! asking for it, and a programmatic caller never gets a dialog it cannot dismiss.
+//!
 //! ```text
+//! stkcraft                                     # the desktop application
 //! stkcraft --help
 //! stkcraft passes --tle "1 25544U ..." "2 25544 ..." --lat 51.5 --lon -0.13
 //! ```
@@ -19,16 +24,79 @@
 )]
 #![forbid(unsafe_code)]
 
+mod app;
 mod cli;
+mod frame_builder;
 mod render;
+mod screenshot;
 
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    // Peek before consuming: `cli::run` takes the iterator by value.
+    if std::env::args_os().len() <= 1 {
+        return run_window();
+    }
+
     match cli::run(std::env::args().skip(1)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Render the first frame to a file, using an adapter that needs no display, and exit.
+///
+/// This is a *verification* path, not a feature: it exists so that a build with no window system
+/// can still prove that the pipelines create, the shader assembles and the geometry lands on
+/// screen. It renders exactly the scene the window would, through the same [`app`] code, into an
+/// offscreen texture.
+fn run_screenshot(path: &str) -> ExitCode {
+    let scenario = match app::demo_scenario() {
+        Ok(scenario) => scenario,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let application = app::App::new(scenario, 30.0);
+    match screenshot::screenshot(&application, path) {
+        Ok(()) => {
+            println!("wrote {path}");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Open the desktop window, reporting a failure to start rather than panicking.
+///
+/// A machine with no display, no GPU adapter or no window system is a normal place to run a
+/// binary — in CI, over SSH, inside a container — so the message says what to do instead of
+/// printing a backtrace.
+fn run_window() -> ExitCode {
+    if let Ok(path) = std::env::var("STKCRAFT_SCREENSHOT") {
+        return run_screenshot(&path);
+    }
+    let scenario = match app::demo_scenario() {
+        Ok(scenario) => scenario,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let application = app::App::new(scenario, 30.0);
+    match app::run(app::native_options(), application) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("error: could not open the window: {message}");
+            eprintln!("       run `stkcraft --help` for the command line, which needs no display");
             ExitCode::FAILURE
         }
     }

@@ -12,6 +12,7 @@
 //! L2  sgp4      orbit propagation
 //! L3  access    access and coverage geometry
 //! L4  engine    scenario, commands and analysis
+//! L4  viewport  3D rendering (GPU), above the analysis layers
 //! ...
 //!     apps      the desktop app, CLI and web shell
 //! ```
@@ -54,8 +55,18 @@ pub const TOOL_LAYER: u32 = LAYER_COUNT + 1;
 
 /// Crates that only the UI layer and the apps may depend on.
 ///
-/// Extend this list when the 3D viewport and the egui shell land.
-pub const GUI_CRATES: [&str; 6] = ["egui", "eframe", "egui-winit", "egui-wgpu", "winit", "rfd"];
+/// The 3D viewport has landed; these are the crates it is allowed to pull in and no analysis
+/// crate is. `wgpu` is listed because a renderer is the thing the rule is about, even though the
+/// engine never names it.
+pub const GUI_CRATES: [&str; 7] = [
+    "egui",
+    "eframe",
+    "egui-winit",
+    "egui-wgpu",
+    "winit",
+    "rfd",
+    "wgpu",
+];
 
 /// Every analysis crate in the workspace, in dependency order.
 ///
@@ -91,6 +102,14 @@ pub const LAYOUT: &[CrateSpec] = &[
         name: "stkcraft-engine",
         path: "crates/engine",
         layer: 4,
+    },
+    // The 3D viewport sits above the analysis layers because it is a UI crate: it may use
+    // `wgpu` and `egui`, which `LAST_NON_UI_LAYER` forbids below. It still depends only on
+    // `stkcraft-core`, so it can be replaced without touching the engine.
+    CrateSpec {
+        name: "stkcraft-viewport",
+        path: "crates/viewport",
+        layer: APP_LAYER - 1,
     },
     CrateSpec {
         name: "stkcraft",

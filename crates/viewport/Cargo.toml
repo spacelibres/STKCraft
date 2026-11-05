@@ -1,0 +1,20 @@
+[package]
+name = "stkcraft-viewport"
+description = "The 3D viewport for STKCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+stkcraft-core.workspace = true
+
+# The viewport is the only crate below the app that may use a GUI stack:
+# `LAST_NON_UI_LAYER` in `xtask/src/layers.rs` stops the analysis crates at L4.
+egui.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+
+[lints]
+workspace = true
