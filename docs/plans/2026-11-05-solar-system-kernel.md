@@ -120,10 +120,16 @@ Sun appear to have no records at all.
 - `Scenario` gains `central_body`; satellites support planet-centred two-body plus J2/J4 in
   addition to Earth TLEs; sites sit on the body's ellipsoid in its body-fixed frame; occultation
   uses that body's radius; commands and the scenario document follow.
-- **Acceptance:** hand-computed Kepler solutions, body-fixed round-trips, and the Earth path
-  unchanged bit for bit (regression).
+- **Landed:** `Scenario::central_body` (default Earth, serialised by name) and `PlanetOrbit`, the
+  exact two-body solution about any body's own GM, checked against `v = sqrt(mu/r)`, the conserved
+  energy and angular momentum, and the antipode after half a period. SGP4 remains the Earth model;
+  the two are separate types rather than a flag.
+- **Still to do:** sites on another body's ellipsoid, and an access problem in that body's
+  body-fixed frame (the body crate's `Orientation` supplies the rotation).
 
 ### Phase 5 — planetary systems
+
+### Phase 4 — central body in the engine (`stkcraft-engine`) — **core landed**
 
 - Moons (Phobos, Deimos, the Galileans, Titan and the rest) as second-level bodies whose central
   body is their planet, with accuracy taken from the kernels. The analytic backend returns
