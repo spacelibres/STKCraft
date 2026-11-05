@@ -39,8 +39,10 @@
 
 pub mod ellipsoid;
 pub mod geometry;
+pub mod sensor;
 pub mod site;
 
 pub use ellipsoid::Ellipsoid;
 pub use geometry::{Topocentric, look_angle};
+pub use sensor::Sensor;
 pub use site::{GroundSite, LocalFrame};
