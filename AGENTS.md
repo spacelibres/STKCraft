@@ -92,7 +92,10 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   degrees/radians mix-up is a compile error. Do not add `From<f64>` conversions.
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
 - **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`,
-  tests, assets, layers, wasm). Commit after every arc that builds and passes.
+  tests, assets, layers, wasm, version). Commit after every arc that builds and passes.
+- **Every commit is a version.** See "Version control and the changelog" below: the smallest
+  version component goes up by one and `CHANGELOG.md` gains the section that names it, in the
+  same commit. `cargo xtask ci` fails if the two disagree.
 
 ## Running and looking at the app
 
@@ -100,7 +103,32 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 cargo run --release -p stkcraft                # the desktop app
 cargo run --release -p stkcraft -- --help      # the command line
 cargo xtask ci                                 # the full gate
+cargo xtask version                            # print the workspace version
+cargo xtask version bump                       # bump it, smallest component
 ```
+
+### Version control and the changelog
+
+Every commit that changes the product is a release-shaped step, and the history says so:
+
+1. **Bump the smallest version component.** `0.1.7` becomes `0.1.8`. `cargo xtask version bump`
+   edits `[workspace.package]` in `Cargo.toml` and regenerates `Cargo.lock`; that manifest entry
+   is the single source of the number, because every crate inherits it with
+   `version.workspace = true`.
+2. **Write the changelog section that names it**, in the same commit: `## [0.1.8] — <title>`,
+   then `### Added` / `### Changed` / `### Fixed` / `### Not built yet` as they apply. Newest
+   section at the top.
+3. **Write it for a reader deciding whether to upgrade**, not for a diff. What changed, why it
+   mattered, and what it means for them — including what is still missing. A changelog line that
+   only repeats the commit subject has said nothing.
+4. **No `[Unreleased]` section.** An unreleased section is where entries go to be forgotten, and
+   the whole point of this rule is that no commit is a draft. Each commit writes its own version.
+5. **Tag the release** as `vX.Y.Z` on the commit whose section carries that number, which is what
+   the existing `v0.1.0` tag does.
+
+`cargo xtask ci` enforces the mechanical half: it fails when the newest `## [x.y.z]` heading and
+the workspace version disagree, and when an `[Unreleased]` heading is present. The judgement half
+— whether the entry is worth reading — is not mechanical, and that half is yours.
 
 ### Looking at the viewport without a window
 

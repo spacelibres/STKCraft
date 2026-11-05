@@ -107,7 +107,7 @@ fn run_program(program: &str, args: &[&str]) -> Result<(), String> {
 type CiStep = (&'static str, fn() -> Result<(), String>);
 
 fn task_ci() -> Result<(), String> {
-    let steps: [CiStep; 6] = [
+    let steps: [CiStep; 7] = [
         ("fmt", || run_cargo(&["fmt", "--all", "--", "--check"])),
         ("clippy", || {
             run_cargo(&[
@@ -123,6 +123,7 @@ fn task_ci() -> Result<(), String> {
         ("assets", task_assets),
         ("layers", task_layers),
         ("wasm", task_wasm),
+        ("version", task_version_check),
     ];
 
     for (name, step) in steps {
@@ -433,56 +434,137 @@ fn task_version(args: &[String]) -> Result<(), String> {
             }
             Err("no version in [workspace.package]".to_owned())
         }
+        Some("bump") => {
+            let current = workspace_version(&root)?;
+            let new = bumped(&current)?;
+            validate_version(&new)?;
+            write_version(&root, &text, &new)?;
+            println!("version {current} -> {new}");
+            Ok(())
+        }
         Some("set") => {
             let Some(new) = args.get(1) else {
                 return Err("usage: cargo xtask version set <X.Y.Z>".to_owned());
             };
             validate_version(new)?;
-            let mut replaced = 0_usize;
-            let mut in_workspace_deps = false;
-            let out: Vec<String> = text
-                .lines()
-                .map(|line| {
-                    let trimmed = line.trim_start();
-                    if trimmed.starts_with('[') {
-                        in_workspace_deps = trimmed.starts_with("[workspace.dependencies]");
-                    }
-                    if trimmed.starts_with("version = ") && !in_workspace_deps {
-                        replaced += 1;
-                        return format!("version = \"{new}\"");
-                    }
-                    // The workspace's own crates are pinned to the workspace version in
-                    // `[workspace.dependencies]`. Leaving those pins behind makes the next
-                    // `cargo update` fail, because every member then asks for a version the
-                    // path dependency no longer provides.
-                    if in_workspace_deps
-                        && trimmed.starts_with("stkcraft-")
-                        && let Some(start) = line.find("version = \"")
-                    {
-                        let rest = &line[start + "version = \"".len()..];
-                        if let Some(end) = rest.find('"') {
-                            replaced += 1;
-                            return format!(
-                                "{}version = \"{new}\"{}",
-                                &line[..start],
-                                &rest[end + 1..]
-                            );
-                        }
-                    }
-                    line.to_owned()
-                })
-                .collect();
-            if replaced == 0 {
-                return Err("no version line to replace in [workspace.package]".to_owned());
-            }
-            fs::write(&manifest, format!("{}\n", out.join("\n")))
-                .map_err(|e| format!("could not write Cargo.toml: {e}"))?;
-            println!("version set to {new}");
-            // Regenerate the lock file so the workspace versions agree.
-            run_cargo(&["update", "--workspace", "--offline"])
+            write_version(&root, &text, new)
         }
         Some(other) => Err(format!("unknown version subcommand `{other}`")),
     }
+}
+
+/// The version in `[workspace.package]`.
+fn workspace_version(root: &Path) -> Result<String, String> {
+    let text = fs::read_to_string(root.join("Cargo.toml"))
+        .map_err(|error| format!("could not read Cargo.toml: {error}"))?;
+    text.lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("version = "))
+        .map(|rest| rest.trim_matches('"').to_owned())
+        .ok_or_else(|| "no version in [workspace.package]".to_owned())
+}
+
+/// The newest `## [x.y.z]` heading in `CHANGELOG.md`, ignoring `[Unreleased]`.
+///
+/// The heading is the version the changelog claims to describe, and the gate compares it with the
+/// workspace version; anything that is not three dot-separated numbers is skipped rather than
+/// parsed leniently, so `[Unreleased]` and a malformed heading both fall through to the error.
+fn newest_changelog_version(changelog: &str) -> Option<String> {
+    changelog.lines().find_map(|line| {
+        let candidate = line.trim().strip_prefix("## [")?;
+        let candidate = &candidate[..candidate.find(']')?];
+        let parts: Vec<&str> = candidate.split('.').collect();
+        let well_formed = parts.len() == 3 && parts.iter().all(|part| part.parse::<u32>().is_ok());
+        well_formed.then(|| candidate.to_owned())
+    })
+}
+
+/// The workspace version bumped in its smallest component: `0.1.7` becomes `0.1.8`.
+fn bumped(version: &str) -> Result<String, String> {
+    let core = version.split(['-', '+']).next().unwrap_or_default();
+    let mut parts: Vec<u32> = core
+        .split('.')
+        .map(|part| {
+            part.parse::<u32>()
+                .map_err(|_| format!("`{version}` is not a semantic version"))
+        })
+        .collect::<Result<_, _>>()?;
+    let [major, minor, patch] = parts.as_mut_slice() else {
+        return Err(format!("`{version}` is not a semantic version"));
+    };
+    *patch = patch.saturating_add(1);
+    Ok(format!("{major}.{minor}.{patch}"))
+}
+
+/// Fail unless `CHANGELOG.md`'s newest section is the version the workspace declares.
+///
+/// This is the mechanical half of the version-control rule in `AGENTS.md`: a commit bumps the
+/// smallest version component and writes the changelog section that names it, so the two can never
+/// drift. An `[Unreleased]` heading is rejected outright, because an unreleased section is exactly
+/// where entries go to be forgotten.
+fn task_version_check() -> Result<(), String> {
+    let root = workspace_root();
+    let version = workspace_version(&root)?;
+    let changelog = fs::read_to_string(root.join("CHANGELOG.md"))
+        .map_err(|error| format!("could not read CHANGELOG.md: {error}"))?;
+    if changelog.contains("## [Unreleased]") {
+        return Err(
+            "CHANGELOG.md has an [Unreleased] section; each commit writes its own version section"
+                .to_owned(),
+        );
+    }
+    let Some(newest) = newest_changelog_version(&changelog) else {
+        return Err("CHANGELOG.md has no `## [x.y.z]` section".to_owned());
+    };
+    if newest != version {
+        return Err(format!(
+            "CHANGELOG.md's newest section is {newest} but the workspace version is {version};              bump both in the same commit"
+        ));
+    }
+    Ok(())
+}
+
+/// Rewrite the workspace version in `Cargo.toml` and regenerate the lock file.
+fn write_version(root: &Path, text: &str, new: &str) -> Result<(), String> {
+    let manifest = root.join("Cargo.toml");
+    let mut replaced = 0_usize;
+    let mut in_workspace_deps = false;
+    let out: Vec<String> = text
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('[') {
+                in_workspace_deps = trimmed.starts_with("[workspace.dependencies]");
+            }
+            if trimmed.starts_with("version = ") && !in_workspace_deps {
+                replaced += 1;
+                return format!("version = \"{new}\"");
+            }
+            // The workspace's own crates are pinned to the workspace version in
+            // `[workspace.dependencies]`. Leaving those pins behind makes the next
+            // `cargo update` fail, because every member then asks for a version the path
+            // dependency no longer provides.
+            if in_workspace_deps
+                && trimmed.starts_with("stkcraft-")
+                && let Some(start) = line.find("version = \"")
+            {
+                let rest = &line[start + "version = \"".len()..];
+                if let Some(end) = rest.find('"') {
+                    replaced += 1;
+                    return format!("{}version = \"{new}\"{}", &line[..start], &rest[end + 1..]);
+                }
+            }
+            line.to_owned()
+        })
+        .collect();
+    if replaced == 0 {
+        return Err("no version line to replace in [workspace.package]".to_owned());
+    }
+    fs::write(&manifest, format!("{}\n", out.join("\n")))
+        .map_err(|e| format!("could not write Cargo.toml: {e}"))?;
+    println!("version set to {new}");
+    // Regenerate the lock file so the workspace versions agree.
+    run_cargo(&["update", "--workspace", "--offline"])
 }
 
 fn validate_version(text: &str) -> Result<(), String> {
@@ -499,6 +581,25 @@ fn validate_version(text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_smallest_component_is_the_one_that_moves() {
+        assert_eq!(bumped("0.1.0").as_deref(), Ok("0.1.1"));
+        assert_eq!(bumped("0.1.9").as_deref(), Ok("0.1.10"));
+        assert_eq!(bumped("2.0.3").as_deref(), Ok("2.0.4"));
+        // A pre-release tag is dropped by a bump, which is what promoting a release means.
+        assert_eq!(bumped("0.2.0-rc.1").as_deref(), Ok("0.2.1"));
+        assert!(bumped("0.2").is_err());
+    }
+
+    #[test]
+    fn the_newest_changelog_section_is_the_first_version_heading() {
+        let text = "## [Unreleased]\n\n### Fixed\n\n## [0.1.1] — a title\n\n## [0.1.0] — older\n";
+        assert_eq!(newest_changelog_version(text).as_deref(), Some("0.1.1"));
+        // With no version heading at all the gate must see nothing rather than guess.
+        assert_eq!(newest_changelog_version("## [Unreleased]\n"), None);
+        assert_eq!(newest_changelog_version(""), None);
+    }
 
     #[test]
     fn semver_accepts_plain_and_pre_release_forms() {

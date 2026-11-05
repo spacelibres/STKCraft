@@ -9,7 +9,10 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
-## [Unreleased]
+## [0.1.1] — The kernel learns more than the Earth
+
+The window draws through the same `wgpu` pipelines as the offscreen verification path, time
+reaches TDB, and a new crate carries the solar-system bodies with the IAU's own rotation models.
 
 ### Fixed
 
@@ -48,6 +51,36 @@ yet.
   filtered on `master` moved with it in the same commit, because a rename without them would
   have left every push to the default branch unchecked.
 
+### Added
+
+- **`TDB` is a real time scale.** `stkcraft-time` used to treat it as TT; it now carries the
+  seven largest terms of the Fairhead & Bretagnon (1990) series in the truncated form of Kaplan
+  (2005), USNO Circular 179. Tests compare it with ERFA's full series at eight epochs from 1985
+  to 2025: worst disagreement 5.2 µs. `TDB → TT` is a fixed-point inversion, because the series
+  argument is a TT quantity that is not known until the correction is.
+- **`stkcraft-body`, a new crate beside `stkcraft-frames`,** answers three questions about a
+  solar-system body and no others: how massive and how large it is (DE440 masses, IAU 2015
+  radii), how it is oriented at a TDB instant (IAU 2015 pole and prime-meridian models, with the
+  periodic terms the kernel carries), and where a point on its surface is (planetocentric and
+  planetodetic latitudes against that body's own ellipsoid).
+  - Ten bodies: the Sun, Mercury, Venus, the Earth, the Moon, Mars, Jupiter, Saturn, Uranus and
+    Neptune, keyed by NAIF identifier as well as name.
+  - The rotation matrices agree with CSPICE's `pxform` over the same kernel to 1e−8 or better for
+    nine bodies at three epochs. That comparison is what established the convention — the pole's
+    right ascension uses a sine where the declination uses a cosine — and a structural test
+    would have accepted three of the wrong answers.
+  - **Mars is incomplete and says so.** Its coefficient arrays in `pck00011.tpc` do not map
+    positionally onto its angle list, and no offset reproduces CSPICE, so the periodic terms are
+    not guessed at: the body ships with its polynomial terms, and a test records the difference
+    and what to do when it is resolved.
+
+### Changed
+
+- **Version control rule, now enforced by `cargo xtask ci`.** Every commit bumps the smallest
+  version component and writes the `CHANGELOG.md` section that names it; `cargo xtask version
+  bump` does the first half, and the gate fails if the newest section and the workspace version
+  disagree, or if an `[Unreleased]` heading is left behind.
+
 ### Not built yet
 
 - **Lines are one pixel wide.** `wgpu` has no portable line width, so a thick line needs
@@ -55,6 +88,9 @@ yet.
 - **No anti-aliasing on the geometry.** The window runs one sample; `eframe` supports MSAA, but
   enabling it means building the pipelines for the sample count, so it is a decision rather
   than a flag.
+- **The ephemeris, the engine's central body and the moons** are the next three steps of the
+  solar-system arc; `docs/plans/2026-11-05-solar-system-kernel.md` records their acceptance
+  criteria.
 
 ## [0.1.0] — The 3D viewport: the analysis, seen
 
