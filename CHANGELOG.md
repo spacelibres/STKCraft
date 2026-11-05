@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.2] — The ephemeris crate, and the layout it will not guess
+
+`stkcraft-ephemeris` exists: the trait every backend will fill, a Chebyshev evaluator, and a reader
+for the NAIF container the JPL ephemerides are published in. What it does *not* do is read a
+trajectory out of a segment, because that layout did not check out, and a wrong ephemeris produces
+a wrong mission timeline quietly.
+
+### Added
+
+- **`stkcraft-ephemeris` (L3), with an `Ephemeris` trait** — barycentric ICRF position and velocity
+  for a `Body` at a TDB instant, and nothing else. Keeping the contract that narrow is what makes a
+  second backend a drop-in later. A TDB epoch is required rather than converted silently, because
+  the kernel's argument is TDB and the conversion belongs to `stkcraft-time`.
+- **A DAF/SPK structure reader** implemented from NAIF's public format documents: the file record,
+  the summary records (whose control words are doubles so they read the same on either endianness),
+  and every segment's interval, target, centre, frame, type and word addresses. Checked against
+  `de440s.bsp`: fourteen segments, the ten barycentres plus the Earth, Moon, Mercury and Venus
+  chains, exactly as the file advertises. Little-endian IEEE only — a big-endian file is refused
+  rather than byte-swapped into a plausible wrong trajectory.
+- **A Chebyshev evaluator** using Clenshaw for the value and a derivative series for the rate,
+  tested against the closed forms, the `Tₙ(±1)` identities and a finite difference.
+
+### Not built yet
+
+- **Reading a type-2 trajectory.** The documented layout — initial state, interval length,
+  coefficient count, record count, records — does not reproduce CSPICE on `de440s.bsp`: the word a
+  summary points at is the first record's midpoint, and no coefficient count, header length or axis
+  ordering tried brought the evaluation within 2 000 km of `spkezr`. The evaluator therefore returns
+  `Error::Unsupported`, states why, and the plan document records what was tried. The next step is
+  to read the SPK Required Reading against a known-good implementation instead of fitting numbers.
+- **The analytic backend** (VSOP87 and ELP2000 truncations) that would place the planets with no
+  data file at all.
+
 ## [0.1.1] — The kernel learns more than the Earth
 
 The window draws through the same `wgpu` pipelines as the offscreen verification path, time

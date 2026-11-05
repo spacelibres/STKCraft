@@ -85,7 +85,7 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   is the ICRF pole at J2000, and a day advances its prime meridian by 0.9856°, which is the
   sidereal-to-solar day difference.
 
-### Phase 3 — `stkcraft-ephemeris` (L2)
+### Phase 3 — `stkcraft-ephemeris` (L3) — **in progress**
 
 - `trait Ephemeris { fn state(&self, body: Body, t: Epoch) -> Result<StateVector>; }` returning
   ICRF position and velocity, with a TDB time argument.
@@ -98,6 +98,20 @@ terms only and a test that pins the known mismatch. This is the first thing to f
 - **Acceptance:** both backends against JPL Horizons for several epochs and every body; A against
   B within A's stated accuracy. Horizons' sub-observer planetographic latitude and longitude are
   used to cross-check phase 2's body-fixed frames against an independent source.
+
+**Landed so far:** the crate, the `Ephemeris` trait, a verified Chebyshev evaluator (checked
+against the closed forms and a finite difference), and a DAF/SPK *structure* reader checked against
+`de440s.bsp`: file record, summary records, and each segment's interval, target, centre, frame,
+type and word addresses.
+
+**Open: the type-2 record layout.** The layout as documented — six words of initial state, interval
+length, coefficient count, record count, then the records — does not reproduce CSPICE on
+`de440s.bsp`. The first word a summary addresses is, in that kernel, the first *record's* midpoint
+followed by its half-width; and a brute-force search over coefficient counts 1–40, header lengths
+0–12 and both axis orderings (blocked and interleaved) never brought the evaluation within
+2 000 km of `spkezr`, let alone the kilometre the format should give. So the evaluator returns
+`Error::Unsupported` instead of a trajectory-shaped guess, and the next step is to read NAIF's SPK
+Required Reading against a known-good implementation rather than to keep fitting numbers.
 
 ### Phase 4 — central body in the engine (`stkcraft-engine`)
 

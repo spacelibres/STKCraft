@@ -107,6 +107,11 @@ pub const LAYOUT: &[CrateSpec] = &[
         layer: 3,
     },
     CrateSpec {
+        name: "stkcraft-ephemeris",
+        path: "crates/ephemeris",
+        layer: 3,
+    },
+    CrateSpec {
         name: "stkcraft-engine",
         path: "crates/engine",
         layer: 4,
