@@ -84,6 +84,11 @@ pub(crate) struct BodyData {
 
 /// A body of the solar system that this kernel models.
 ///
+/// The eight planets, the Sun, the Moon, and seven of the larger moons of other planets: Phobos,
+/// Deimos, Io, Europa, Ganymede, Callisto and Titan. Triton is in the table too — its constants are
+/// IAU 2015 like the rest — but no kernel this repository fetches carries its ephemeris, so an
+/// ephemeris backend will refuse it by name rather than place it."
+///
 /// Serialises as its IAU name (`"Mars"`), not as an index: a document written today must load in a
 /// build whose table has grown a body, and an index would silently point at the wrong planet.
 #[derive(
@@ -110,11 +115,27 @@ pub enum Body {
     Uranus,
     /// Neptune.
     Neptune,
+    /// Phobos, the inner moon of Mars.
+    Phobos,
+    /// Deimos, the outer moon of Mars.
+    Deimos,
+    /// Io, moon of Jupiter.
+    Io,
+    /// Europa, moon of Jupiter.
+    Europa,
+    /// Ganymede, moon of Jupiter.
+    Ganymede,
+    /// Callisto, moon of Jupiter.
+    Callisto,
+    /// Titan, moon of Saturn.
+    Titan,
+    /// Triton, moon of Neptune.
+    Triton,
 }
 
 impl Body {
     /// Every body this crate knows, in order from the Sun.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 18] = [
         Self::Sun,
         Self::Mercury,
         Self::Venus,
@@ -125,6 +146,14 @@ impl Body {
         Self::Saturn,
         Self::Uranus,
         Self::Neptune,
+        Self::Phobos,
+        Self::Deimos,
+        Self::Io,
+        Self::Europa,
+        Self::Ganymede,
+        Self::Callisto,
+        Self::Titan,
+        Self::Triton,
     ];
 
     /// The body's entry in the generated table.
@@ -144,6 +173,14 @@ impl Body {
             saturn,
             uranus,
             neptune,
+            phobos,
+            deimos,
+            io,
+            europa,
+            ganymede,
+            callisto,
+            titan,
+            triton,
         ] = &generated::BODIES;
         match self {
             Self::Sun => sun,
@@ -156,6 +193,14 @@ impl Body {
             Self::Saturn => saturn,
             Self::Uranus => uranus,
             Self::Neptune => neptune,
+            Self::Phobos => phobos,
+            Self::Deimos => deimos,
+            Self::Io => io,
+            Self::Europa => europa,
+            Self::Ganymede => ganymede,
+            Self::Callisto => callisto,
+            Self::Titan => titan,
+            Self::Triton => triton,
         }
     }
 
@@ -206,6 +251,14 @@ impl Body {
             699 => Some(Self::Saturn),
             799 => Some(Self::Uranus),
             899 => Some(Self::Neptune),
+            401 => Some(Self::Phobos),
+            402 => Some(Self::Deimos),
+            501 => Some(Self::Io),
+            502 => Some(Self::Europa),
+            503 => Some(Self::Ganymede),
+            504 => Some(Self::Callisto),
+            606 => Some(Self::Titan),
+            801 => Some(Self::Triton),
             _ => None,
         }
     }
@@ -300,9 +353,11 @@ mod tests {
                     .all(|radius| radius.is_finite() && *radius > 0.0),
                 "{body} has a nonsense radius"
             );
+            // Triaxial moons have `x > y` as often as not (Phobos is 13 by 11.4 by 9.1 km), so the
+            // invariant is only that the polar radius is not the largest.
             assert!(
-                radii[2] <= radii[0] && radii[0] <= radii[1] * 1.001,
-                "{body} has polar radius larger than equatorial"
+                radii[2] <= radii[0].max(radii[1]) * 1.001,
+                "{body} has a polar radius larger than its equatorial ones"
             );
             assert_ne!(body.name(), "", "{body:?} has no name");
         }

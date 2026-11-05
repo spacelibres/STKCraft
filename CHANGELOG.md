@@ -9,6 +9,27 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.10] — Moons
+
+The body crate knows seven moons of other planets as bodies in their own right — Phobos, Deimos,
+Io, Europa, Ganymede, Callisto and Titan — with IAU 2015 radii and rotation models and DE440
+masses, and the CSPICE regression now covers fifty-one reference states: eight planets and seven
+moons, three epochs each, all reproduced to better than a metre in position through the satellite
+system kernels.
+
+### Added
+
+- **Eight moons in `Body`**, each with its own GM, its three radii (several are triaxial: Phobos is
+  13 by 11.4 by 9.1 km), its pole and prime-meridian model, and the periodic terms the kernel
+  carries. Triton is in the table as well; no kernel this repository fetches carries its
+  ephemeris, so an ephemeris backend refuses it by name instead of placing it.
+
+### Changed
+
+- **The radius invariant is physical, not assumed.** The old test required `x <= y`, which triaxial
+  moons violate; it now requires that the polar radius not be the largest, which is what the IAU
+  data actually guarantees.
+
 ## [0.1.9] — A scenario can be about another planet
 
 The engine's document now names its central body, and an orbit about Mars, Jupiter or Titan has a
