@@ -9,6 +9,25 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.11] — A station on Mars can see a satellite
+
+Phase 4's last piece: `PlanetAccess` answers "does this station see that target" on any body the
+body crate models, using that body's own ellipsoid and its IAU 2015 rotation to put the target into
+body-fixed axes. The existing access machinery does the rest, so a bug here can only be a rotation
+or an ellipsoid — both of which the body crate already checks against CSPICE.
+
+### Added
+
+- **`PlanetAccess`**: a planetodetic station, a sensor and a body, with `visible_at` taking a
+  target in ICRF axes about that body — what a two-body propagation produces — and returning
+  whether it is in view. Verified with the hand-computable case: a target on the zenith is visible
+  and its antipode is not, on Mars, whose flattening is four times the Earth's.
+
+### Changed
+
+- **`stkcraft-access` takes `stkcraft-body`** (L2 → L3, allowed by the layer rule), which is what
+  lets a station sit on any body instead of only on WGS-84.
+
 ## [0.1.10] — Moons
 
 The body crate knows seven moons of other planets as bodies in their own right — Phobos, Deimos,
