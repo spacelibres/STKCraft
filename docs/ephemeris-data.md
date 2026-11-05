@@ -9,12 +9,19 @@ outside the repository; this page is how that rule is kept for ephemerides.
 
 | File | Source | SHA-256 | Used for |
 |---|---|---|---|
-| `de440s.bsp` | `https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp` | `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2` | Planet and Moon positions, 1849–2150 |
+| `de440s.bsp` | `https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp` | `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2` | Planet and Moon barycentres, 1849–2150 |
 
-Satellite-system kernels (Mars, Jupiter, Saturn, Uranus, Neptune) are published the same way under
-`https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/`. They are fetched by the same
-procedure; each one is added to the table above with its own checksum at the moment it is first
-used, and never before — a row whose checksum was guessed is worse than no row.
+The satellite-system kernels come from
+`https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/` and carry the planets
+themselves along with their moons. Each checksum below was taken from a file that was downloaded,
+verified against CSPICE, and used in the regression table; none was guessed in advance.
+
+| `mar099.bsp` | `.../satellites/mar099.bsp` | `9991e57b196bae1a096acc6e2afc6718102ee420d684695de0f0333064c046bc` | Mars, Phobos, Deimos |
+| `jup365.bsp` | `.../satellites/jup365.bsp` | `dbf016c01ba4d022154838000cf3f06962cf958ddc503a366f7fe8f81495c5cb` | Jupiter and its moons |
+| `sat441.bsp` | `.../satellites/sat441.bsp` | `d7e444a9ba7a52b8f448ff0747030789524d2f0c1212e4e2bd7f5fc3c96444d5` | Saturn and its moons |
+| `ura111xl-799.bsp` | `.../satellites/ura111xl-799.bsp` | `fa55665eb129613574a5d029bf2cc7b521d3f0d2edc7de5790add3cf950714bf` | Uranus and its moons |
+| `nep097xl-899.bsp` | `.../satellites/nep097xl-899.bsp` | `95e815cb8584e530d3c83f35e39af4bf67d0874f01b65538cbe9dbf279818df8` | Neptune and its moons |
+
 
 ## Fetching
 

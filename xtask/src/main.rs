@@ -638,11 +638,38 @@ fn tag_release(root: &Path) -> Result<(), String> {
 /// The checksums are what makes the fetch trustworthy: a kernel is a large binary that taints every
 /// number computed from it, so a silently truncated download (which this repository has already
 /// seen once) must fail loudly rather than produce a plausible ephemeris.
-const DATA_FILES: [(&str, &str, &str); 1] = [(
-    "de440s.bsp",
-    "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
-    "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2",
-)];
+const DATA_FILES: [(&str, &str, &str); 6] = [
+    (
+        "de440s.bsp",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
+        "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2",
+    ),
+    (
+        "mar099.bsp",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/mar099.bsp",
+        "9991e57b196bae1a096acc6e2afc6718102ee420d684695de0f0333064c046bc",
+    ),
+    (
+        "jup365.bsp",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/jup365.bsp",
+        "dbf016c01ba4d022154838000cf3f06962cf958ddc503a366f7fe8f81495c5cb",
+    ),
+    (
+        "sat441.bsp",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/sat441.bsp",
+        "d7e444a9ba7a52b8f448ff0747030789524d2f0c1212e4e2bd7f5fc3c96444d5",
+    ),
+    (
+        "ura111xl-799.bsp",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/ura111xl-799.bsp",
+        "fa55665eb129613574a5d029bf2cc7b521d3f0d2edc7de5790add3cf950714bf",
+    ),
+    (
+        "nep097xl-899.bsp",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/nep097xl-899.bsp",
+        "95e815cb8584e530d3c83f35e39af4bf67d0874f01b65538cbe9dbf279818df8",
+    ),
+];
 
 /// Download the data files this repository does not commit, and verify them.
 ///

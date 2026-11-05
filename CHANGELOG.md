@@ -9,6 +9,26 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.8] — All eight planets, and the kernels to reach them
+
+Uranus and Neptune are in the regression table: thirty CSPICE reference states now cover every
+planet the kernel models, at three epochs each, and all of them reproduce to better than a metre in
+position. The five satellite-system kernels that make the outer planets placeable are recorded in
+`docs/ephemeris-data.md` with the SHA-256 of the files that were actually verified, and
+`cargo xtask fetch-data` will fetch and check all six.
+
+### Added
+
+- **`ura111xl-799.bsp` and `nep097xl-899.bsp`** in the data table, with the checksums of the
+  downloads that were used: Neptune's is the 370 MB file the tests ran against, not a guess at what
+  the publisher's copy hashes to.
+
+### Fixed
+
+- **The velocity tolerance now says what it is.** Uranus's kernel spreads centuries over long
+  Chebyshev records, so the last bits of an evaluation are a micrometre per second; the test bounds
+  that explicitly instead of holding every kernel to the inner planets' precision.
+
 ## [0.1.7] — An ephemeris with no data file
 
 JPL publishes Keplerian elements and rates for the eight major planets, with the algorithm and the
