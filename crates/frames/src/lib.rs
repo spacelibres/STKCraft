@@ -23,8 +23,10 @@ pub mod arguments;
 pub mod nutation;
 pub mod precession;
 pub mod rotation;
+pub mod sidereal;
 
 pub use arguments::{FundamentalArguments, iau_1980};
 pub use nutation::Nutation;
 pub use precession::{PrecessionAngles, iau_1976_matrix, iau_1977_angles};
 pub use rotation::Rotation3;
+pub use sidereal::greenwich_mean;
