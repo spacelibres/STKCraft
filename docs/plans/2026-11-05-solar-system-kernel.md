@@ -100,8 +100,18 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   0.02″. The record layout is the blocker: a data line is `[id, iv, it, 12 α-powers, then five
   numbers]`, and no assignment of the last five to `(A, B, C, S, K)` that was tried reproduces
   CSPICE for Mercury at J2000 — the best was 657 000 km, three orders off the truncation error. The
-  next step is the published record description (Bretagnon & Francou 1988, and the format notes that
-  ship with the distribution), not more guessing at columns.
+  next step is the published record description, not more guessing at columns.
+- **VSOP87 record format, now read from the distribution's own `vsop87.doc`.** A term record is
+  `1x,4i1,i5,12i3,f15.11,2f18.11,f14.11,f20.11`: version code, body code, coordinate index and the
+  power of `T` packed into the first four characters (which is why a line begins `1110` for
+  `iv=1, ib=1, ic=1, it=0`), then the rank, then the twelve mean-longitude coefficients, then
+  **S, K, A, B, C**. The term is `A·cos(B + C·T)` with `T` in thousands of Julian years from J2000,
+  and the documented time argument is TT. So the columns used in the failed attempt (16, 17, 18 as
+  A, B, C) were already the right ones, which means the 657 000 km residual is *not* a column
+  problem: the next suspects are the coordinate index (the first character of the packed field must
+  be the *version* code 1 for VSOP87A, not the coordinate) and the ecliptic-to-ICRF step used to
+  build the reference. That is where the next attempt starts, with the doc's own
+  `sqrt(S²+K²) = A` identity as the check on the parse.
 - **Backend B (optional):** a NAIF DAF/SPK reader implemented here (Type 2 and 3) over
   `de440s.bsp` (32 MB) and the JPL satellite kernels. Data is not committed: it is fetched with a
   pinned SHA-256, and CI skips the backend offline without failing.
