@@ -25,7 +25,7 @@ use stkcraft_core::Angle;
 use stkcraft_engine::{Registry, Scenario};
 use stkcraft_time::Epoch;
 use stkcraft_viewport::scene::SceneData;
-use stkcraft_viewport::{Camera, Frame};
+use stkcraft_viewport::{Camera, Frame, SceneCallback};
 
 use crate::frame_builder::{build_frame, clamp_rate, step_duration};
 use crate::render;
@@ -144,17 +144,27 @@ impl App {
         }
     }
 
+    /// The current frame's geometry, with the display toggles applied.
+    ///
+    /// One function for the window and for the verification renderer, so a screenshot cannot show
+    /// a graticule the window hides.
+    fn scene(&self) -> SceneData {
+        let mut scene = SceneData::build(&self.frame, &self.camera);
+        if !self.show_graticule {
+            // The graticule is a display aid, not part of the frame, so dropping it here is
+            // cheaper than teaching `SceneData` about display state.
+            scene.graticule.clear();
+        }
+        scene
+    }
+
     /// The current frame, scene and camera, for the verification renderer.
     ///
     /// Exposed rather than duplicated so a screenshot draws exactly what the window draws: if
-    /// this disagreed with [`Self::paint_frame`], the image would be evidence of nothing.
+    /// this disagreed with the window's own path, the image would be evidence of nothing.
     #[must_use]
     pub fn scene_for_verification(&self) -> (String, SceneData, Camera) {
-        (
-            self.frame.epoch_label.clone(),
-            SceneData::build(&self.frame, &self.camera),
-            self.camera,
-        )
+        (self.frame.epoch_label.clone(), self.scene(), self.camera)
     }
 
     /// Move the displayed instant back to the scenario epoch.
@@ -290,7 +300,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_update).as_secs_f64();
         self.last_update = now;
@@ -303,157 +313,65 @@ impl eframe::App for App {
             .default_size(300.0)
             .show(ui, |ui| self.side_panel(ui));
 
-        egui::CentralPanel::default().show(ui, |ui| {
-            let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::drag());
-            let rect = response.rect;
+        // No panel frame: the viewport is the whole area, and a theme-coloured margin around it
+        // would look like a letterbox rather than space.
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                let (response, painter) =
+                    ui.allocate_painter(ui.available_size(), egui::Sense::drag());
+                let rect = response.rect;
 
-            // Camera input: drag orbits, wheel zooms.
-            if response.dragged() {
-                let delta = response.drag_delta();
-                let scale = 0.005;
-                self.camera.orbit(-delta.x * scale, delta.y * scale);
-            }
-            if response.hovered() {
-                let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-                if scroll != 0.0 {
-                    // An exponential zoom, so each notch changes the distance by a constant
-                    // ratio rather than a constant number of kilometres.
-                    self.camera.zoom((-scroll * 0.0015).exp());
+                // Camera input: drag orbits, wheel zooms.
+                if response.dragged() {
+                    let delta = response.drag_delta();
+                    let scale = 0.005;
+                    self.camera.orbit(-delta.x * scale, delta.y * scale);
                 }
-            }
+                if response.hovered() {
+                    let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+                    if scroll != 0.0 {
+                        // An exponential zoom, so each notch changes the distance by a constant
+                        // ratio rather than a constant number of kilometres.
+                        self.camera.zoom((-scroll * 0.0015).exp());
+                    }
+                }
 
-            // The background: space, not the theme's panel colour.
-            painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(4, 6, 12));
+                // The background: space, not the theme's panel colour.
+                painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(4, 6, 12));
 
-            // A CPU projection of the frame. Drawing through the same `SceneData` the GPU pass
-            // will consume means the window shows real propagated positions now, and the geometry
-            // the GPU will draw is already exercised.
-            self.paint_frame(&painter, rect);
+                // The scene itself, through the same `wgpu` pipelines the offscreen verification path
+                // uses. The engine's frame is turned into geometry once, here, and both paths consume
+                // the same `SceneData`, so a screenshot cannot agree with a window that is drawing
+                // something else.
+                //
+                // Without a render state — a backend other than `wgpu` — there is nothing to draw the
+                // scene with; the overlay still shows the frame's contents, so the window is legible
+                // rather than empty.
+                if let Some(render_state) = frame.wgpu_render_state() {
+                    let scene = self.scene();
+                    let aspect = rect.width() / rect.height();
+                    painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
+                        rect,
+                        SceneCallback::new(scene, &self.camera, aspect, render_state.target_format),
+                    ));
+                }
 
-            // The overlay: the clock, floating over the view.
-            painter.text(
-                rect.left_top() + egui::vec2(12.0, 10.0),
-                egui::Align2::LEFT_TOP,
-                &self.frame.epoch_label,
-                egui::FontId::monospace(15.0),
-                egui::Color32::from_rgb(200, 210, 230),
-            );
-        });
+                // The overlay: the clock, floating over the view.
+                painter.text(
+                    rect.left_top() + egui::vec2(12.0, 10.0),
+                    egui::Align2::LEFT_TOP,
+                    &self.frame.epoch_label,
+                    egui::FontId::monospace(15.0),
+                    egui::Color32::from_rgb(200, 210, 230),
+                );
+            });
 
         // Keep the clock running. Without this an idle window would stop advancing the timeline.
         if self.rate != 0.0 {
             ui.ctx().request_repaint();
         }
     }
-}
-
-impl App {
-    /// Draw the frame with the painter, using the same `SceneData` the GPU pass will use.
-    fn paint_frame(&self, painter: &egui::Painter, rect: egui::Rect) {
-        let view = self.camera.view();
-        let aspect = if rect.height() > 0.0 {
-            rect.width() / rect.height()
-        } else {
-            1.0
-        };
-        let projection = self.camera.projection(aspect);
-        let clip = stkcraft_viewport::camera::multiply(projection, view);
-
-        // Screen position of a world point, or `None` when it is behind the camera.
-        let project = |point: [f32; 3]| -> Option<egui::Pos2> {
-            let ndc = stkcraft_viewport::camera::transform_point(clip, point)?;
-            Some(egui::pos2(
-                rect.center().x + ndc[0] * rect.width() * 0.5,
-                rect.center().y - ndc[1] * rect.height() * 0.5,
-            ))
-        };
-
-        let scene = SceneData::build(&self.frame, &self.camera);
-
-        if self.show_graticule {
-            paint_lines(painter, &scene.graticule, &project, 0.6);
-        }
-        for track in chunk_tracks(&scene.tracks) {
-            paint_lines(painter, track, &project, 1.6);
-        }
-        paint_lines(painter, &scene.markers, &project, 1.4);
-    }
-}
-
-/// Draw a line list with the painter, skipping segments that cross the camera.
-///
-/// A segment with one endpoint behind the camera is dropped rather than clipped. Clipping to the
-/// near plane is correct but would draw a false line across the screen for a polyline that
-/// passes behind the viewer, and a ground track never does: it is on the far side of the Earth.
-fn paint_lines(
-    painter: &egui::Painter,
-    vertices: &[stkcraft_viewport::Vertex],
-    project: &impl Fn([f32; 3]) -> Option<egui::Pos2>,
-    width: f32,
-) {
-    for pair in vertices.chunks(2) {
-        let [a, b] = pair else { continue };
-        let (Some(from), Some(to)) = (project(a.position), project(b.position)) else {
-            continue;
-        };
-        // The colour is linear; `egui` wants sRGB bytes.
-        let colour = linear_to_colour32(a.color);
-        painter.line_segment([from, to], egui::Stroke::new(width, colour));
-    }
-}
-
-/// Convert linear RGB back to an `egui` colour, the inverse of the viewport's conversion.
-fn linear_to_colour32(colour: [f32; 3]) -> egui::Color32 {
-    // Infinity clamps to its own sign's end of the range; NaN maps to zero. Rust's `clamp`
-    // propagates NaN, so the NaN case is handled first rather than relied on.
-    let encode = |linear: f32| -> u8 {
-        let c = if linear.is_nan() {
-            0.0
-        } else {
-            linear.clamp(0.0, 1.0)
-        };
-        let srgb = if c <= 0.003_130_8 {
-            c * 12.92
-        } else {
-            1.055 * c.powf(1.0 / 2.4) - 0.055
-        };
-        (srgb * 255.0).round() as u8
-    };
-    egui::Color32::from_rgb(encode(colour[0]), encode(colour[1]), encode(colour[2]))
-}
-
-/// Split a concatenated line list back into polylines so each one is drawn as a path.
-///
-/// `SceneData` concatenates every satellite's track into one buffer; the painter wants them
-/// separate so that two tracks are never joined by a spurious segment. Each entry is a line list
-/// of consecutive segments, and the split is at every point where one segment ends where the
-/// previous one started — i.e. where a vertex repeats its predecessor's position, which the
-/// polyline generator never emits within one track.
-fn chunk_tracks(vertices: &[stkcraft_viewport::Vertex]) -> Vec<&[stkcraft_viewport::Vertex]> {
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    // Walk segments in pairs. A new chunk begins whenever a segment does not continue the
-    // previous one, and the shared vertex is drawn in both.
-    let mut index = 0;
-    while index + 1 < vertices.len() {
-        if index >= start + 2 {
-            let previous_end = vertices.get(index - 1).map(|v| v.position);
-            let current_start = vertices.get(index).map(|v| v.position);
-            if previous_end != current_start {
-                if let Some(slice) = vertices.get(start..index) {
-                    chunks.push(slice);
-                }
-                start = index;
-            }
-        }
-        index += 2;
-    }
-    if start < vertices.len()
-        && let Some(slice) = vertices.get(start..)
-    {
-        chunks.push(slice);
-    }
-    chunks
 }
 
 /// An absolute instant from a scenario epoch and an offset.
@@ -534,6 +452,10 @@ pub fn native_options() -> eframe::NativeOptions {
             .with_min_inner_size([640.0, 400.0])
             .with_title("STKCraft"),
         renderer: eframe::Renderer::Wgpu,
+        // The viewport draws a depth-tested globe, so the window's pass needs a depth attachment.
+        // `eframe` takes bits and `wgpu` takes a format; the constant ties the two together and a
+        // test in the viewport crate pins the mapping.
+        depth_buffer: stkcraft_viewport::renderer::WINDOW_DEPTH_BITS,
         ..eframe::NativeOptions::default()
     }
 }
@@ -603,28 +525,24 @@ mod tests {
     }
 
     #[test]
-    fn a_linear_colour_survives_the_round_trip_to_a_byte_colour() {
-        // The app converts scenario bytes to linear for the viewport and back for the painter;
-        // the two round trips must agree to within rounding, or a user-chosen colour would drift.
-        for value in [0_u8, 1, 64, 128, 200, 255] {
-            let linear = stkcraft_viewport::frame::color_from_bytes([value, value, value]);
-            let back = linear_to_colour32(linear);
-            assert!(
-                i16::from(back.r()).abs_diff(i16::from(value)) <= 1,
-                "{value} came back as {}",
-                back.r()
-            );
-        }
-    }
+    fn the_graticule_toggle_only_affects_the_graticule() {
+        // The window used to draw geometry itself; it now hands `SceneData` to the GPU, and this
+        // pins that the display toggle survived the move — a toggle that did nothing would be a
+        // silent regression.
+        let scenario = demo_scenario().expect("valid");
+        let app = App::new(scenario, 30.0);
+        let (_, with_graticule, _) = app.scene_for_verification();
+        assert_ne!(
+            with_graticule.graticule,
+            [] as [stkcraft_viewport::Vertex; 0]
+        );
 
-    #[test]
-    fn a_nan_colour_is_drawn_by_channel_rather_than_panicking() {
-        // NaN and infinity clamp to the nearest end of the [0, 1] range, and a negative linear
-        // value clamps to 0. The result is a valid colour for every input, which is the contract
-        // that matters: the painter must never be handed an out-of-range byte.
-        let colour = linear_to_colour32([f32::NAN, f32::INFINITY, -1.0]);
-        assert_eq!(colour.r(), 0, "NaN was not clamped to black");
-        assert_eq!(colour.g(), 255, "infinity was not clamped to white");
-        assert_eq!(colour.b(), 0, "a negative linear value was not clamped");
+        let mut without = App::new(app.scenario.clone(), 30.0);
+        without.show_graticule = false;
+        let (_, scene, _) = without.scene_for_verification();
+        assert!(
+            scene.graticule.is_empty(),
+            "the graticule was drawn with the toggle off"
+        );
     }
 }

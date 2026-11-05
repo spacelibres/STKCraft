@@ -104,16 +104,26 @@ cargo xtask ci                                 # the full gate
 
 ### Looking at the viewport without a window
 
-A build machine has no window system, so the app can render one frame offscreen through the
-same `wgpu` pipelines the window will use and write it as a PNG:
+A build machine has no window system, so the app can render one frame offscreen and write it as a
+PNG. There are two paths, because the window has two layers and either can be the broken one:
 
 ```sh
-STKCRAFT_SCREENSHOT=/tmp/frame.png cargo run --release -p stkcraft
+STKCRAFT_SCREENSHOT=/tmp/frame.png cargo run --release -p stkcraft        # the scene renderer
+STKCRAFT_SCREENSHOT_EGUI=/tmp/window.png cargo run --release -p stkcraft  # the window's own path
 ```
 
-This is a verification path, not a feature. It prints the adapter it chose, so a software
-Vulkan fallback is visible rather than hidden. It is how the viewport image in `CHANGELOG.md`
-was produced.
+The first opens its own `wgpu` pass and asks whether the pipelines and the geometry are right. The
+second builds an `egui` frame the way the window does, draws the scene as a paint callback inside
+`egui-wgpu`'s pass with the depth attachment the window configures, and asks whether the window's
+own path draws that scene — a callback that never runs, a missing depth buffer or a projection
+built from the wrong aspect ratio all pass the first path and leave the window blank. With no
+margin on the panel the two images are byte-identical, which is the check that says the window and
+the verified render agree.
+
+Both print the adapter they chose, so a software Vulkan fallback is visible rather than hidden, and
+both check the depth buffer numerically: every ground-track sample that is geometrically behind the
+globe must be hidden, with the samples in front as the control that proves the check can see a line
+at all. `STKCRAFT_SCREENSHOT` is how the viewport image in `CHANGELOG.md` was produced.
 
 **A passing test is not evidence that the drawing is right.** Five defects in the 0.1.0
 viewport — an invisible star field, an invisible graticule, a ground track hidden behind the

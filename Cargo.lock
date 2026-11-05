@@ -2347,6 +2347,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "egui",
+ "egui-wgpu",
  "stkcraft-core",
  "wgpu",
 ]

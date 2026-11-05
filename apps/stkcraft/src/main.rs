@@ -47,6 +47,33 @@ fn main() -> ExitCode {
     }
 }
 
+/// Render the first frame through `egui`'s paint-callback path, and exit.
+///
+/// The window draws the scene as an `egui` paint callback inside `egui-wgpu`'s render pass, which
+/// no windowless machine can exercise by opening a window. This path runs that same callback
+/// against a real `egui-wgpu` renderer with the depth attachment the window configures, so the
+/// window's drawing code is verified even where nothing can be displayed.
+fn run_egui_screenshot(path: &str) -> ExitCode {
+    let scenario = match app::demo_scenario() {
+        Ok(scenario) => scenario,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let application = app::App::new(scenario, 30.0);
+    match screenshot::screenshot_through_egui(&application, path) {
+        Ok(()) => {
+            println!("wrote {path}");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Render the first frame to a file, using an adapter that needs no display, and exit.
 ///
 /// This is a *verification* path, not a feature: it exists so that a build with no window system
@@ -82,6 +109,9 @@ fn run_screenshot(path: &str) -> ExitCode {
 fn run_window() -> ExitCode {
     if let Ok(path) = std::env::var("STKCRAFT_SCREENSHOT") {
         return run_screenshot(&path);
+    }
+    if let Ok(path) = std::env::var("STKCRAFT_SCREENSHOT_EGUI") {
+        return run_egui_screenshot(&path);
     }
     let scenario = match app::demo_scenario() {
         Ok(scenario) => scenario,

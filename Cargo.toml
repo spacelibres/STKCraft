@@ -44,6 +44,9 @@ log = "0.4"
 # changes the pipeline descriptors and the WGSL entry-point surface.
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 egui = "0.37"
+# The viewport draws inside `egui`'s own render pass, which is what `egui-wgpu` paint callbacks
+# are for. Pinned alongside `egui` because the two share the `wgpu` types in their signatures.
+egui-wgpu = "0.37"
 wgpu = "30"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "1"

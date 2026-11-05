@@ -30,12 +30,14 @@
 )]
 #![forbid(unsafe_code)]
 
+pub mod callback;
 pub mod camera;
 pub mod frame;
 pub mod geometry;
 pub mod renderer;
 pub mod scene;
 
+pub use callback::SceneCallback;
 pub use camera::{Camera, Mat4};
 pub use frame::{
     EARTH_EQUATORIAL_RADIUS_KM, EARTH_POLAR_RADIUS_KM, Frame, SatelliteGlyph, StationGlyph,

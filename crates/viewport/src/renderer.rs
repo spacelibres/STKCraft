@@ -194,6 +194,360 @@ pub fn marker_size_km(view_distance_km: f32) -> f32 {
     view_distance_km * 0.004
 }
 
+/// How many depth bits the window must be created with for [`SceneRenderer`] to be valid in it.
+///
+/// `eframe` takes a *bit count* and derives the texture format from it
+/// (`egui_wgpu::depth_format_from_bits`), while a `wgpu` pipeline takes the *format*. The two have
+/// to agree or the pipeline is rejected by the pass it is drawn into, so the number lives here
+/// beside [`DEPTH_FORMAT`] and a test below pins the mapping between them. The app sets
+/// `NativeOptions::depth_buffer` to this value; nothing else may assume a depth buffer exists.
+pub const WINDOW_DEPTH_BITS: u8 = 32;
+
+/// One vertex or index buffer, written in place while it is big enough.
+///
+/// A ground track is rebuilt from scratch every frame, so a buffer per draw per frame would
+/// allocate roughly a megabyte and a half a second and hand the GPU a new allocation each time.
+/// Writing into a buffer that has already been asked for the memory is the cheap version, and the
+/// capacity is rounded so that a track growing by a vertex does not reallocate.
+#[derive(Debug)]
+struct GrowableBuffer {
+    label: &'static str,
+    usage: wgpu::BufferUsages,
+    buffer: Option<wgpu::Buffer>,
+    /// The buffer's size in bytes, zero before the first write.
+    capacity: u64,
+    /// How many bytes the last [`Self::write`] put in it, i.e. what a draw call should cover.
+    written: u64,
+}
+
+impl GrowableBuffer {
+    const fn new(label: &'static str, usage: wgpu::BufferUsages) -> Self {
+        Self {
+            label,
+            usage,
+            buffer: None,
+            capacity: 0,
+            written: 0,
+        }
+    }
+
+    /// Upload `bytes`, reallocating only when they do not fit.
+    fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, bytes: &[u8]) {
+        self.written = bytes.len() as u64;
+        if bytes.is_empty() {
+            return;
+        }
+        if self.written > self.capacity {
+            let capacity = capacity_for(self.written);
+            self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(self.label),
+                size: capacity,
+                usage: self.usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.capacity = capacity;
+        }
+        if let Some(buffer) = &self.buffer {
+            queue.write_buffer(buffer, 0, bytes);
+        }
+    }
+
+    /// The buffer to bind, or `None` when the last write was empty.
+    fn slice(&self) -> Option<wgpu::BufferSlice<'_>> {
+        if self.written == 0 {
+            return None;
+        }
+        self.buffer.as_ref().map(|buffer| buffer.slice(..))
+    }
+}
+
+/// The allocation size for a buffer that must hold `bytes` bytes: whole pages, never smaller than
+/// a page.
+///
+/// 4 KiB is one page on every platform `wgpu` supports, so a reallocation is a page-aligned request
+/// rather than an arbitrary size the allocator has to round up anyway.
+const fn capacity_for(bytes: u64) -> u64 {
+    const PAGE: u64 = 4_096;
+    bytes.div_ceil(PAGE) * PAGE
+}
+
+/// The `wgpu` vertex layout the pipelines in [`SceneRenderer`] are created with.
+///
+/// Derived from [`vertex_attributes`] so the stride, the offsets and the shader locations come
+/// from one place; a mismatch here draws garbage rather than failing.
+#[must_use]
+pub fn vertex_layout() -> [wgpu::VertexAttribute; 2] {
+    let spec = vertex_attributes();
+    [
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: spec[0].2 as wgpu::BufferAddress,
+            shader_location: 0,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: spec[1].2 as wgpu::BufferAddress,
+            shader_location: 1,
+        },
+    ]
+}
+
+/// Everything needed to draw one [`SceneData`](crate::scene::SceneData), held between frames.
+///
+/// Both consumers use this and only this: the window draws through [`SceneCallback`]
+/// (see `crate::callback`) inside `egui`'s render pass, and the offscreen verification path opens
+/// its own pass. That is the point of the type — the image the build machine checks and the image
+/// a user sees come from the same pipelines, the same shader and the same buffers, so a
+/// screenshot cannot agree with a window that is wrong.
+///
+/// # Depth
+///
+/// The globe writes depth and the lines test against it without writing. This is what hides a
+/// ground track passing behind the Earth, which the `egui` painter could not do: a painter has no
+/// depth buffer, so a track on the far side was drawn over the disc.
+///
+/// [`SceneCallback`]: crate::callback::SceneCallback
+pub struct SceneRenderer {
+    globals: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    globe_pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
+    globe_vertices: GrowableBuffer,
+    globe_indices: GrowableBuffer,
+    stars: GrowableBuffer,
+    graticule: GrowableBuffer,
+    tracks: GrowableBuffer,
+    markers: GrowableBuffer,
+    /// The colour format the pipelines were built for; a surface with another format cannot use
+    /// them.
+    target_format: wgpu::TextureFormat,
+    /// The depth format likewise.
+    depth_format: wgpu::TextureFormat,
+}
+
+impl SceneRenderer {
+    /// Create the pipelines for one target and depth format.
+    ///
+    /// The formats are recorded rather than assumed so that a caller can ask
+    /// ([`Self::target_format`]) before handing it a pass it does not match.
+    #[must_use]
+    pub fn new(
+        device: &wgpu::Device,
+        target_format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("stkcraft"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+
+        let globals = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("globals"),
+            size: Globals::SIZE as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("globals layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("globals"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals.as_entire_binding(),
+            }],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("stkcraft"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
+
+        let attributes = vertex_layout();
+        let vertex_buffers = [Some(wgpu::VertexBufferLayout {
+            array_stride: crate::geometry::Vertex::SIZE as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &attributes,
+        })];
+        let targets = [Some(wgpu::ColorTargetState {
+            format: target_format,
+            // The shader's alpha is always 1, and the scene is opaque, so blending would only
+            // let the pass's clear colour leak through the lines.
+            blend: None,
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+
+        // The globe: triangles, depth write on, no blending. Culling the back half is what makes
+        // the far side of the Earth hidden rather than smeared over.
+        let globe_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("globe"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_globe"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &vertex_buffers,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_globe"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &targets,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Lines: depth-tested but not depth-writing, so a track is not z-fought by the surface it
+        // sits on. `LineList` with no index buffer, matching how `geometry` produces vertices.
+        let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lines"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &vertex_buffers,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &targets,
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        Self {
+            globals,
+            bind_group,
+            globe_pipeline,
+            line_pipeline,
+            globe_vertices: GrowableBuffer::new("globe vertices", wgpu::BufferUsages::VERTEX),
+            globe_indices: GrowableBuffer::new("globe indices", wgpu::BufferUsages::INDEX),
+            stars: GrowableBuffer::new("stars", wgpu::BufferUsages::VERTEX),
+            graticule: GrowableBuffer::new("graticule", wgpu::BufferUsages::VERTEX),
+            tracks: GrowableBuffer::new("tracks", wgpu::BufferUsages::VERTEX),
+            markers: GrowableBuffer::new("markers", wgpu::BufferUsages::VERTEX),
+            target_format,
+            depth_format,
+        }
+    }
+
+    /// The colour format the pipelines were created for.
+    #[must_use]
+    pub const fn target_format(&self) -> wgpu::TextureFormat {
+        self.target_format
+    }
+
+    /// The depth format the pipelines were created for.
+    #[must_use]
+    pub const fn depth_format(&self) -> wgpu::TextureFormat {
+        self.depth_format
+    }
+
+    /// Write one frame's matrices and geometry.
+    ///
+    /// Cheap when nothing grew: the matrices go through `write_buffer` and every vertex buffer is
+    /// reused. A scene with no stars, or no tracks, simply leaves that buffer's draw empty.
+    pub fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        globals: &Globals,
+        scene: &crate::scene::SceneData,
+    ) {
+        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(globals));
+
+        self.globe_vertices
+            .write(device, queue, bytemuck::cast_slice(&scene.globe.vertices));
+        self.globe_indices
+            .write(device, queue, bytemuck::cast_slice(&scene.globe.indices));
+        self.stars
+            .write(device, queue, bytemuck::cast_slice(&scene.stars));
+        self.graticule
+            .write(device, queue, bytemuck::cast_slice(&scene.graticule));
+        self.tracks
+            .write(device, queue, bytemuck::cast_slice(&scene.tracks));
+        self.markers
+            .write(device, queue, bytemuck::cast_slice(&scene.markers));
+    }
+
+    /// Record the draw calls into an open pass whose colour and depth attachments the caller set.
+    ///
+    /// The pass must have a depth attachment of [`Self::depth_format`] already cleared to `1.0`,
+    /// and a colour attachment of [`Self::target_format`]. The pass's viewport must already map
+    /// normalized device coordinates onto the rectangle the scene should occupy — `wgpu` has no
+    /// access to the caller's idea of where that is.
+    pub fn draw(&self, pass: &mut wgpu::RenderPass<'static>) {
+        pass.set_bind_group(0, &self.bind_group, &[]);
+
+        // The globe first, so that everything after it is depth-tested against a real surface.
+        pass.set_pipeline(&self.globe_pipeline);
+        if let (Some(vertices), Some(indices)) =
+            (self.globe_vertices.slice(), self.globe_indices.slice())
+        {
+            pass.set_vertex_buffer(0, vertices);
+            pass.set_index_buffer(indices, wgpu::IndexFormat::Uint32);
+            // The index buffer is written as bytes; one index is a `u32`.
+            let index_count = (self.globe_indices.written / 4) as u32;
+            pass.draw_indexed(0..index_count, 0, 0..1);
+        }
+
+        pass.set_pipeline(&self.line_pipeline);
+        for buffer in [&self.stars, &self.graticule, &self.tracks, &self.markers] {
+            let Some(slice) = buffer.slice() else {
+                continue;
+            };
+            pass.set_vertex_buffer(0, slice);
+            // One vertex is a `Vertex`; the shader reads positions and colours from it.
+            let vertex_count = (buffer.written / crate::geometry::Vertex::SIZE as u64) as u32;
+            pass.draw(0..vertex_count, 0..1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +646,40 @@ mod tests {
         assert_eq!(marker_size_km(0.0), 0.0);
         assert_eq!(marker_size_km(-1.0), 0.0);
         assert_eq!(marker_size_km(f32::NAN), 0.0);
+    }
+
+    #[test]
+    fn the_window_depth_bits_resolve_to_the_pipeline_depth_format() {
+        // `eframe` is configured in bits and the pipelines in formats. If these two ever disagree
+        // every frame is a validation error, so the mapping is pinned rather than assumed.
+        assert_eq!(
+            egui_wgpu::depth_format_from_bits(WINDOW_DEPTH_BITS, 0),
+            Some(DEPTH_FORMAT)
+        );
+    }
+
+    #[test]
+    fn a_buffer_grows_to_whole_pages_and_only_when_it_has_to() {
+        // The point of the rounding is that a track one vertex longer does not reallocate, and
+        // that an allocation is never asked for a zero-sized buffer (which `wgpu` rejects).
+        assert_eq!(capacity_for(1), 4_096);
+        assert_eq!(capacity_for(4_096), 4_096);
+        assert_eq!(capacity_for(4_097), 8_192);
+        let vertex = Vertex::SIZE as u64;
+        // 1 000 vertices is 24 000 bytes: six pages, not the five that 4 096 would give.
+        assert_eq!(capacity_for(1_000 * vertex), 24_576);
+    }
+
+    #[test]
+    fn the_wgpu_vertex_layout_agrees_with_the_documented_attributes() {
+        let layout = vertex_layout();
+        assert_eq!(layout[0].offset, 0);
+        assert_eq!(layout[1].offset, 12);
+        assert_eq!(layout[0].shader_location, 0);
+        assert_eq!(layout[1].shader_location, 1);
+        // Beyond the last attribute must be the stride, which `SceneRenderer::new` takes from
+        // `Vertex::SIZE`.
+        let last = layout[1];
+        assert_eq!(last.offset as usize + 3 * size_of::<f32>(), Vertex::SIZE);
     }
 }

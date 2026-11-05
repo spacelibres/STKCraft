@@ -9,6 +9,53 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [Unreleased]
+
+### Fixed
+
+- **The window draws the Earth.** It draws the globe, the ground tracks, the graticule, the
+  markers and the star field through the same `wgpu` pipelines the offscreen verification path
+  uses, instead of projecting vertices on the CPU and handing `egui`'s painter line segments.
+  Two consequences a user sees on the first frame: the Earth is a lit sphere rather than a
+  starfield with an outline on it, and the stars are drawn at all — the painter path never
+  added them.
+- **A ground track on the far side is hidden by the Earth.** The painter had no depth buffer,
+  so the half of every track behind the globe was drawn over the disc. The window's pass now
+  carries a depth attachment (`NativeOptions::depth_buffer`), the globe writes depth and the
+  lines test against it. This is checked numerically rather than by eye: both verification
+  paths sample every track vertex, skip the ones within 2 % of the limb, and require that no
+  vertex geometrically behind the globe shows its own colour on screen — with the vertices in
+  front required to be drawn, so a check that saw nothing could not pass. With the depth
+  compare on the line pipeline changed to `Always`, that check reports 100 of 100 far-side
+  samples drawn over the globe, which is the defect it exists to catch.
+
+### Changed
+
+- **The pipelines, the shader and the buffers moved into `stkcraft-viewport`.** `SceneRenderer`
+  owns the two pipelines, the uniform and one growable buffer per drawable, so the window and
+  the screenshot path share them by construction rather than by both happening to create the
+  same descriptors. Buffer writes go through `queue.write_buffer` into a buffer that is
+  reallocated only when it has to be, instead of a fresh allocation per drawable per frame.
+- **`SceneCallback` is the window's drawing path.** It is an `egui-wgpu` paint callback — the
+  way to draw into the pass `egui` already records — so the scene lands in the pass that has
+  the depth attachment and nothing has to be blitted in from a second swapchain. The surface
+  format is read at callback time, and a surface format that changes (dragging the window to a
+  monitor driven by another GPU) rebuilds the pipelines instead of drawing with the wrong ones.
+- **`STKCRAFT_SCREENSHOT_EGUI` renders the window's own path offscreen**, and with the central
+  panel unframed its image is byte-identical to `STKCRAFT_SCREENSHOT`'s. `AGENTS.md` documents
+  both.
+- **The default branch is `main`**, matching the sibling Craft apps. The two workflows that
+  filtered on `master` moved with it in the same commit, because a rename without them would
+  have left every push to the default branch unchecked.
+
+### Not built yet
+
+- **Lines are one pixel wide.** `wgpu` has no portable line width, so a thick line needs
+  screen-space quad expansion — a geometry change, not a parameter.
+- **No anti-aliasing on the geometry.** The window runs one sample; `eframe` supports MSAA, but
+  enabling it means building the pipelines for the sample count, so it is a decision rather
+  than a flag.
+
 ## [0.1.0] — The 3D viewport: the analysis, seen
 
 The first release whose minor version changes, because the product now has a user interface.
