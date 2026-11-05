@@ -108,8 +108,12 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   latitude term is stored with a second-column value of 412 529 where a linear-in-`T` term cannot
   be that large, so ELP's polynomial columns carry a scaling this reading does not apply. Nothing
   was shipped: a Moon off by a degree is worse than a Moon refused by name, which is what the
-  VSOP87 backend already does. The next step is the ELP2000 file description from the same
-  distribution before the columns are read again.
+  VSOP87 backend already does. The notice (`elp82b.ps`, extracted with `ps2ascii`) confirms what the
+  files contain — main-problem longitude, latitude and distance series in arcseconds and kilometres,
+  with Delaunay arguments as polynomials in TDB centuries — but it does not state the term-record
+  column layout, and the latitude file's second column is where the reading breaks. The next step is
+  the record layout in the original 1983/1988 papers (A&A 124, 50 and A&A 190, 342), not the
+  distribution notice.
 - **VSOP87 landed: 0.1.14.** `Vsop87Ephemeris` reads the published Poisson series (9 537 terms
   truncated at 1e-7 au, in `generated_vsop.rs` with its provenance) and agrees with CSPICE to under
   an arcsecond over fifteen heliocentric states — Mercury at 0.04″. The Moon needs ELP2000 and is
