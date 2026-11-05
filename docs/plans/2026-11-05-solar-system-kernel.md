@@ -62,7 +62,7 @@ extension, or a different model revision — and neither is being guessed at. Un
 report's F-angle table is transcribed and checked the same way, Mars ships with its polynomial
 terms only and a test that pins the known mismatch. This is the first thing to finish in phase 2.
 
-### Phase 2 — `stkcraft-body` (L1, between `time` and `frames`)
+### Phase 2 — `stkcraft-body` (L2, beside `frames`) — **done except Mars**
 
 - `Body`: Sun, Mercury, Venus, Earth, Moon, Mars, Jupiter, Saturn, Uranus, Neptune, keyed by both
   NAIF ID and IAU name (the NAIF key is what phase 3's kernel backend will need).
@@ -77,10 +77,13 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   terms of the Moon's model. The full librational model needs a binary PCK, which is phase 3
   work; until then the omission is documented with its magnitude (about 0.01°, a few hundred
   metres on the surface).
-- **Acceptance:** the model reproduces the kernel's constants at J2000 for the bodies without
-  periodic terms; rotation matrices are orthonormal with determinant +1 at several epochs;
-  icrf → fixed → icrf returns the input to machine precision; planetodetic ↔ planetocentric
-  round-trips inside 1 m.
+- **Acceptance, measured:** every rotation matrix agrees with CSPICE's `pxform` over the same
+  kernel to 1e−8 or better (nine bodies × three epochs; a wrong trigonometric function, a
+  transposed matrix or a wrong angle index miss by six orders of magnitude). Orthonormality and a
+  determinant of +1 hold for all ten bodies at four epochs. Planetodetic ↔ planetocentric and
+  surface-point round trips return to a nanoradian and a tenth of a millimetre. The Earth's pole
+  is the ICRF pole at J2000, and a day advances its prime meridian by 0.9856°, which is the
+  sidereal-to-solar day difference.
 
 ### Phase 3 — `stkcraft-ephemeris` (L2)
 

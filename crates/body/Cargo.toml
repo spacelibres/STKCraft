@@ -1,0 +1,16 @@
+[package]
+name = "stkcraft-body"
+description = "Solar-system bodies: constants, IAU rotation models and ellipsoids for STKCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+stkcraft-core.workspace = true
+# An orientation model takes a TDB epoch, which only `stkcraft-time` can produce correctly.
+stkcraft-time.workspace = true
+
+[lints]
+workspace = true

@@ -2293,6 +2293,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "stkcraft-body"
+version = "0.1.0"
+dependencies = [
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
 name = "stkcraft-core"
 version = "0.1.0"
 dependencies = [

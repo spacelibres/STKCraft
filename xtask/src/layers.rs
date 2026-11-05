@@ -83,6 +83,14 @@ pub const LAYOUT: &[CrateSpec] = &[
         path: "crates/time",
         layer: 1,
     },
+    // Body constants and rotation models sit beside the frame machinery: both are L2, and
+    // neither depends on the other, which is why `stkcraft-body` does not need `Rotation3`
+    // from `stkcraft-frames`.
+    CrateSpec {
+        name: "stkcraft-body",
+        path: "crates/body",
+        layer: 2,
+    },
     CrateSpec {
         name: "stkcraft-frames",
         path: "crates/frames",
