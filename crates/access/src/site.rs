@@ -11,7 +11,7 @@ use stkcraft_core::{Angle, Error, Result, Vector3};
 use crate::ellipsoid::Ellipsoid;
 
 /// A point fixed to the rotating Earth, given geodetically.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GroundSite {
     /// Geodetic latitude, positive north. In `[-90°, 90°]`.
     pub latitude: Angle,

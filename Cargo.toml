@@ -6,6 +6,7 @@ members = [
     "crates/frames",
     "crates/sgp4",
     "crates/access",
+    "crates/engine",
     "apps/stkcraft",
     "xtask",
 ]
@@ -25,11 +26,13 @@ stkcraft-time = { path = "crates/time", version = "0.0.5" }
 stkcraft-frames = { path = "crates/frames", version = "0.0.5" }
 stkcraft-sgp4 = { path = "crates/sgp4", version = "0.0.5" }
 stkcraft-access = { path = "crates/access", version = "0.0.5" }
+stkcraft-engine = { path = "crates/engine", version = "0.0.5" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
 log = "0.4"
 

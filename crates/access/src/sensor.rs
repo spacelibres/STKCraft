@@ -16,7 +16,7 @@ use stkcraft_core::{Angle, Distance, Error, Result, Vector3};
 use crate::geometry::Topocentric;
 
 /// The acceptance region of a sensor, in the site's local frame.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Sensor {
     /// The lowest elevation at which the sensor can see: its horizon mask.
     pub minimum_elevation: Angle,

@@ -1,0 +1,20 @@
+[package]
+name = "stkcraft-engine"
+description = "Scenario, commands and analysis for STKCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+stkcraft-core.workspace = true
+stkcraft-time.workspace = true
+stkcraft-frames.workspace = true
+stkcraft-sgp4.workspace = true
+stkcraft-access.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

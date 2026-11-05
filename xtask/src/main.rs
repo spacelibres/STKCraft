@@ -378,12 +378,13 @@ fn collect_assets(dir: &Path, visit: &mut dyn FnMut(&Path)) -> Result<(), String
 /// The analysis layers carry no platform code, so a WebAssembly build is a check that no
 /// one has pulled in a file-system or threading dependency by accident. The app and xtask
 /// are deliberately absent: the first is the native shell, the second is a build tool.
-const PORTABLE_CRATES: [&str; 5] = [
+const PORTABLE_CRATES: [&str; 6] = [
     "stkcraft-core",
     "stkcraft-time",
     "stkcraft-frames",
     "stkcraft-sgp4",
     "stkcraft-access",
+    "stkcraft-engine",
 ];
 
 fn task_wasm() -> Result<(), String> {

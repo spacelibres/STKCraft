@@ -11,6 +11,7 @@
 //! L2  frames    reference frames and rotations
 //! L2  sgp4      orbit propagation
 //! L3  access    access and coverage geometry
+//! L4  engine    scenario, commands and analysis
 //! ...
 //!     apps      the desktop app, CLI and web shell
 //! ```
@@ -34,7 +35,7 @@ pub struct CrateSpec {
 pub const FIRST_LAYER: u32 = 0;
 
 /// How many layers the analysis crates occupy. The apps sit just above the top one.
-pub const LAYER_COUNT: u32 = 4;
+pub const LAYER_COUNT: u32 = 5;
 
 /// The highest layer that must stay free of any GUI dependency.
 ///
@@ -85,6 +86,11 @@ pub const LAYOUT: &[CrateSpec] = &[
         name: "stkcraft-access",
         path: "crates/access",
         layer: 3,
+    },
+    CrateSpec {
+        name: "stkcraft-engine",
+        path: "crates/engine",
+        layer: 4,
     },
     CrateSpec {
         name: "stkcraft",

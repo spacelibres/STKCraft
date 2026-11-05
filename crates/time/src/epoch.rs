@@ -158,12 +158,58 @@ impl fmt::Display for JulianDate {
 /// Construct one from a stated scale or from a UTC calendar time. Converting between
 /// scales consumes the value and returns a new one, so a mistyped scale shows up as a type
 /// error rather than a silent offset.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Epoch {
     /// The Julian Date in the scale named by [`Self::scale`].
     julian: JulianDate,
     /// The scale [`Self::julian`] is expressed in.
     scale: TimeScale,
+}
+
+/// An `Epoch` serialises as `"<scale>:<jd day>+<jd fraction>"`.
+///
+/// Not as a JSON number: `serde_json` round-trips a 53-bit mantissa through its decimal
+/// formatting, and the extra digit it writes can come back one unit in the last place away —
+/// which is a 20-nanosecond error that `assert_eq!` catches and nothing else would. Two
+/// integers and a dot are exact, and a scenario file a human may open is the better for
+/// saying `TT:2451545.0` rather than `2451545.0`.
+impl serde::Serialize for Epoch {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let day = self.julian.day;
+        let fraction = self.julian.fraction;
+        serializer.serialize_str(&format!("{}:{day}+{fraction}", self.scale.id()))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Epoch {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+
+        let text = String::deserialize(deserializer)?;
+        let (scale_name, parts) = text
+            .split_once(':')
+            .ok_or_else(|| D::Error::custom(format!("epoch `{text}` has no scale")))?;
+        let (day, fraction) = parts
+            .split_once('+')
+            .ok_or_else(|| D::Error::custom(format!("epoch `{text}` has no `+` separator")))?;
+
+        let scale = TimeScale::from_id(scale_name)
+            .ok_or_else(|| D::Error::custom(format!("unknown time scale `{scale_name}`")))?;
+        let day: f64 = day
+            .parse()
+            .map_err(|_| D::Error::custom(format!("epoch `{text}` has an unreadable day")))?;
+        let fraction: f64 = fraction
+            .parse()
+            .map_err(|_| D::Error::custom(format!("epoch `{text}` has an unreadable fraction")))?;
+
+        if !day.is_finite() || !fraction.is_finite() {
+            return Err(D::Error::custom(format!("epoch `{text}` is not finite")));
+        }
+        Ok(Self {
+            julian: JulianDate::from_parts(day, fraction),
+            scale,
+        })
+    }
 }
 
 impl Epoch {
@@ -239,6 +285,25 @@ impl Epoch {
     #[must_use]
     pub const fn julian(&self) -> JulianDate {
         self.julian
+    }
+
+    /// The current instant, on the UTC scale.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the system clock reads a time outside the range the leap-second
+    /// table covers, which includes a clock set before UTC existed.
+    pub fn now() -> Result<Self> {
+        Self::from_chrono_utc(chrono::Utc::now())
+    }
+
+    /// The J2000.0 reference epoch, `2000-01-01T12:00:00 TT`.
+    ///
+    /// A fixed, valid instant, useful as a default where an uninitialised time would be a
+    /// silent error.
+    #[must_use]
+    pub const fn j2000() -> Self {
+        Self::from_julian(JulianDate::J2000, TimeScale::Tt)
     }
 
     /// The scale this epoch is expressed in.
@@ -441,6 +506,7 @@ pub fn utc_datetime(naive: NaiveDateTime) -> DateTime<Utc> {
 }
 
 #[cfg(test)]
+#[expect(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::JD_J2000;
@@ -557,6 +623,39 @@ mod tests {
         let a = Epoch::from_jd(JD_J2000, TimeScale::Tai);
         let b = Epoch::from_jd(JD_J2000, TimeScale::Tt);
         assert!(a.seconds_until(b).is_err());
+    }
+
+    #[test]
+    fn an_epoch_survives_json_exactly() {
+        // Regression: `Epoch` used to derive `Serialize`, and `serde_json`'s decimal formatting
+        // of a 53-bit mantissa returns one unit in the last place away for some values -- a
+        // 20-nanosecond error that only an equality assertion notices. The custom impl writes
+        // two exact decimal numbers, so the value survives byte for byte.
+        // Any value whose binary fraction does not terminate; the exact digits are not the
+        // point, surviving the round trip is.
+        let original = Epoch::from_jd(2_461_349.939_848_400_5, TimeScale::Tt);
+        let json = serde_json::to_string(&original).expect("serialises");
+        let back: Epoch = serde_json::from_str(&json).expect("deserialises");
+        assert_eq!(back, original, "json was {json}");
+        assert_eq!(
+            back.julian().sum().to_bits(),
+            original.julian().sum().to_bits()
+        );
+    }
+
+    #[test]
+    fn a_malformed_epoch_string_is_refused() {
+        for bad in [
+            "",
+            "2451545.0",
+            "TT:2451545.0",
+            "XX:2451545+0.0",
+            "TT:not-a-number+0.0",
+            "TT:2451545.0+not-a-number",
+        ] {
+            let parsed: Result<Epoch, _> = serde_json::from_str(&format!("\"{bad}\""));
+            assert!(parsed.is_err(), "`{bad}` was accepted");
+        }
     }
 
     #[test]
