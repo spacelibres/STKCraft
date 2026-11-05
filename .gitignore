@@ -1,0 +1,23 @@
+# Everything Cargo produces.
+/target
+/dist
+
+# `plan/` is a local working folder: execution plans, observations of the reference
+# workflow, screenshots and notes. It is never committed.
+/plan
+/log
+
+# Editor and OS noise.
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local settings that must never travel. Scoped to the root so that a Cargo config at
+# `.cargo/config.toml`, which carries the `cargo xtask` alias and must be committed, is not
+# caught by the same pattern.
+/config.toml
+/config.toml.bak
+/config.broken-*.toml

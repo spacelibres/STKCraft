@@ -1,0 +1,40 @@
+STKCraft
+Copyright (c) 2026 ArtCraft Team and the STKCraft contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team. They are not open
+source and are not covered by the license above.
+
+Third-party material
+--------------------
+
+This product depends on third-party crates under their own licenses. The crates and their
+licenses are recorded in Cargo.lock and can be listed with `cargo license` or `cargo deny`.
+Bundled assets, if any, are listed per file in ATTRIBUTION.md.
+
+Chrono
+------
+Used for calendar dates and formatting. Licensed under the MIT License or the Apache
+License, Version 2.0, at your option.
+https://github.com/chronotope/chrono
+
+Serde
+-----
+Used for serialization. Licensed under the MIT License or the Apache License, Version 2.0,
+at your option.
+https://github.com/serde-rs/serde
+
+Reference standards
+-------------------
+STKCraft implements published standards rather than any product's implementation:
+
+- IERS Conventions (2010), IERS Technical Note No. 36, for the time scales, Earth
+  orientation parameters and leap-second data.
+- IAU resolutions and the IAU SOFA / ERFA reference implementations for fundamental
+  astronomy constants and transformations. ERFA is distributed under a BSD-style license
+  derived from SOFA with permission; STKCraft uses the published *values and algorithms*,
+  not the library.
+- The SGP4 specification (Vallado, Crawford, Hujsak and Kelso, AIAA 2006-6753) and its
+  published verification vectors.
+- CCSDS blue books for orbit and tracking data exchange formats (OEM, OPM, OMM).

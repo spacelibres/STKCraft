@@ -1,0 +1,17 @@
+[package]
+name = "stkcraft"
+description = "STKCraft: space mission analysis and visualisation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+stkcraft-core.workspace = true
+stkcraft-time.workspace = true
+stkcraft-frames.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

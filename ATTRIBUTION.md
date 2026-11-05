@@ -1,0 +1,39 @@
+# Attribution
+
+Every bundled asset in this repository is listed here with its author, source and licence.
+`cargo xtask assets` fails when a file with an asset extension has no row below, and when a
+row names a file that is not in the repository.
+
+Resources that are read at runtime rather than bundled — star catalogues, Earth orientation
+parameters, gravity models, ephemeris files — are **not** stored here. They live in a
+separate corpus repository or are fetched at run time, and they are never committed.
+
+| Path | Title | Author | Source | Licence |
+|---|---|---|---|---|
+| — | _No bundled assets yet._ | — | — | — |
+
+## What counts as an asset
+
+Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`, `.gif`, `.ico`), fonts (`.ttf`, `.otf`) and
+audio (`.wav`, `.ogg`, `.mp3`) anywhere in the repository outside `target/`.
+
+## The rule
+
+An asset may be bundled only when it is:
+
+- original work by a STKCraft contributor, who has the right to license it;
+- public domain or CC0;
+- open source under a licence that permits redistribution; or
+- Creative Commons licensed in a form that permits redistribution.
+
+**No asset from any commercial mission-analysis, CAD, graphics or office product may be
+used — ever.** That includes icons, artwork, fonts, templates, themes, sample scenarios and
+help text. Feature *names* are fine; the artwork and wording around them are not.
+
+Prefer assets drawn in code. Icons, line styles, orbit colours and the star field are all
+generated, so they carry no licence and no attribution burden.
+
+## Fonts
+
+UI fonts come from [`storytold/craft-fonts`](https://github.com/storytold/craft-fonts) as an
+optional build input (`CRAFT_FONTS_DIR`). No font file is committed here.
