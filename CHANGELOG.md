@@ -13,6 +13,83 @@ yet.
 
 Nothing yet.
 
+## [0.0.5] — When can this satellite see that station
+
+The product's central question is now answerable. A new crate, `stkcraft-access`, turns a
+station, a sensor and a target position over time into **access windows with start and end
+times**, and every piece of it is held to a case that can be checked by hand.
+
+It does not yet connect to a two-line element set: the target position is supplied by the
+caller. Joining SGP4 to this is the engine's job and is the next arc.
+
+### Added
+
+- **`stkcraft-access` at L3**, above `stkcraft-frames`. Six modules, each independently tested:
+  - `ellipsoid` — the WGS-84 Earth, so a station is where it really is rather than where a
+    sphere would put it. The two defining constants are written down and everything else is
+    derived, because a derived constant typed from memory is a transcription error waiting to
+    happen.
+  - `site` — a geodetic station and its local east/north/up axes, with `up` along the
+    **ellipsoid normal** rather than the geocentric radius.
+  - `geometry` — elevation, azimuth and range from a station to a target, azimuth clockwise
+    from north.
+  - `sensor` — a horizon mask, a field-of-view cone and an optional range limit.
+  - `occultation` — whether the Earth is in the way.
+  - `window` — the window finder, and `problem` — the end-to-end computation.
+- **`find_windows`** brackets visibility changes and bisects them to a millisecond. It does
+  not sample and threshold: sampling snaps every boundary to the sample grid, so the reported
+  start time changes when the step changes, and it loses any pass shorter than the step.
+- **`docs/plans/2026-11-05-access-geometry.md`** records the arc, its reference values and the
+  reasoning behind each layer.
+
+### Correctness
+
+Every claim names the test that holds it.
+
+- **The acceptance case from `AGENTS.md` holds end to end.** A satellite 500 km directly
+  overhead is visible; one below the surface is not. (`a_satellite_directly_overhead_is_visible_and_one_below_the_horizon_is_not`)
+- **A sensor cannot see through the Earth.** Even a mask of `−90°` with a `180°` cone reports
+a satellite on the far side as not visible, because occultation is checked separately from the
+  sensor. (`a_satellite_on_the_far_side_is_rejected_even_at_high_elevation`)
+- **A window boundary is a root, not a sample.** The boundary is placed at `1234.5678 s`,
+  nowhere near a `60 s` sample, and must be recovered to `1 ms`. This is the test that fails for
+  a sampling implementation. (`the_boundary_is_a_root_not_a_sample`)
+- **A pass shorter than the step is still found** when it straddles a sample.
+  (`a_short_window_between_two_samples_is_found_when_it_straddles_one`)
+- **The cone is round, not square.** With the boresight north at 45°, a point 4° off in
+  azimuth and 4° off in elevation is 4.84° away on the sky — outside a 4.5° cone, inside a
+  4.5° box. (`the_cone_is_round_not_square`)
+- **The local frame is the ellipsoid normal, not the radius.** A target along the geocentric
+  radius at 45° N sits at `90° − 0.1924°` elevation, not at 90°.
+  (`the_up_axis_being_the_normal_matters`)
+- **A station at the North Pole sits on the z axis at the polar radius**, which is the test
+  that fails if the `(1 − e²)` factor is dropped from the z term.
+  (`a_site_at_the_north_pole_is_on_the_z_axis_at_the_polar_radius`)
+- **The sidereal, occultation and geometry layers are each checked against computed values**,
+  not recalled ones — see the commit messages for the cases where a recalled figure was wrong.
+
+### Verification
+
+- `cargo xtask ci --offline` passes all six gates: fmt, clippy `-D warnings`, **170 tests**
+  workspace-wide, assets, layers, and the wasm build of all five portable crates.
+- 49 of those tests are in `stkcraft-access`, a new crate with no test debt.
+
+### Known limitations
+
+- **No propagation in this crate.** The target position arrives as a closure. Connecting a
+  two-line element set through SGP4 and the frame chain is the engine's job.
+- **The line of sight is geometric.** No atmospheric refraction, no light time, no aberration.
+  Refraction is zero above about `5°` and half a degree at the horizon, so a mask near `0°` is a
+  geometric horizon, not an optical one. Both omissions are named in the crate docs.
+- **No antenna gain pattern.** The cone is a hard cutoff; a real dish has a main lobe and
+  sidelobes.
+- **The Earth occultation test uses a sphere of volumetric radius** (`6371.0008 km`) rather
+  than the ellipsoid, because the difference moves a grazing elevation by `0.06°`. The
+  elevation test itself uses the exact ellipsoid.
+- **No ground coverage grids, no chains, no access between two satellites.** Only
+  satellite-to-ground access is implemented.
+- **Still no engine, no scenario document, no viewport and no UI.**
+
 ## [0.0.4] — From a TEME vector to a usable position
 
 0.0.3 could compute where a satellite is but nothing could use the answer: SGP4 is defined in
@@ -303,7 +380,8 @@ These are the properties the numerical layers guarantee, each with a regression 
 - **Converting a uniform-scale epoch back to UTC is not implemented** and returns
   `Error::Unsupported`, because it needs the leap offset at that instant.
 
-[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/spacelibres/STKCraft/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/spacelibres/STKCraft/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/spacelibres/STKCraft/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/spacelibres/STKCraft/compare/v0.0.1...v0.0.2
