@@ -2,7 +2,7 @@ name: Packaging lint
 
 on:
   push:
-    branches: [main, release]
+    branches: [master, release]
     paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
   pull_request:
     paths: [".github/workflows/**", "packaging/**", "assets/app-icon/**"]
