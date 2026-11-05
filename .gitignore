@@ -25,3 +25,13 @@ Thumbs.db
 /config.toml
 /config.toml.bak
 /config.broken-*.toml
+
+# Ephemeris and other bulk data. Kernels are fetched from their publisher (NAIF for the JPL
+# ephemerides) with a pinned checksum and are never committed: `docs/ephemeris-data.md` lists the
+# sources, `cargo xtask fetch-data` downloads and verifies them, and a deployment downloads the
+# same files it needs rather than receiving a copy in the repository.
+*.bsp
+*.bpc
+*.tpc
+*.tf
+/data/

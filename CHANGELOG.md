@@ -9,6 +9,29 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.5] — Every version is tagged, and data is fetched rather than committed
+
+Releases are tags in this repository and in its siblings, and 0.1.2 through 0.1.4 were committed
+without them. That is now a command rather than a habit: `cargo xtask release` refuses to tag unless
+the changelog names the current version, creates the annotated `vX.Y.Z` tag, pushes it, and prints
+the `gh release create` line that publishes it with generated notes. The three missing tags have
+been created and released.
+
+### Added
+
+- **`cargo xtask release`** — tag and push the version the changelog names, and print the release
+  command. The step exists because it was forgotten three times in a row and everything else about
+  a release here is mechanical.
+- **`cargo xtask fetch-data`** and `docs/ephemeris-data.md` — the ephemeris kernels are downloaded
+  from NAIF with a recorded SHA-256 and verified, into a `.gitignore`d directory; nothing is
+  committed and a deployment fetches the same files from the same URLs. A row is added to the table
+  only with the checksum of a file that was actually verified, never in advance.
+
+### Changed
+
+- **`.gitignore` excludes ephemeris data**: `*.bsp`, `*.bpc`, `*.tpc`, `*.tf` and `data/`. A kernel
+  in the repository would age silently against the file a deployment actually reads.
+
 ## [0.1.4] — Several kernels, one ephemeris, and an asset gate that means what it says
 
 A planetary kernel carries the system barycentres and a satellite-system kernel carries a planet

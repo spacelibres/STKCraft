@@ -50,6 +50,8 @@ fn main() -> ExitCode {
         Some("assets") => task_assets(),
         Some("wasm") => task_wasm(),
         Some("version") => task_version(args.get(1..).unwrap_or_default()),
+        Some("release") => tag_release(&workspace_root()),
+        Some("fetch-data") => task_fetch_data(args.get(1..).unwrap_or_default()),
         Some("help" | "-h" | "--help") | None => {
             print_help();
             Ok(())
@@ -593,6 +595,130 @@ fn write_version(root: &Path, text: &str, new: &str) -> Result<(), String> {
     println!("version set to {new}");
     // Regenerate the lock file so the workspace versions agree.
     run_cargo(&["update", "--workspace", "--offline"])
+}
+
+/// Tag the current version and push the tag, then leave the GitHub release to `gh`.
+///
+/// The tag is the release in the sibling Craft apps: every version carries one, and a version
+/// without one is a version nobody can check out. This command makes that mechanical rather than
+/// remembered: it refuses when `CHANGELOG.md`'s newest section is not the workspace version (so a
+/// tag cannot point at a section that does not exist), creates the annotated tag if it is missing,
+/// and pushes it. `gh release create <tag> --title "STKCraft <tag>" --generate-notes` is the
+/// remaining step and is printed rather than run, so this works on a machine without `gh`.
+fn tag_release(root: &Path) -> Result<(), String> {
+    let version = workspace_version(root)?;
+    task_version_check()?;
+    let tag = format!("v{version}");
+    let exists = run_git(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/tags/{tag}"),
+        ],
+    )
+    .is_ok();
+    if exists {
+        println!("{tag} already exists");
+    } else {
+        run_git(
+            root,
+            &["tag", "-a", &tag, "-m", &format!("STKCraft {version}")],
+        )?;
+        println!("tagged {tag}");
+    }
+    run_git(root, &["push", "origin", &tag])?;
+    println!("next: gh release create {tag} --title \"STKCraft {tag}\" --generate-notes");
+    Ok(())
+}
+
+/// A `.gitignore`d directory of fetched data, and the files that belong in it with their checksums.
+///
+/// The checksums are what makes the fetch trustworthy: a kernel is a large binary that taints every
+/// number computed from it, so a silently truncated download (which this repository has already
+/// seen once) must fail loudly rather than produce a plausible ephemeris.
+const DATA_FILES: [(&str, &str, &str); 1] = [(
+    "de440s.bsp",
+    "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
+    "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2",
+)];
+
+/// Download the data files this repository does not commit, and verify them.
+///
+/// `cargo xtask fetch-data [dir]` writes to `data/` by default, which `.gitignore` excludes.
+fn task_fetch_data(args: &[String]) -> Result<(), String> {
+    let root = workspace_root();
+    let directory = args
+        .first()
+        .map_or_else(|| root.join("data"), |arg| root.join(arg));
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+    for (name, url, expected) in DATA_FILES {
+        let path = directory.join(name);
+        if path.exists() {
+            let actual = sha256_of(&path)?;
+            if actual == expected {
+                println!("{name}: present and verified");
+                continue;
+            }
+            return Err(format!(
+                "{name}: on disk it hashes {actual}, but the recorded checksum is {expected}; \
+                 delete it and fetch again"
+            ));
+        }
+        println!("{name}: fetching {url}");
+        let status = std::process::Command::new("curl")
+            .args(["-sS", "--fail", "-L", "-o"])
+            .arg(&path)
+            .arg(url)
+            .status()
+            .map_err(|error| format!("could not run curl: {error}"))?;
+        if !status.success() {
+            return Err(format!("{name}: curl exited with {status}"));
+        }
+        let actual = sha256_of(&path)?;
+        if actual != expected {
+            return Err(format!(
+                "{name}: downloaded file hashes {actual}, expected {expected}"
+            ));
+        }
+        println!("{name}: fetched and verified");
+    }
+    Ok(())
+}
+
+/// The lower-case hex SHA-256 of a file, computed with `sha256sum`.
+fn sha256_of(path: &Path) -> Result<String, String> {
+    let output = std::process::Command::new("sha256sum")
+        .arg(path)
+        .output()
+        .map_err(|error| format!("could not run sha256sum: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("sha256sum failed for {}", path.display()));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.split_whitespace()
+        .next()
+        .map(str::to_owned)
+        .ok_or_else(|| "sha256sum printed nothing".to_owned())
+}
+
+/// Run `git` in the workspace root and fail with its output if it does.
+fn run_git(root: &Path, args: &[&str]) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("could not run git: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
 }
 
 fn validate_version(text: &str) -> Result<(), String> {

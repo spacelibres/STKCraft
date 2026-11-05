@@ -74,7 +74,11 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 - **Bulk data lives outside this repository.** Star catalogues, Earth orientation
   parameters, gravity models, atmospheric tables and ephemeris files are fetched pinned and
   checksum-verified, or bundled as small generated tables with a source comment. Never
-  commit a large binary fixture.
+  commit a large binary fixture. `cargo xtask fetch-data` downloads the ephemeris kernels into
+  `data/`, which is `.gitignore`d, and verifies each against the SHA-256 recorded in
+  `docs/ephemeris-data.md`; a deployment fetches the same files from the same URLs. A kernel is
+  never committed, and a row is added to that table only with the checksum of a file that was
+  actually verified.
 - **Everything is a command.** User-visible behaviour = a command in the engine
   (`id`, label, menu path, shortcut, parameter documentation, `enabled`, `run`) plus tests.
   The menus, shortcuts, CLI, control channel and MCP server all dispatch commands by id, so
@@ -105,6 +109,8 @@ cargo run --release -p stkcraft -- --help      # the command line
 cargo xtask ci                                 # the full gate
 cargo xtask version                            # print the workspace version
 cargo xtask version bump                       # bump it, smallest component
+cargo xtask release                            # tag the version and push the tag
+cargo xtask fetch-data                         # download the kernels, verified
 ```
 
 ### Version control and the changelog
@@ -123,8 +129,12 @@ Every commit that changes the product is a release-shaped step, and the history 
    only repeats the commit subject has said nothing.
 4. **No `[Unreleased]` section.** An unreleased section is where entries go to be forgotten, and
    the whole point of this rule is that no commit is a draft. Each commit writes its own version.
-5. **Tag the release** as `vX.Y.Z` on the commit whose section carries that number, which is what
-   the existing `v0.1.0` tag does.
+5. **Tag the release**, and make it a release rather than only a tag: `cargo xtask release` checks
+   that the changelog names the version, creates the annotated `vX.Y.Z` tag, pushes it, and prints
+   the one `gh release create` command that publishes it with generated notes. Every version in
+   this repository carries a tag — the siblings tag every release, and a version without one is a
+   version nobody can check out. `cargo xtask release` exists so that step cannot be forgotten;
+   for 0.1.2 through 0.1.4 it was, and the tags had to be added afterwards.
 
 `cargo xtask ci` enforces the mechanical half: it fails when the newest `## [x.y.z]` heading and
 the workspace version disagree, and when an `[Unreleased]` heading is present. The judgement half
