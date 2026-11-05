@@ -5,6 +5,7 @@ members = [
     "crates/time",
     "crates/frames",
     "crates/sgp4",
+    "crates/access",
     "apps/stkcraft",
     "xtask",
 ]
@@ -23,6 +24,7 @@ stkcraft-core = { path = "crates/core", version = "0.0.4" }
 stkcraft-time = { path = "crates/time", version = "0.0.4" }
 stkcraft-frames = { path = "crates/frames", version = "0.0.4" }
 stkcraft-sgp4 = { path = "crates/sgp4", version = "0.0.4" }
+stkcraft-access = { path = "crates/access", version = "0.0.4" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.

@@ -9,6 +9,8 @@
 //! L0  core      units, errors, vectors
 //! L1  time      time scales, leap seconds, epochs
 //! L2  frames    reference frames and rotations
+//! L2  sgp4      orbit propagation
+//! L3  access    access and coverage geometry
 //! ...
 //!     apps      the desktop app, CLI and web shell
 //! ```
@@ -32,7 +34,7 @@ pub struct CrateSpec {
 pub const FIRST_LAYER: u32 = 0;
 
 /// How many layers the analysis crates occupy. The apps sit just above the top one.
-pub const LAYER_COUNT: u32 = 3;
+pub const LAYER_COUNT: u32 = 4;
 
 /// The highest layer that must stay free of any GUI dependency.
 ///
@@ -78,6 +80,11 @@ pub const LAYOUT: &[CrateSpec] = &[
         name: "stkcraft-sgp4",
         path: "crates/sgp4",
         layer: 2,
+    },
+    CrateSpec {
+        name: "stkcraft-access",
+        path: "crates/access",
+        layer: 3,
     },
     CrateSpec {
         name: "stkcraft",

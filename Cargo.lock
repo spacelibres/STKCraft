@@ -262,6 +262,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "stkcraft-access"
+version = "0.0.4"
+dependencies = [
+ "serde",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
 name = "stkcraft-core"
 version = "0.0.4"
 dependencies = [
