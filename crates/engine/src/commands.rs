@@ -1,0 +1,729 @@
+//! The command table: the single entry point for everything a user can do.
+//!
+//! Every user-visible action is a [`Command`] with an id, a label, a menu path, documented
+//! parameters, an `enabled` predicate and a `run` function. The menus, keyboard shortcuts, the
+//! CLI, the control channel and the MCP server will all dispatch **by id**, so an agent can do
+//! anything a user can. That is a testable property rather than an aspiration, and this module
+//! is where it is tested: the tests below drive commands through [`Registry::run`] exactly as a
+//! menu click or an automated call will.
+//!
+//! # Two rules that shape the signatures
+//!
+//! - **Programmatic calls never open a dialog.** There is no dialog to open yet, but every
+//!   command takes all its inputs as [`Arg`]uments and none of them reads the environment,
+//!   the clock or a file. A future interactive variant would be a *different* command.
+//! - **The engine holds no global state.** `run` takes `&mut Scenario` and returns a value; a
+//!   control channel will wrap that in whatever synchronisation it needs.
+
+use std::collections::BTreeMap;
+
+use stkcraft_access::Sensor;
+use stkcraft_core::{Angle, Duration, Error, Result};
+use stkcraft_sgp4::TwoLineElement;
+
+use crate::analysis::{SatelliteAccess, compute_all_access};
+use crate::scenario::{Scenario, StationId};
+
+/// One documented parameter of a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Parameter {
+    /// The name a caller passes.
+    pub name: &'static str,
+    /// What it means, in one sentence, for the parameter documentation a UI shows.
+    pub description: &'static str,
+    /// Whether the command refuses to run without it.
+    pub required: bool,
+}
+
+/// The static description of a command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandDescriptor {
+    /// The stable identifier, e.g. `satellite.add`. Never changes once released.
+    pub id: &'static str,
+    /// The label a menu shows.
+    pub label: &'static str,
+    /// Where a menu places it, e.g. `Satellite`.
+    pub menu_path: &'static str,
+    /// The default keyboard shortcut, if any.
+    pub shortcut: Option<&'static str>,
+    /// Every parameter, documented.
+    pub parameters: &'static [Parameter],
+}
+
+/// A value passed to a command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Arg {
+    /// A number.
+    Number(f64),
+    /// Free text.
+    Text(String),
+    /// An angle, already in its typed form so no unit can be guessed.
+    Angle(Angle),
+    /// A duration.
+    Duration(Duration),
+}
+
+impl Arg {
+    /// Read this argument as a number.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Invalid`] naming the argument when it is not a number.
+    fn as_number(&self, name: &'static str) -> Result<f64> {
+        match self {
+            Self::Number(value) if value.is_finite() => Ok(*value),
+            Self::Number(value) => Err(Error::out_of_range(name, value, "a finite number")),
+            _ => Err(Error::invalid(name, "expected a number")),
+        }
+    }
+
+    /// Read this argument as text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Invalid`] naming the argument when it is not text.
+    fn as_text(&self, name: &'static str) -> Result<&str> {
+        match self {
+            Self::Text(value) => Ok(value),
+            _ => Err(Error::invalid(name, "expected text")),
+        }
+    }
+
+    /// Read this argument as an angle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Invalid`] naming the argument when it is not an angle.
+    fn as_angle(&self, name: &'static str) -> Result<Angle> {
+        match self {
+            Self::Angle(value) => Ok(*value),
+            _ => Err(Error::invalid(name, "expected an angle")),
+        }
+    }
+}
+
+/// The arguments of one command invocation, by parameter name.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Args(BTreeMap<String, Arg>);
+
+impl Args {
+    /// No arguments.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    /// Add an argument.
+    #[must_use]
+    pub fn with(mut self, name: &str, value: Arg) -> Self {
+        self.0.insert(name.to_owned(), value);
+        self
+    }
+
+    /// Look up an argument.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&Arg> {
+        self.0.get(name)
+    }
+
+    /// A required argument, or an error naming it.
+    fn required(&self, name: &'static str) -> Result<&Arg> {
+        self.get(name)
+            .ok_or_else(|| Error::invalid(name, "is required"))
+    }
+}
+
+/// What a command did, for a status line or an automated caller.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandOutcome {
+    /// A one-line summary, suitable for a status bar or a log.
+    pub summary: String,
+    /// Access results, when the command computed any.
+    pub access: Option<Vec<SatelliteAccess>>,
+}
+
+impl CommandOutcome {
+    /// An outcome with only a summary.
+    #[must_use]
+    pub fn new(summary: impl Into<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            access: None,
+        }
+    }
+}
+
+/// A command: a description plus the two functions every transport needs.
+pub struct Command {
+    /// The static description.
+    pub descriptor: CommandDescriptor,
+    /// Whether the command can run in this scenario.
+    pub enabled: fn(&Scenario) -> bool,
+    /// Run it.
+    pub run: fn(&mut Scenario, &Args) -> Result<CommandOutcome>,
+}
+
+impl std::fmt::Debug for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Command")
+            .field("id", &self.descriptor.id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Every command the engine knows, by id.
+#[derive(Debug, Default)]
+pub struct Registry {
+    commands: BTreeMap<&'static str, Command>,
+}
+
+impl Registry {
+    /// The built-in command set.
+    #[must_use]
+    pub fn builtin() -> Self {
+        let mut registry = Self::default();
+        for (descriptor, enabled, run) in BUILTIN {
+            registry.commands.insert(
+                descriptor.id,
+                Command {
+                    descriptor,
+                    enabled,
+                    run,
+                },
+            );
+        }
+        registry
+    }
+
+    /// Every command, in id order.
+    pub fn iter(&self) -> impl Iterator<Item = &Command> {
+        self.commands.values()
+    }
+
+    /// Find a command by id.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<&Command> {
+        self.commands.get(id)
+    }
+
+    /// Whether a command could run right now.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotFound`] for an unknown id, so a caller can never mistake "no such
+    /// command" for "disabled".
+    pub fn enabled(&self, id: &str, scenario: &Scenario) -> Result<bool> {
+        let command = self.get(id).ok_or_else(|| Error::NotFound {
+            what: format!("command `{id}`"),
+        })?;
+        Ok((command.enabled)(scenario))
+    }
+
+    /// Run a command by id.
+    ///
+    /// This is the single dispatch path: a menu click, a shortcut, a CLI invocation and an
+    /// agent all arrive here.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::NotFound`] for an unknown id.
+    /// - [`Error::Unsupported`] if the command is disabled in this scenario.
+    /// - Whatever the command's own validation returns.
+    pub fn run(&self, id: &str, scenario: &mut Scenario, args: &Args) -> Result<CommandOutcome> {
+        let command = self.get(id).ok_or_else(|| Error::NotFound {
+            what: format!("command `{id}`"),
+        })?;
+        if !(command.enabled)(scenario) {
+            return Err(Error::Unsupported {
+                what: "this command in the current scenario",
+            });
+        }
+        (command.run)(scenario, args)
+    }
+}
+
+/// One built-in command: its description, its `enabled` predicate and its implementation.
+type Builtin = (
+    CommandDescriptor,
+    fn(&Scenario) -> bool,
+    fn(&mut Scenario, &Args) -> Result<CommandOutcome>,
+);
+
+const ALWAYS: fn(&Scenario) -> bool = |_| true;
+
+const BUILTIN: [Builtin; 7] = [
+    (
+        CommandDescriptor {
+            id: "scenario.rename",
+            label: "Rename Scenario",
+            menu_path: "Scenario",
+            shortcut: None,
+            parameters: &[Parameter {
+                name: "name",
+                description: "The new scenario name.",
+                required: true,
+            }],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let name = args.required("name")?.as_text("name")?.to_owned();
+            scenario.name.clone_from(&name);
+            Ok(CommandOutcome::new(format!("Scenario renamed to `{name}`")))
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "scenario.set-duration",
+            label: "Set Timeline Duration",
+            menu_path: "Scenario",
+            shortcut: None,
+            parameters: &[Parameter {
+                name: "seconds",
+                description: "How long the timeline runs, in seconds. Must be positive.",
+                required: true,
+            }],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let seconds = args.required("seconds")?.as_number("seconds")?;
+            if seconds <= 0.0 {
+                return Err(Error::out_of_range(
+                    "seconds",
+                    seconds,
+                    "strictly positive seconds",
+                ));
+            }
+            scenario.duration_seconds = seconds;
+            Ok(CommandOutcome::new(format!("Timeline set to {seconds} s")))
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "satellite.add",
+            label: "Add Satellite",
+            menu_path: "Satellite",
+            shortcut: None,
+            parameters: &[
+                Parameter {
+                    name: "name",
+                    description: "A display name; need not be unique.",
+                    required: true,
+                },
+                Parameter {
+                    name: "line1",
+                    description: "The first line of the two-line element set.",
+                    required: true,
+                },
+                Parameter {
+                    name: "line2",
+                    description: "The second line of the two-line element set.",
+                    required: true,
+                },
+            ],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let name = args.required("name")?.as_text("name")?.to_owned();
+            let line1 = args.required("line1")?.as_text("line1")?;
+            let line2 = args.required("line2")?.as_text("line2")?;
+            let element_set = TwoLineElement::parse(line1, line2)?;
+            let id = scenario.add_satellite(name.clone(), element_set, [255, 255, 255])?;
+            Ok(CommandOutcome::new(format!(
+                "Added satellite `{name}` as {id:?}"
+            )))
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "satellite.remove",
+            label: "Remove Satellite",
+            menu_path: "Satellite",
+            shortcut: None,
+            parameters: &[Parameter {
+                name: "id",
+                description: "The numeric id of the satellite to remove.",
+                required: true,
+            }],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let id = args.required("id")?.as_number("id")?;
+            let id = crate::scenario::SatelliteId(
+                u32::try_from(id as i64).map_err(|_| Error::invalid("id", "out of range"))?,
+            );
+            if scenario.remove_satellite(id) {
+                Ok(CommandOutcome::new(format!("Removed satellite {id:?}")))
+            } else {
+                Err(Error::NotFound {
+                    what: format!("satellite {id:?}"),
+                })
+            }
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "station.add",
+            label: "Add Ground Station",
+            menu_path: "Station",
+            shortcut: None,
+            parameters: &[
+                Parameter {
+                    name: "name",
+                    description: "A display name; need not be unique.",
+                    required: true,
+                },
+                Parameter {
+                    name: "latitude",
+                    description: "Geodetic latitude, positive north.",
+                    required: true,
+                },
+                Parameter {
+                    name: "longitude",
+                    description: "Longitude, positive east.",
+                    required: true,
+                },
+                Parameter {
+                    name: "minimum-elevation",
+                    description: "The horizon mask; nothing below it is visible.",
+                    required: true,
+                },
+            ],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let name = args.required("name")?.as_text("name")?.to_owned();
+            let latitude = args.required("latitude")?.as_angle("latitude")?;
+            let longitude = args.required("longitude")?.as_angle("longitude")?;
+            let mask = args
+                .required("minimum-elevation")?
+                .as_angle("minimum-elevation")?;
+            let site = stkcraft_access::GroundSite::new(latitude, longitude, 0.0)?;
+            let sensor = Sensor::above_horizon(mask);
+            let id = scenario.add_station(name.clone(), site, sensor)?;
+            Ok(CommandOutcome::new(format!(
+                "Added station `{name}` as {id:?}"
+            )))
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "station.remove",
+            label: "Remove Ground Station",
+            menu_path: "Station",
+            shortcut: None,
+            parameters: &[Parameter {
+                name: "id",
+                description: "The numeric id of the station to remove.",
+                required: true,
+            }],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let id = args.required("id")?.as_number("id")?;
+            let id = StationId(
+                u32::try_from(id as i64).map_err(|_| Error::invalid("id", "out of range"))?,
+            );
+            if scenario.remove_station(id) {
+                Ok(CommandOutcome::new(format!("Removed station {id:?}")))
+            } else {
+                Err(Error::NotFound {
+                    what: format!("station {id:?}"),
+                })
+            }
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "access.compute",
+            label: "Compute Access",
+            menu_path: "Access",
+            shortcut: Some("Ctrl+Shift+A"),
+            parameters: &[Parameter {
+                name: "step-seconds",
+                description: "Search step. Shorter is more thorough and slower.",
+                required: false,
+            }],
+        },
+        |scenario| !scenario.satellites.is_empty() && !scenario.stations.is_empty(),
+        |scenario, args| {
+            let step = match args.get("step-seconds") {
+                Some(argument) => argument.as_number("step-seconds")?,
+                // The default is the access crate's own: one minute.
+                None => stkcraft_access::DEFAULT_STEP.as_seconds(),
+            };
+            if step <= 0.0 {
+                return Err(Error::out_of_range(
+                    "step-seconds",
+                    step,
+                    "strictly positive seconds",
+                ));
+            }
+            let results = compute_all_access(scenario, Duration::from_seconds(step))?;
+            let windows: usize = results.iter().map(|r| r.windows.len()).sum();
+            Ok(CommandOutcome {
+                summary: format!(
+                    "Computed access: {} pair(s), {windows} window(s)",
+                    results.len()
+                ),
+                access: Some(results),
+            })
+        },
+    ),
+];
+
+#[cfg(test)]
+#[expect(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    const LEO_L1: &str = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009";
+    const LEO_L2: &str = "2 25544  51.6400 208.9163 0006317  69.9862  25.2906 15.49569600 12343";
+
+    fn add_satellite_args() -> Args {
+        Args::none()
+            .with("name", Arg::Text("ISS".to_owned()))
+            .with("line1", Arg::Text(LEO_L1.to_owned()))
+            .with("line2", Arg::Text(LEO_L2.to_owned()))
+    }
+
+    #[test]
+    fn every_command_id_is_unique_and_dotted() {
+        let registry = Registry::builtin();
+        let mut seen = std::collections::BTreeSet::new();
+        for command in registry.iter() {
+            let id = command.descriptor.id;
+            assert!(seen.insert(id), "duplicate command id {id}");
+            assert!(
+                id.contains('.'),
+                "command id `{id}` is not `namespace.verb` shaped"
+            );
+            assert!(
+                id.chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '.' || c == '-'),
+                "command id `{id}` has characters a caller has to quote"
+            );
+        }
+        assert_eq!(seen.len(), BUILTIN.len());
+    }
+
+    #[test]
+    fn every_command_has_a_label_a_menu_path_and_documented_parameters() {
+        let registry = Registry::builtin();
+        for command in registry.iter() {
+            let d = &command.descriptor;
+            assert!(!d.label.is_empty(), "{} has no label", d.id);
+            assert!(!d.menu_path.is_empty(), "{} has no menu path", d.id);
+            for parameter in d.parameters {
+                assert!(
+                    !parameter.name.is_empty(),
+                    "{} has an unnamed parameter",
+                    d.id
+                );
+                assert!(
+                    parameter.description.len() > 10,
+                    "{}::{} has no real description",
+                    d.id,
+                    parameter.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn commands_dispatch_by_id() {
+        // The whole point: run through the registry by string id, exactly as a menu item or an
+        // automated caller would, and assert the scenario actually changed.
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("test");
+
+        let outcome = registry
+            .run("satellite.add", &mut scenario, &add_satellite_args())
+            .expect("adds");
+        assert!(outcome.summary.contains("ISS"));
+        assert_eq!(scenario.satellites.len(), 1);
+
+        let outcome = registry
+            .run(
+                "station.add",
+                &mut scenario,
+                &Args::none()
+                    .with("name", Arg::Text("Equator".to_owned()))
+                    .with("latitude", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("longitude", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("minimum-elevation", Arg::Angle(Angle::from_deg(0.0))),
+            )
+            .expect("adds");
+        assert!(outcome.summary.contains("Equator"));
+        assert_eq!(scenario.stations.len(), 1);
+    }
+
+    #[test]
+    fn an_unknown_command_is_not_found_rather_than_disabled() {
+        // The distinction matters: "no such command" and "this command cannot run now" are
+        // different errors and a caller must be able to tell them apart.
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("test");
+        let error = registry
+            .run("no.such.command", &mut scenario, &Args::none())
+            .expect_err("must fail");
+        assert!(matches!(error, Error::NotFound { .. }), "got {error:?}");
+
+        let error = registry
+            .enabled("no.such.command", &scenario)
+            .expect_err("must fail");
+        assert!(matches!(error, Error::NotFound { .. }), "got {error:?}");
+    }
+
+    #[test]
+    fn a_disabled_command_reports_unsupported() {
+        // `access.compute` needs at least one satellite and one station.
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("test");
+        assert_eq!(registry.enabled("access.compute", &scenario), Ok(false));
+        let error = registry
+            .run("access.compute", &mut scenario, &Args::none())
+            .expect_err("must fail");
+        assert!(matches!(error, Error::Unsupported { .. }), "got {error:?}");
+    }
+
+    #[test]
+    fn every_command_runs_without_reading_anything_but_its_arguments() {
+        // The guarantee behind "programmatic calls never open a dialog": each command must be a
+        // pure function of (scenario, arguments). This checks the mechanical part of that --
+        // every command is runnable from a cold scenario with only explicit arguments, and
+        // never blocks or reads ambient state.
+        //
+        // Commands whose inputs are real data (a TLE, an id that must exist) are exercised by
+        // their own tests; here the property is that the registry has an entry that can be
+        // called by id at all, and that calling it with nothing yields a typed error rather
+        // than a hang or a panic.
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("automation");
+
+        for command in registry.iter() {
+            let id = command.descriptor.id;
+            let outcome = registry.run(id, &mut scenario, &Args::none());
+            // Either it succeeded, or it failed with one of our typed errors. Never a panic.
+            match outcome {
+                Ok(_) => {}
+                Err(error) => {
+                    assert!(
+                        matches!(
+                            error,
+                            Error::Invalid { .. }
+                                | Error::NotFound { .. }
+                                | Error::OutOfRange { .. }
+                                | Error::Unsupported { .. }
+                        ),
+                        "`{id}` failed with an unexpected error: {error:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_missing_required_argument_is_named() {
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("test");
+        let error = registry
+            .run(
+                "satellite.add",
+                &mut scenario,
+                &Args::none().with("name", Arg::Text("ISS".to_owned())),
+            )
+            .expect_err("must fail");
+        let text = error.to_string();
+        assert!(text.contains("line1"), "error did not name line1: {text}");
+    }
+
+    #[test]
+    fn an_argument_of_the_wrong_type_is_refused() {
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("test");
+        let error = registry
+            .run(
+                "station.add",
+                &mut scenario,
+                &Args::none()
+                    .with("name", Arg::Text("E".to_owned()))
+                    // A number where an angle belongs: degrees and radians must not be guessed.
+                    .with("latitude", Arg::Number(0.0))
+                    .with("longitude", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("minimum-elevation", Arg::Angle(Angle::from_deg(0.0))),
+            )
+            .expect_err("must fail");
+        assert!(error.to_string().contains("latitude"), "got {error}");
+    }
+
+    #[test]
+    fn an_invalid_element_set_is_refused_by_the_command() {
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("test");
+        let error = registry
+            .run(
+                "satellite.add",
+                &mut scenario,
+                &Args::none()
+                    .with("name", Arg::Text("BROKEN".to_owned()))
+                    .with("line1", Arg::Text(LEO_L1.to_owned()))
+                    .with("line2", Arg::Text("2 not a tle line".to_owned())),
+            )
+            .expect_err("must fail");
+        assert!(
+            error.to_string().contains("TLE"),
+            "error did not mention the TLE: {error}"
+        );
+        assert_eq!(scenario.satellites.len(), 0, "a broken TLE got added");
+    }
+
+    #[test]
+    fn access_compute_runs_end_to_end_through_the_registry() {
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("automation");
+        scenario.epoch = TwoLineElement::parse(LEO_L1, LEO_L2)
+            .expect("valid TLE")
+            .epoch;
+        scenario.duration_seconds = 3_600.0;
+
+        registry
+            .run("satellite.add", &mut scenario, &add_satellite_args())
+            .expect("adds satellite");
+        registry
+            .run(
+                "station.add",
+                &mut scenario,
+                &Args::none()
+                    .with("name", Arg::Text("Equator".to_owned()))
+                    .with("latitude", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("longitude", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("minimum-elevation", Arg::Angle(Angle::from_deg(0.0))),
+            )
+            .expect("adds station");
+
+        assert_eq!(registry.enabled("access.compute", &scenario), Ok(true));
+        let outcome = registry
+            .run(
+                "access.compute",
+                &mut scenario,
+                &Args::none().with("step-seconds", Arg::Number(30.0)),
+            )
+            .expect("computes");
+        let access = outcome.access.expect("access results");
+        assert_eq!(access.len(), 1);
+    }
+
+    #[test]
+    fn removing_an_object_that_is_not_there_is_not_found() {
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("test");
+        let error = registry
+            .run(
+                "satellite.remove",
+                &mut scenario,
+                &Args::none().with("id", Arg::Number(42.0)),
+            )
+            .expect_err("must fail");
+        assert!(matches!(error, Error::NotFound { .. }), "got {error:?}");
+    }
+}

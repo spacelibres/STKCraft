@@ -33,9 +33,11 @@
 #![forbid(unsafe_code)]
 
 pub mod analysis;
+pub mod commands;
 pub mod propagate;
 pub mod scenario;
 
 pub use analysis::{SatelliteAccess, compute_access, compute_all_access};
+pub use commands::{Arg, Args, Command, CommandOutcome, Parameter, Registry};
 pub use propagate::Propagator;
 pub use scenario::{Satellite, SatelliteId, Scenario, Station, StationId};
