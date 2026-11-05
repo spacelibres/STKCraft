@@ -40,6 +40,28 @@ Why this is not optional: `pck00011.tpc` states that the independent variable of
 rotation formulas is TDB and that the frame is the ICRF. Phase 2's rotation models and phase 3's
 ephemerides both take TDB, so a kernel that treats TDB as TT contaminates all of them.
 
+### Phase 2 — status: convention settled, crate not yet written
+
+The rotation convention below is now pinned against an authoritative implementation rather than
+assumed. A throwaway harness loaded `pck00011.tpc` into CSPICE (spiceypy 8.3, `CSPICE_N0067`) and
+compared `pxform('IAU_<body>', 'J2000', et)` against our formula at three epochs (ET = 0, 3.2e8,
+8.0e8 s). Agreed conventions and their evidence:
+
+- `r_fixed = R3(W) · R1(90° − δ) · R3(90° + α) · r_icrf`, with the passive matrices
+  `R3(θ) = [[c, s, 0], [−s, c, 0], [0, 0, 1]]` and `R1(θ) = [[1, 0, 0], [0, c, s], [0, −s, c]]`.
+- The trigonometric terms are **sine for α, cosine for δ, sine for W** — the PCK's own Jupiter
+  example spells this out and a first attempt with cosine for α disagreed with CSPICE by order 1.
+- `T` is Julian centuries and `d` Julian days of **TDB** from J2000.
+- With those, Mercury, the Moon, Jupiter and Earth match CSPICE to 1e−12 or better.
+
+**Open item: Mars.** Its `NUT_PREC_*` arrays in `pck00011.tpc` have different lengths
+(15, 20, 26) from its 39-entry angle list, and no positional offset of the coefficients
+reproduces CSPICE's `IAU_MARS` matrix (best residual 1.5e−2 after trying offsets 0–11, against
+≤1e−12 for the other bodies). Two readings are still possible — the file's quadratic phase-angle
+extension, or a different model revision — and neither is being guessed at. Until the 2015
+report's F-angle table is transcribed and checked the same way, Mars ships with its polynomial
+terms only and a test that pins the known mismatch. This is the first thing to finish in phase 2.
+
 ### Phase 2 — `stkcraft-body` (L1, between `time` and `frames`)
 
 - `Body`: Sun, Mercury, Venus, Earth, Moon, Mars, Jupiter, Saturn, Uranus, Neptune, keyed by both
