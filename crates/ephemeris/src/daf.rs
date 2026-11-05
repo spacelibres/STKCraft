@@ -104,8 +104,22 @@ impl Daf {
             ));
         }
 
+        // The summary records are a linked list, not a contiguous range: a kernel with many
+        // segments (Saturn's, with nine satellites and the planet) puts them in records at either
+        // end of the file with the data in between. Following `NEXT` from `FWARD` is the format's
+        // own answer; iterating `FWARD..=BWARD` reads data records as summaries and, with luck,
+        // only fails on a nonsense count.
         let mut summaries = Vec::new();
-        for record in fward..=bward {
+        let mut record = fward;
+        let mut visited = 0_usize;
+        while record != 0 {
+            visited += 1;
+            if visited > 1024 {
+                return Err(Error::invalid(
+                    "SPK file",
+                    "the summary records form a cycle or a very long chain",
+                ));
+            }
             let offset = (usize::try_from(record).unwrap_or(0)).saturating_sub(1) * RECORD_BYTES;
             let record_bytes = bytes
                 .get(offset..offset + RECORD_BYTES)
@@ -114,6 +128,7 @@ impl Daf {
             for index in 0..count {
                 summaries.push(summary_at(record_bytes, index)?);
             }
+            record = next_summary_record(record_bytes)?;
         }
         Ok(Self { bytes, summaries })
     }
@@ -184,6 +199,23 @@ fn i32_at(bytes: &[u8], offset: usize) -> Result<i32> {
     let mut four = [0_u8; 4];
     four.copy_from_slice(slice);
     Ok(i32::from_le_bytes(four))
+}
+
+/// The record number of the next summary record, or zero at the end of the chain.
+fn next_summary_record(record: &[u8]) -> Result<i32> {
+    let slice = record
+        .get(0..8)
+        .ok_or_else(|| Error::invalid("SPK file", "a summary record is truncated"))?;
+    let mut eight = [0_u8; 8];
+    eight.copy_from_slice(slice);
+    let next = f64::from_le_bytes(eight);
+    if !next.is_finite() || next < 0.0 || next > f64::from(i32::MAX) || next.fract() != 0.0 {
+        return Err(Error::invalid(
+            "SPK file",
+            "a summary record's next-record pointer is not a record number",
+        ));
+    }
+    Ok(next as i32)
 }
 
 /// How many summaries a summary record holds.

@@ -185,11 +185,23 @@ impl KernelEphemeris {
         self.segments.iter().map(|segment| segment.target).collect()
     }
 
-    /// The segment a target is stored in, if any.
-    fn segment_for(&self, target: i32) -> Option<&Segment> {
+    /// The segment a target is stored in at this epoch, if any.
+    ///
+    /// A target can appear more than once: a kernel that covers a long span, or one that was
+    /// extended, writes several segments for the same body with different intervals. Picking the
+    /// first would answer "outside the coverage" for epochs the kernel does cover, which is what
+    /// happened to Jupiter before this check existed.
+    fn segment_for(&self, target: i32, et: f64) -> Option<&Segment> {
         self.segments
             .iter()
-            .find(|segment| segment.target == target)
+            .find(|segment| {
+                segment.target == target && et >= segment.start_et && et <= segment.stop_et
+            })
+            .or_else(|| {
+                self.segments
+                    .iter()
+                    .find(|segment| segment.target == target)
+            })
     }
 
     /// The state a segment gives, relative to the segment's own centre.
@@ -217,11 +229,15 @@ impl KernelEphemeris {
                 "an ephemeris segment in a reference frame other than J2000",
             ));
         }
-        if segment.kind != 2 {
+        // Type 2 stores positions and differentiates them; type 3 stores positions *and*
+        // velocities, so its records carry six coefficient sets instead of three. The planetary
+        // barycentre kernels use type 2 and the satellite-system kernels use type 3.
+        if segment.kind != 2 && segment.kind != 3 {
             return Err(Error::unsupported(
-                "an ephemeris segment of a type other than 2 (Chebyshev positions)",
+                "an ephemeris segment of a type other than 2 or 3 (Chebyshev polynomials)",
             ));
         }
+        let sets = if segment.kind == 2 { 3_i32 } else { 6_i32 };
         let directory = segment.last_word - 3;
         let init = self.daf.word(directory)?;
         let interval_length = self.daf.word(directory + 1)?;
@@ -241,13 +257,13 @@ impl KernelEphemeris {
             // is how DE440 represents a barycentre that coincides with its planet.
             return Ok(StateVector::ZERO);
         }
-        if record_count < 0 || record_size < 5 || (record_size - 2) % 3 != 0 {
+        if record_count < 0 || record_size < 5 || (record_size - 2) % sets != 0 {
             return Err(Error::invalid(
                 "SPK segment",
-                "its record size or count is not a plausible type-2 value",
+                "its record size or count is not a plausible Chebyshev value",
             ));
         }
-        let coefficient_count = (record_size - 2) / 3;
+        let coefficient_count = (record_size - 2) / sets;
         let count = usize::try_from(coefficient_count).unwrap_or(0);
         // The records must fit in the segment: everything before the four-word directory.
         let words_for_records =
@@ -292,8 +308,18 @@ impl KernelEphemeris {
             }
             *slot = chebyshev::evaluate(&coefficients, u);
             if let Some(rate) = velocity.get_mut(axis) {
-                // `u = (t − midpoint) / radius`, so `d/dt` carries a factor of `1 / radius`.
-                *rate = chebyshev::evaluate_derivative(&coefficients, u) / radius;
+                if segment.kind == 3 {
+                    // The velocity coefficients are stored, not derived.
+                    let first_rate = base + 2 + i32::try_from((3 + axis) * count).unwrap_or(0);
+                    let mut rate_coefficients = Vec::with_capacity(count);
+                    for step in 0..coefficient_count {
+                        rate_coefficients.push(self.daf.word(first_rate + step)?);
+                    }
+                    *rate = chebyshev::evaluate(&rate_coefficients, u);
+                } else {
+                    // `u = (t − midpoint) / radius`, so `d/dt` carries a factor of `1 / radius`.
+                    *rate = chebyshev::evaluate_derivative(&coefficients, u) / radius;
+                }
             }
         }
         Ok(StateVector {
@@ -310,7 +336,7 @@ impl KernelEphemeris {
             if current == 0 {
                 return Ok(state);
             }
-            let Some(segment) = self.segment_for(current) else {
+            let Some(segment) = self.segment_for(current, et) else {
                 return Err(Error::NotFound {
                     what: format!(
                         "a segment for NAIF {current} in this kernel (a kernel that carries only \
@@ -374,10 +400,10 @@ impl EphemerisSet {
     }
 
     /// The kernel that holds a segment for `target`, if one does.
-    fn kernel_for(&self, target: i32) -> Option<&KernelEphemeris> {
+    fn kernel_for(&self, target: i32, et: f64) -> Option<&KernelEphemeris> {
         self.kernels
             .iter()
-            .find(|kernel| kernel.segment_for(target).is_some())
+            .find(|kernel| kernel.segment_for(target, et).is_some())
     }
 
     /// Walk the chain from `target` to the barycentre, taking each step from whichever kernel
@@ -389,14 +415,14 @@ impl EphemerisSet {
             if current == 0 {
                 return Ok(state);
             }
-            let Some(kernel) = self.kernel_for(current) else {
+            let Some(kernel) = self.kernel_for(current, et) else {
                 return Err(Error::NotFound {
                     what: format!(
                         "a segment for NAIF {current} in any loaded kernel (a planetary kernel                          alone carries only the system barycentres)"
                     ),
                 });
             };
-            let Some(segment) = kernel.segment_for(current) else {
+            let Some(segment) = kernel.segment_for(current, et) else {
                 return Err(Error::NotFound {
                     what: format!("a segment for NAIF {current}"),
                 });
@@ -484,13 +510,18 @@ mod tests {
             );
             return;
         };
-        let kernel = KernelEphemeris::from_path(Path::new(&path)).expect("a readable SPK kernel");
-        let targets = kernel.targets();
-        // `de440s.bsp` carries the ten system barycentres, the Earth and Moon about the Earth-Moon
-        // barycentre, and Mercury and Venus about their own barycentres.
+        let paths: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+        let Some(first) = paths.first() else {
+            return;
+        };
+        let kernel = KernelEphemeris::from_path(first).expect("a readable SPK kernel");
+        // The first kernel in the list is the planetary one: `de440s.bsp` carries the ten system
+        // barycentres, the Earth and Moon about the Earth-Moon barycentre, and Mercury and Venus
+        // about their own barycentres. A satellite-system kernel after it adds the planets
+        // themselves, which the reader then resolves without being told which file holds what.
         for expected in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 199, 299, 301, 399] {
             assert!(
-                targets.contains(&expected),
+                kernel.targets().contains(&expected),
                 "the kernel has no segment for NAIF {expected}"
             );
         }
@@ -501,7 +532,7 @@ mod tests {
     /// (SHA-256 `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2`), taken
     /// 2026-11-05: `(NAIF id, ET seconds past J2000 TDB, [x, y, z, vx, vy, vz])`.
     #[allow(clippy::unreadable_literal, clippy::excessive_precision)] // CSPICE transcriptions
-    const CSPICE_STATES: [(i32, f64, [f64; 6]); 15] = [
+    const CSPICE_STATES: [(i32, f64, [f64; 6]); 24] = [
         (
             10,
             -320000000.0,
@@ -682,6 +713,114 @@ mod tests {
                 -10.361668312092,
             ],
         ),
+        (
+            499,
+            -320000000.0,
+            [
+                -216160270.827666849,
+                -97906994.027641699,
+                -39065831.821844734,
+                11.546719982059,
+                -17.804104373886,
+                -8.478387389042,
+            ],
+        ),
+        (
+            499,
+            0.0,
+            [
+                206980433.836461037,
+                -186417.011257136,
+                -5667227.497442207,
+                1.171984975693,
+                23.906708192988,
+                10.933920650561,
+            ],
+        ),
+        (
+            499,
+            320000000.0,
+            [
+                -189386001.998358667,
+                144760306.952087343,
+                71489384.332195386,
+                -14.804180094348,
+                -15.045534425012,
+                -6.500917305365,
+            ],
+        ),
+        (
+            599,
+            -320000000.0,
+            [
+                -26545586.324847516,
+                705094797.846636534,
+                302875595.863716781,
+                -13.228994940233,
+                0.027190115777,
+                0.334052071486,
+            ],
+        ),
+        (
+            599,
+            0.0,
+            [
+                597499917.851683497,
+                408990269.799366057,
+                160756261.693281770,
+                -7.900547720245,
+                10.171872576227,
+                4.552504127783,
+            ],
+        ),
+        (
+            599,
+            320000000.0,
+            [
+                696179993.469434619,
+                -239996644.669206858,
+                -119830654.323857129,
+                4.532462973776,
+                11.820842443111,
+                4.956448885098,
+            ],
+        ),
+        (
+            699,
+            -320000000.0,
+            [
+                381045713.397660553,
+                -1335550526.643791914,
+                -567968364.526734352,
+                8.822114703659,
+                2.381382487458,
+                0.604503072488,
+            ],
+        ),
+        (
+            699,
+            0.0,
+            [
+                957317652.110340714,
+                923319435.057476878,
+                340162793.274089098,
+                -7.421900386838,
+                6.098450820882,
+                2.837547973276,
+            ],
+        ),
+        (
+            699,
+            320000000.0,
+            [
+                -1419212969.841247320,
+                -25871010.102881845,
+                50408287.526556902,
+                -0.492635299232,
+                -8.955644123319,
+                -3.678160554702,
+            ],
+        ),
     ];
 
     /// Compare the reader with CSPICE over the real kernel, when the kernel is available.
@@ -691,7 +830,11 @@ mod tests {
             eprintln!("STKCRAFT_EPHEMERIS_KERNEL is not set; the kernel comparison did not run");
             return;
         };
-        let kernel = KernelEphemeris::from_path(Path::new(&path)).expect("a readable SPK kernel");
+        // A colon-separated list: the planetary kernel carries the barycentres and a
+        // satellite-system kernel carries a planet and its moons about one of them, so the bodies
+        // that need both say so here rather than in a second test.
+        let paths: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+        let kernel = EphemerisSet::from_paths(&paths).expect("readable SPK kernels");
         let mut checked = 0;
         for (naif, et, expected) in CSPICE_STATES {
             let Some(body) = Body::from_naif_id(naif) else {
@@ -719,7 +862,7 @@ mod tests {
             checked += 1;
         }
         assert_eq!(
-            checked, 15,
+            checked, 24,
             "every reference state should have been compared"
         );
     }

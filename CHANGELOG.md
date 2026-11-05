@@ -9,6 +9,32 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.6] — Every planet, checked against NASA's own numbers
+
+The reader places Mars, Jupiter and Saturn as bodies, not only as barycentres, and the regression
+table now holds 24 CSPICE reference states covering the Sun, Mercury, Venus, the Earth, the Moon
+and those three giant planets at three epochs each. All 24 agree to better than a metre in position
+and a nanometre per second in velocity.
+
+### Fixed
+
+- **Summary records are a linked list, not a range.** Saturn's kernel puts its summary records at
+  either end of a 660 MB file with the data between them, so iterating `FWARD..=BWARD` read data
+  records as summaries. Following each record's `NEXT` pointer is what the format asks for; the old
+  code at least failed loudly on a nonsense count rather than inventing segments.
+- **A target can appear more than once.** A kernel that covers a long span writes one segment per
+  time range, so taking the first match for a body answered "outside the coverage" for epochs the
+  kernel does cover — Jupiter did exactly that at J2000. Segments are now selected by coverage.
+- **Type-3 segments**, which store position *and* velocity coefficients; the satellite-system
+  kernels use them, and their velocity comes from the stored coefficients rather than from
+  differentiating the position series.
+
+### Added
+
+- **`de440s.bsp`, `mar099.bsp`, `jup365.bsp` and `sat441.bsp` read as one ephemeris**, which is what
+  puts Mars, Jupiter and Saturn themselves in reach: `Body::Mars` resolves `499 → 4 → SSB` across
+  two files without the caller knowing which file holds which step.
+
 ## [0.1.5] — Every version is tagged, and data is fetched rather than committed
 
 Releases are tags in this repository and in its siblings, and 0.1.2 through 0.1.4 were committed
