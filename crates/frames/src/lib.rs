@@ -20,7 +20,9 @@
 #![forbid(unsafe_code)]
 
 pub mod arguments;
+pub mod nutation;
 pub mod rotation;
 
 pub use arguments::{FundamentalArguments, iau_1980};
+pub use nutation::Nutation;
 pub use rotation::Rotation3;
