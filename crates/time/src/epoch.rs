@@ -19,6 +19,35 @@ use crate::leaps::{LeapLookup, tai_minus_utc};
 use crate::scales::TimeScale;
 use crate::{DAYS_PER_JULIAN_CENTURY, JD_MJD_ZERO, SECONDS_PER_DAY, TT_MINUS_TAI};
 
+/// `TAI - UTC` in seconds at a Julian Date, read from the leap table.
+///
+/// The date is first converted to a naive UTC calendar time, then looked up. An instant
+/// outside the range the table covers is an error rather than a default: a leap offset that
+/// was guessed is worse than one that is missing.
+fn tai_minus_utc_at(jd: JulianDate) -> Result<f64> {
+    let datetime = julian_to_utc_naive(jd).ok_or_else(|| {
+        Error::out_of_range("UTC Julian Date", jd.sum(), "a representable calendar time")
+    })?;
+    // `month_day` is the day of the month as a fraction. The fraction comes straight from the
+    // Julian Date rather than from `chrono`, whose `Timelike` accessors are not compiled in:
+    // the day part of `jd` is integral and the fraction is in `[0, 1)`, so the day of month is
+    // whatever `chrono` says and the time of day is `jd.fraction`.
+    let day_of_month = f64::from(datetime.day());
+    let leap = tai_minus_utc(
+        datetime.year(),
+        datetime.month(),
+        day_of_month + jd.fraction.min(0.999_999_999),
+    );
+    if leap.confidence == LeapLookup::BeforeUtc {
+        return Err(Error::out_of_range(
+            "UTC year",
+            datetime.year(),
+            "1960 or later (UTC did not exist before 1960)",
+        ));
+    }
+    Ok(leap.seconds)
+}
+
 /// A Julian Date held as two parts for precision.
 ///
 /// `day` holds the whole days counted from JD 0 and `fraction` the remainder, in days. Sum for
@@ -370,6 +399,44 @@ impl Epoch {
         })
     }
 
+    /// The instant as a UTC calendar time, for display and for file output.
+    ///
+    /// This exists because [`Self::to_scale`] deliberately refuses to convert *into* UTC from
+    /// a uniform scale: a TAI Julian Date does not carry the leap offset, so that conversion
+    /// would have to guess. Here the leap table supplies the offset, which is the definition
+    /// and not a guess.
+    ///
+    /// The offset depends on the UTC date, which is what is being solved for, so the lookup is
+    /// iterated once: start from the naive `TAI - 32.184 s` guess, read the offset at the
+    /// resulting date, and apply it. A second pass cannot change the answer, because a leap
+    /// second moves the date by less than a day and the table is constant between leaps.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a UT1 source (which needs `DUT1`) or an instant outside the range
+    /// the leap table covers, where UTC did not exist.
+    pub fn to_utc(self) -> Result<Self> {
+        if self.scale == TimeScale::Utc {
+            return Ok(self);
+        }
+
+        let tai = self.as_tai(None)?;
+
+        // First estimate: treat TAI as if it were UTC. The error is the leap offset, at most a
+        // minute, which cannot move the calendar date far enough to pick the wrong table entry
+        // except within a minute of a leap second, where the iteration below corrects it.
+        let mut utc = tai;
+        for _ in 0..2 {
+            let offset = tai_minus_utc_at(utc)?;
+            utc = tai.plus_seconds(-offset);
+        }
+
+        Ok(Self {
+            julian: utc,
+            scale: TimeScale::Utc,
+        })
+    }
+
     /// The instant as a TAI Julian Date, converting if needed.
     fn as_tai(self, dut1: Option<f64>) -> Result<JulianDate> {
         let _ = dut1;
@@ -623,6 +690,45 @@ mod tests {
         let a = Epoch::from_jd(JD_J2000, TimeScale::Tai);
         let b = Epoch::from_jd(JD_J2000, TimeScale::Tt);
         assert!(a.seconds_until(b).is_err());
+    }
+
+    #[test]
+    fn a_utc_epoch_round_trips_through_tai_and_back() {
+        // Regression for the 37-second display error: `Epoch::from_utc` stores the instant on
+        // the TAI scale, and going back to a calendar time needs the leap offset at that
+        // instant. `to_scale(Utc)` refuses to guess it, which is right; `to_utc` reads the
+        // leap table, which is the definition.
+        let original = utc_from_ymd_hms(2024, 1, 1, 12, 0, 0).expect("valid date");
+        assert_eq!(original.scale(), TimeScale::Tai, "from_utc stores TAI");
+
+        let back = original.to_utc().expect("converts");
+        assert_eq!(back.scale(), TimeScale::Utc);
+        // The recovered UTC Julian Date is the one the calendar time started from.
+        assert_eq!(back.julian(), original.julian().plus_seconds(-37.0));
+    }
+
+    #[test]
+    fn to_utc_is_the_identity_for_an_epoch_already_in_utc() {
+        let utc = Epoch::from_jd(2_460_311.5, TimeScale::Utc);
+        let back = utc.to_utc().expect("converts");
+        assert_eq!(back, utc);
+    }
+
+    #[test]
+    fn to_utc_handles_a_leap_second_boundary() {
+        // 2016-12-31 23:59:60 was an inserted leap second, after which TAI - UTC went from 36
+        // to 37. Converting an instant on either side must use the offset in force there, not
+        // one read from the other side.
+        let before = utc_from_ymd_hms(2016, 12, 31, 12, 0, 0).expect("valid");
+        let after = utc_from_ymd_hms(2017, 1, 1, 12, 0, 0).expect("valid");
+        let before_utc = before.to_utc().expect("converts");
+        let after_utc = after.to_utc().expect("converts");
+        // A day apart in UTC, with the offset changing by a second between them.
+        let gap = after_utc.julian().sum() - before_utc.julian().sum();
+        assert!(
+            (gap - 1.0).abs() < 1e-9,
+            "a UTC day across the leap was {gap} days"
+        );
     }
 
     #[test]

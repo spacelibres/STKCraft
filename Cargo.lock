@@ -275,8 +275,11 @@ name = "stkcraft"
 version = "0.0.6"
 dependencies = [
  "log",
+ "stkcraft-access",
  "stkcraft-core",
+ "stkcraft-engine",
  "stkcraft-frames",
+ "stkcraft-sgp4",
  "stkcraft-time",
 ]
 

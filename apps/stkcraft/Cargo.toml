@@ -11,6 +11,9 @@ authors.workspace = true
 stkcraft-core.workspace = true
 stkcraft-time.workspace = true
 stkcraft-frames.workspace = true
+stkcraft-sgp4.workspace = true
+stkcraft-access.workspace = true
+stkcraft-engine.workspace = true
 log.workspace = true
 
 [lints]

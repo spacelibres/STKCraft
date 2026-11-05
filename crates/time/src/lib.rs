@@ -27,7 +27,7 @@ pub mod epoch;
 pub mod leaps;
 pub mod scales;
 
-pub use epoch::{Epoch, JulianDate};
+pub use epoch::{Epoch, JulianDate, julian_to_utc_naive, naive_from_ymd_hms, utc_from_ymd_hms};
 pub use leaps::{LeapSecondTable, UTC_INTRODUCED, tai_minus_utc};
 pub use scales::{TimeScale, TimeScaleConversion};
 
