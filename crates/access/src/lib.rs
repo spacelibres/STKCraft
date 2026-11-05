@@ -42,9 +42,11 @@ pub mod geometry;
 pub mod occultation;
 pub mod sensor;
 pub mod site;
+pub mod window;
 
 pub use ellipsoid::Ellipsoid;
 pub use geometry::{Topocentric, look_angle};
 pub use occultation::is_occulted;
 pub use sensor::Sensor;
 pub use site::{GroundSite, LocalFrame};
+pub use window::{AccessWindow, DEFAULT_STEP, find_windows};
