@@ -353,8 +353,16 @@ fn collect_assets(dir: &Path, visit: &mut dyn FnMut(&Path)) -> Result<(), String
         let name = entry.file_name();
         let name = name.to_string_lossy();
 
-        // Generated build output and version control are not repository assets.
-        if matches!(name.as_ref(), "target" | ".git" | "node_modules" | "dist") {
+        // Generated build output, version control, and checkouts of *other* repositories are not
+        // assets of this one. `craft-fonts` is cloned here by CI (see `AGENTS.md`: "Fonts live in
+        // storytold/craft-fonts"), and its fonts carry their own licence in their own repository;
+        // listing them here would be a table of somebody else's files that rots the moment
+        // upstream adds a face. Before this skip, the asset gate passed locally and failed in CI
+        // for exactly that reason.
+        if matches!(
+            name.as_ref(),
+            "target" | ".git" | "node_modules" | "dist" | "craft-fonts"
+        ) {
             continue;
         }
 

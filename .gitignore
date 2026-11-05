@@ -2,6 +2,10 @@
 /target
 /dist
 
+# A checkout of the sibling repository that holds the fonts (see `AGENTS.md`). CI clones it
+# next to the workspace; it is never part of this repository.
+/craft-fonts
+
 # `plan/` is a local working folder: execution plans, observations of the reference
 # workflow, screenshots and notes. It is never committed.
 /plan
