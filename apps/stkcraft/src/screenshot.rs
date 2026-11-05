@@ -551,26 +551,28 @@ fn drawn_at(rgb: &[u8], x: f64, y: f64, colour: [u8; 3]) -> bool {
     false
 }
 
-/// Whether the globe hides a point from the camera, by intersecting the line of sight with the
-/// sphere.
+/// Whether the globe hides a point from the camera, by asking where the sight line's closest
+/// approach to the globe's centre falls.
 ///
-/// `None` means "too close to the limb to call": a sample within 2 % of the radius of the globe's
-/// silhouette is neither clearly in front nor clearly behind, and excluding it keeps the check
-/// honest rather than lucky.
+/// `Some(true)` means the sphere is between the camera and the point, `Some(false)` means it is
+/// not, and `None` means "too close to the limb to call": a sight line whose closest approach is
+/// within 2 % of the radius grazes the silhouette, where whether a pixel is the sphere's edge or
+/// the line's is a question about rasterisation rather than about occlusion.
 fn hidden_by_globe(eye: [f64; 3], point: [f64; 3], radius: f64) -> Option<bool> {
     let direction = [point[0] - eye[0], point[1] - eye[1], point[2] - eye[2]];
     let length_squared = dot(direction, direction);
-    if length_squared.is_nan() || length_squared <= 0.0 {
+    if !length_squared.is_finite() || length_squared <= 0.0 {
         return None;
     }
-    // The parameter of the closest approach of the line of sight to the globe's centre.
+    // The parameter at which the line through the camera and the point comes closest to the
+    // globe's centre, which is the origin.
     let t = -dot(eye, direction) / length_squared;
-    if t <= 0.0 {
-        // The closest approach is behind the camera, so nothing is in the way.
-        return Some(false);
+    if !t.is_finite() {
+        return None;
     }
-    if t >= 1.0 {
-        // The closest approach is beyond the point itself, so the point is in front.
+    if t <= 0.0 || t >= 1.0 {
+        // The closest approach is behind the camera or beyond the point itself, so the globe is
+        // not between the two whatever the distances turn out to be.
         return Some(false);
     }
     let closest = [
@@ -772,4 +774,130 @@ fn crc32(data: &[u8]) -> u32 {
         crc = entry ^ (crc >> 8);
     }
     crc ^ 0xFFFF_FFFF
+}
+
+#[cfg(test)]
+#[expect(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    const TRACK: [u8; 3] = [222, 26, 12];
+
+    /// An image of the verification size, with one track-coloured pixel.
+    fn image_with_pixel(x: u32, y: u32) -> Vec<u8> {
+        let mut rgb = vec![0_u8; (WIDTH * HEIGHT * 3) as usize];
+        let index = ((y * WIDTH + x) * 3) as usize;
+        if let Some(pixel) = rgb.get_mut(index..index + 3) {
+            pixel.copy_from_slice(&TRACK);
+        }
+        rgb
+    }
+
+    #[test]
+    fn a_pixel_is_found_through_its_neighbours() {
+        // A projected vertex can land on either side of a pixel boundary, so a line drawn at a
+        // vertex is looked for in a three-by-three window rather than at one pixel.
+        let rgb = image_with_pixel(100, 100);
+        assert!(drawn_at(&rgb, 100.0, 100.0, TRACK));
+        assert!(drawn_at(&rgb, 101.0, 101.0, TRACK));
+        assert!(drawn_at(&rgb, 99.4, 99.6, TRACK));
+        assert!(!drawn_at(&rgb, 140.0, 100.0, TRACK));
+        // A different colour is not a match, which is what makes the check a check.
+        assert!(!drawn_at(&rgb, 100.0, 100.0, [10, 40, 80]));
+    }
+
+    #[test]
+    fn sampling_outside_the_image_does_not_panic() {
+        // The check runs on a frame the GPU produced, so a rounding error near an edge must be a
+        // miss rather than an index panic in a verification path.
+        let rgb = image_with_pixel(500, 300);
+        assert!(!drawn_at(&rgb, -3.0, -3.0, TRACK));
+        assert!(!drawn_at(&rgb, f64::NAN, 0.0, TRACK));
+        assert!(!drawn_at(&rgb, 2_000.0, 2_000.0, TRACK));
+        assert!(!drawn_at(&[], 0.0, 0.0, TRACK));
+    }
+
+    #[test]
+    fn the_globe_hides_a_point_behind_it_and_not_one_in_front() {
+        // The camera looks down the -z axis at the origin from 23 000 km; the radius is the
+        // Earth's.
+        let eye = [0.0, 0.0, 23_000.0];
+        let radius = 6_378.0;
+        // On the far side, the sight line goes straight through the globe.
+        assert_eq!(
+            hidden_by_globe(eye, [0.0, 0.0, -6_400.0], radius),
+            Some(true)
+        );
+        // On the near side, the closest approach is the point itself, past the globe's centre.
+        assert_eq!(
+            hidden_by_globe(eye, [0.0, 0.0, 6_400.0], radius),
+            Some(false)
+        );
+        // Behind the camera: nothing it cannot see through is in the way.
+        assert_eq!(
+            hidden_by_globe(eye, [0.0, 0.0, 30_000.0], radius),
+            Some(false)
+        );
+        // A point whose sight line misses the globe, though its closest approach is still between
+        // the camera and the point.
+        assert_eq!(
+            hidden_by_globe(eye, [7_000.0, 0.0, 1_000.0], radius),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn a_sight_line_that_grazes_the_limb_is_not_called_either_way() {
+        // A far-side track sample whose sight line passes just inside the silhouette: which side
+        // of the edge its pixel falls on is a question about rasterisation, not about occlusion,
+        // so the check declines to answer rather than guessing.
+        let distance: f64 = 23_000.0;
+        let radius: f64 = 6_378.0;
+        let track = radius * 1.004;
+        // The sight line comes within 1 % of a radius of the globe's centre: grazing.
+        let closest = radius * 0.99;
+        let sin = closest / distance;
+        let cos = (1.0 - sin * sin).sqrt();
+        let along = distance * cos;
+        // The far intersection of the ray with the track's shell, which is the far side.
+        let s = along + (along * along - (distance * distance - track * track)).sqrt();
+        let point = [s * sin, 0.0, distance - s * cos];
+        let offset = (point[0] * point[0] + point[2] * point[2]).sqrt();
+        assert!(
+            (offset - track).abs() < 1.0,
+            "the test point is not on the track's shell: {offset} km"
+        );
+        assert_eq!(hidden_by_globe([0.0, 0.0, distance], point, radius), None);
+
+        // Degenerate inputs are not claimed either.
+        let eye = [0.0, 0.0, distance];
+        assert_eq!(hidden_by_globe(eye, eye, radius), None);
+        assert_eq!(hidden_by_globe(eye, [f64::NAN, 0.0, 0.0], radius), None);
+    }
+
+    #[test]
+    fn a_linear_colour_becomes_the_byte_a_target_holds() {
+        // The check compares against the bytes the GPU wrote, so the conversion has to be the
+        // write's, and a NaN vertex colour has to become a byte rather than a panic.
+        assert_eq!(linear_to_bytes([0.0, 0.5, 1.0]), [0, 128, 255]);
+        assert_eq!(
+            linear_to_bytes([f32::NAN, f32::INFINITY, -1.0]),
+            [0, 255, 0]
+        );
+    }
+
+    #[test]
+    fn the_check_reports_a_frame_it_cannot_verify_rather_than_passing_it() {
+        // A frame with no geometry at all would otherwise "pass" every occlusion check by having
+        // nothing to check, which is the shape of a verification path that silently stops
+        // verifying anything.
+        let camera = Camera::default_view();
+        let scene = stkcraft_viewport::scene::SceneData::default();
+        let rgb = vec![0_u8; (WIDTH * HEIGHT * 3) as usize];
+        let report = occlusion(&scene, &camera, &rgb);
+        assert_eq!(report.far_samples, 0);
+        assert_eq!(report.near_samples, 0);
+        let error = assert_occlusion(&scene, &camera, &rgb).expect_err("an empty scene passed");
+        assert!(error.contains("cannot verify"), "{error}");
+    }
 }
