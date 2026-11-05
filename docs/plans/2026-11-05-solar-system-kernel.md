@@ -95,6 +95,13 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   transcription, and its accuracy is stated by JPL and checked against CSPICE in the tests (15″ to
   600″). A VSOP87/ELP2000 backend would be more accurate and much larger; it is the next accuracy
   step, not a correction.
+- **VSOP87 attempt, and where it stopped.** The `VSOP87A.*` files were fetched from IMCCE (they are
+  public and the series is the published standard) and truncated at 1e-7 au, which would give about
+  0.02″. The record layout is the blocker: a data line is `[id, iv, it, 12 α-powers, then five
+  numbers]`, and no assignment of the last five to `(A, B, C, S, K)` that was tried reproduces
+  CSPICE for Mercury at J2000 — the best was 657 000 km, three orders off the truncation error. The
+  next step is the published record description (Bretagnon & Francou 1988, and the format notes that
+  ship with the distribution), not more guessing at columns.
 - **Backend B (optional):** a NAIF DAF/SPK reader implemented here (Type 2 and 3) over
   `de440s.bsp` (32 MB) and the JPL satellite kernels. Data is not committed: it is fetched with a
   pinned SHA-256, and CI skips the backend offline without failing.
