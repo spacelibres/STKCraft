@@ -99,19 +99,21 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   B within A's stated accuracy. Horizons' sub-observer planetographic latitude and longitude are
   used to cross-check phase 2's body-fixed frames against an independent source.
 
-**Landed so far:** the crate, the `Ephemeris` trait, a verified Chebyshev evaluator (checked
-against the closed forms and a finite difference), and a DAF/SPK *structure* reader checked against
-`de440s.bsp`: file record, summary records, and each segment's interval, target, centre, frame,
-type and word addresses.
+**Landed:** the crate, the `Ephemeris` trait, the Chebyshev evaluator (checked against the closed
+forms and a finite difference), the DAF/SPK structure reader, and **type-2 evaluation, verified
+against CSPICE**: 15 reference states — the Sun, Mercury, Venus, the Earth and the Moon at three
+epochs each — agree to better than 1e−3 km in position and 1e−9 km/s in velocity over
+`de440s.bsp`.
 
-**Open: the type-2 record layout.** The layout as documented — six words of initial state, interval
-length, coefficient count, record count, then the records — does not reproduce CSPICE on
-`de440s.bsp`. The first word a summary addresses is, in that kernel, the first *record's* midpoint
-followed by its half-width; and a brute-force search over coefficient counts 1–40, header lengths
-0–12 and both axis orderings (blocked and interleaved) never brought the evaluation within
-2 000 km of `spkezr`, let alone the kilometre the format should give. So the evaluator returns
-`Error::Unsupported` instead of a trajectory-shaped guess, and the next step is to read NAIF's SPK
-Required Reading against a known-good implementation rather than to keep fitting numbers.
+**The layout, and the mistake worth recording.** The first attempt assumed a segment begins with
+six words of initial state, an interval length, a coefficient count and a record count, and no
+parameter fit reproduced `spkezr`. NAIF's SPK Required Reading says the opposite: the records come
+first and a four-number directory — `INIT`, `INTLEN`, `RSIZE`, `N` — sits at the *end* of the
+segment. `RSIZE` is a whole record in array elements, not a coefficient count (`(RSIZE − 2) / 3` is
+the count), the four directory entries are stored as doubles, and `N = 0` is not an empty segment
+but a degenerate one: the target *is* its centre, which is how DE440 writes a barycentre sitting on
+its planet. Reading the two counts as integers from the low half of their words is what made the
+Sun appear to have no records at all.
 
 ### Phase 4 — central body in the engine (`stkcraft-engine`)
 

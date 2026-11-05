@@ -9,6 +9,32 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.3] — The ephemeris reads a trajectory
+
+The SPK reader evaluates type-2 segments, and `stkcraft-ephemeris` now answers the question it was
+built for: where is a body at a TDB instant, in barycentric ICRF coordinates, out of a JPL kernel.
+
+### Added
+
+- **Type-2 SPK evaluation.** Records first, then a four-number directory at the end of the segment
+  carrying `INIT`, `INTLEN`, `RSIZE` and `N`; `RSIZE` is a whole record in array elements, so the
+  coefficient count is `(RSIZE − 2) / 3`; and a segment with `N = 0` is degenerate rather than
+  empty, which is how DE440 writes a barycentre that coincides with its planet.
+- **Verified against CSPICE**, which is the only claim that matters here: fifteen reference states
+  — the Sun, Mercury, Venus, the Earth and the Moon at three epochs each, the Moon's being a
+  two-step chain through the Earth-Moon barycentre — agree to better than 1e−3 km in position and
+  1e−9 km/s in velocity over `de440s.bsp`. A previous attempt, reading the directory from the front,
+  did not come within 2 000 km; the format document settled it, and the difference between the two
+  layouts is recorded in the module documentation so it is not guessed at again.
+
+### Not built yet
+
+- **The analytic backend** (VSOP87 and ELP2000 truncations) that would place the planets with no
+  data file at all.
+- **Mars, Jupiter, Saturn, Uranus and Neptune themselves.** `de440s.bsp` carries only their system
+  barycentres; the body-to-barycentre offset needs a satellite-system kernel, and the reader says
+  so by name instead of returning the barycentre as if it were the planet.
+
 ## [0.1.2] — The ephemeris crate, and the layout it will not guess
 
 `stkcraft-ephemeris` exists: the trait every backend will fill, a Chebyshev evaluator, and a reader

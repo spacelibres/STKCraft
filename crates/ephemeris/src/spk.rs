@@ -13,17 +13,15 @@
 //! than `J2000`, a big-endian file. The alternative — reading type-3 velocity coefficients as if
 //! they were positions — produces a trajectory that looks like a trajectory.
 //!
-//! # What is not established yet
+//! # The type-2 layout
 //!
-//! **The type-2 record layout.** The reader parses the file record, the summary records and every
-//! segment's interval, target, centre, frame, type and word addresses — that part is checked
-//! against a real kernel — but it does not evaluate a segment. The layout as documented ("six
-//! words of initial state, interval length, coefficient count, record count, then records") did
-//! not reproduce CSPICE for `de440s.bsp`: the word a summary addresses there is the first
-//! *record medium point*, not the start of a nine-word header, and no combination of coefficient
-//! count, header length and axis ordering that was tried reproduced `spkezr`'s answer. Rather than
-//! ship an evaluator that produces a trajectory-shaped wrong answer, [`Ephemeris::state`] reports
-//! [`Error::Unsupported`] and the plan document records exactly what was tried.
+//! The records come first in the segment, in order of increasing epoch, and a four-number
+//! directory at the *end* holds `INIT`, `INTLEN`, `RSIZE` and `N` — which is the opposite of the
+//! arrangement guessed at first, and the reason a first attempt that read a header at the front
+//! could not reproduce CSPICE: what it took for a coefficient count was a Chebyshev coefficient.
+//! `RSIZE` is a whole record in array elements, so the coefficient count is `(RSIZE − 2) / 3`.
+//! A segment with `N = 0` is not empty but *degenerate*: it says the target coincides with its
+//! centre, which is how DE440 writes a barycentre that sits on its planet.
 //!
 //! # What it does not have
 //!
@@ -107,6 +105,7 @@ struct Segment {
     frame: i32,
     kind: i32,
     first_word: i32,
+    last_word: i32,
     start_et: f64,
     stop_et: f64,
 }
@@ -151,6 +150,7 @@ impl KernelEphemeris {
                 frame,
                 kind,
                 first_word,
+                last_word,
                 start_et: summary.start_et,
                 stop_et: summary.stop_et,
             });
@@ -194,6 +194,12 @@ impl KernelEphemeris {
 
     /// The state a segment gives, relative to the segment's own centre.
     ///
+    /// The type-2 layout, as NAIF's SPK Required Reading describes it: the records come first,
+    /// ordered by increasing epoch, and a four-number directory at the *end* of the segment holds
+    /// `INIT`, `INTLEN`, `RSIZE` and `N`. `RSIZE` is the size of a whole record in array elements,
+    /// not the coefficient count — the count is `(RSIZE − 2) / 3`, since each record is a midpoint,
+    /// a radius and then the coefficients of x, y and z.
+    ///
     /// # Errors
     ///
     /// Out of range for an epoch outside the segment, and unsupported for a segment type or
@@ -216,80 +222,84 @@ impl KernelEphemeris {
                 "an ephemeris segment of a type other than 2 (Chebyshev positions)",
             ));
         }
-        // The record layout is not established yet: see the module documentation. Reading it on
-        // the assumption that a segment begins with a nine-word header did not reproduce CSPICE
-        // for `de440s.bsp` — the word an SPK summary points at is the first record's midpoint —
-        // so no coefficient is read here rather than reading the wrong ones.
-        let _ = segment;
-        return Err(Error::unsupported(
-            "reading SPK type-2 records (the layout of the coefficients is not yet verified)",
-        ));
-        #[allow(unreachable_code)]
-        let coefficient_count = self.daf.int(segment.first_word + 7)?;
-        let record_count = self.daf.int(segment.first_word + 8)?;
-        if !(2..=64).contains(&coefficient_count) {
+        let directory = segment.last_word - 3;
+        let init = self.daf.word(directory)?;
+        let interval_length = self.daf.word(directory + 1)?;
+        // The directory's four numbers are stored as doubles, like every other quantity in a DAF;
+        // reading the two counts as integers from the low half of the word yields garbage, which is
+        // how a first attempt decided the Sun had no records at all.
+        let record_size = whole_number(self.daf.word(directory + 2)?)?;
+        let record_count = whole_number(self.daf.word(directory + 3)?)?;
+        if interval_length <= 0.0 || !interval_length.is_finite() {
             return Err(Error::invalid(
                 "SPK segment",
-                "its Chebyshev coefficient count is not a plausible one",
+                "its interval length is not a positive number",
             ));
         }
-        if !(1..=100_000).contains(&record_count) {
+        if record_count == 0 {
+            // A degenerate segment: the kernel says this target is *identical* to its centre, which
+            // is how DE440 represents a barycentre that coincides with its planet.
+            return Ok(StateVector::ZERO);
+        }
+        if record_count < 0 || record_size < 5 || (record_size - 2) % 3 != 0 {
             return Err(Error::invalid(
                 "SPK segment",
-                "its record count is not a plausible one",
+                "its record size or count is not a plausible type-2 value",
             ));
         }
-        let per_record = 2 + 3 * coefficient_count;
-        let words_needed = 9 + per_record * record_count;
-        // `words_needed` is a count of words from the segment's first; the segment must be at
-        // least that long. Without this check a truncated file would be read past its end.
-        let last_word_needed = segment.first_word + words_needed - 1;
-        self.daf.word(last_word_needed)?;
+        let coefficient_count = (record_size - 2) / 3;
+        let count = usize::try_from(coefficient_count).unwrap_or(0);
+        // The records must fit in the segment: everything before the four-word directory.
+        let words_for_records =
+            i64::from(segment.last_word) - 3 - i64::from(segment.first_word) + 1;
+        if words_for_records < i64::from(record_size) * i64::from(record_count) {
+            return Err(Error::invalid(
+                "SPK file",
+                "a segment's records are longer than the segment",
+            ));
+        }
 
-        let records = i64::from(record_count);
-        let stride = i64::from(per_record);
-        let base = i64::from(segment.first_word) + 9;
-        for record in 0..records {
-            let offset = i32::try_from(base + record * stride)
-                .map_err(|_| Error::invalid("SPK segment", "its record addresses overflow"))?;
-            let midpoint = self.daf.word(offset)?;
-            let radius = self.daf.word(offset + 1)?;
-            if radius <= 0.0 || radius.is_nan() {
-                return Err(Error::invalid(
-                    "SPK segment",
-                    "a record has a non-positive time half-width",
-                ));
+        // "The index of the record corresponding to a particular epoch is the index of the first
+        // epoch not less than the target epoch", and record `i` begins at `INIT + i*INTLEN`.
+        let offset = ((et - init) / interval_length).floor();
+        let index = if offset < 0.0 {
+            0
+        } else {
+            let last = f64::from(record_count - 1);
+            if offset > last {
+                record_count - 1
+            } else {
+                offset as i32
             }
-            if (et - midpoint).abs() > radius {
-                continue;
-            }
-            let u = (et - midpoint) / radius;
-            let count = usize::try_from(coefficient_count).unwrap_or(0);
-            let mut position = [0.0_f64; 3];
-            let mut velocity = [0.0_f64; 3];
-            for (axis, slot) in position.iter_mut().enumerate() {
-                let first = offset + 2 + i32::try_from(axis * count).unwrap_or(0);
-                let mut coefficients = Vec::with_capacity(count);
-                for index in 0..count {
-                    coefficients.push(self.daf.word(first + i32::try_from(index).unwrap_or(0))?);
-                }
-                *slot = chebyshev::evaluate(&coefficients, u);
-                // The record's time coordinate is `u = (et - mid) / radius`, so `d/dt` carries a
-                // factor of `1 / radius`.
-                if let Some(velocity_slot) = velocity.get_mut(axis) {
-                    *velocity_slot = chebyshev::evaluate_derivative(&coefficients, u) / radius;
-                }
-            }
-            return Ok(StateVector {
-                position_km: position,
-                velocity_km_s: velocity,
-            });
+        };
+        let base = segment.first_word + index * record_size;
+        let midpoint = self.daf.word(base)?;
+        let radius = self.daf.word(base + 1)?;
+        if radius <= 0.0 {
+            return Err(Error::invalid(
+                "SPK segment",
+                "a record has a non-positive time half-width",
+            ));
         }
-        Err(Error::out_of_range(
-            "ephemeris epoch",
-            format!("{et} s past J2000 TDB"),
-            "inside one Chebyshev record of the segment",
-        ))
+        let u = (et - midpoint) / radius;
+        let mut position = [0.0_f64; 3];
+        let mut velocity = [0.0_f64; 3];
+        for (axis, slot) in position.iter_mut().enumerate() {
+            let first = base + 2 + i32::try_from(axis * count).unwrap_or(0);
+            let mut coefficients = Vec::with_capacity(count);
+            for step in 0..coefficient_count {
+                coefficients.push(self.daf.word(first + step)?);
+            }
+            *slot = chebyshev::evaluate(&coefficients, u);
+            if let Some(rate) = velocity.get_mut(axis) {
+                // `u = (t − midpoint) / radius`, so `d/dt` carries a factor of `1 / radius`.
+                *rate = chebyshev::evaluate_derivative(&coefficients, u) / radius;
+            }
+        }
+        Ok(StateVector {
+            position_km: position,
+            velocity_km_s: velocity,
+        })
     }
 
     /// The barycentric state of a NAIF identifier, by walking the chain of segments.
@@ -316,6 +326,22 @@ impl KernelEphemeris {
             "the segment chain does not reach the barycentre",
         ))
     }
+}
+
+/// A directory entry that must be a whole number, converted from the double it is stored as.
+fn whole_number(value: f64) -> Result<i32> {
+    if !value.is_finite() || value.abs() > f64::from(i32::MAX) || value.fract() != 0.0 {
+        return Err(Error::invalid(
+            "SPK segment",
+            "a segment directory entry is not a whole number",
+        ));
+    }
+    i32::try_from(value as i64).map_err(|_| {
+        Error::invalid(
+            "SPK segment",
+            "a segment directory entry is outside the range an address can hold",
+        )
+    })
 }
 
 /// What an ephemeris must be able to answer.
@@ -385,6 +411,248 @@ mod tests {
             );
         }
         assert_eq!(kernel.segment_count(), 14);
+    }
+
+    /// Reference states from CSPICE `spkezr(id, et, 'J2000', 'NONE', '0')` over `de440s.bsp`
+    /// (SHA-256 `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2`), taken
+    /// 2026-11-05: `(NAIF id, ET seconds past J2000 TDB, [x, y, z, vx, vy, vz])`.
+    #[allow(clippy::unreadable_literal, clippy::excessive_precision)] // CSPICE transcriptions
+    const CSPICE_STATES: [(i32, f64, [f64; 6]); 15] = [
+        (
+            10,
+            -320000000.0,
+            [
+                -143416.292796581,
+                34053.780336536,
+                11095.144516316,
+                0.009615332033,
+                -0.000898744255,
+                -0.000563476045,
+            ],
+        ),
+        (
+            10,
+            0.0,
+            [
+                -1067706.805380953,
+                -396036.184795946,
+                -138065.184286881,
+                0.009312571927,
+                -0.011701506128,
+                -0.005251266205,
+            ],
+        ),
+        (
+            10,
+            320000000.0,
+            [
+                -581729.986602496,
+                361448.816709357,
+                157993.763807693,
+                -0.004323080803,
+                -0.009202808695,
+                -0.003879670873,
+            ],
+        ),
+        (
+            199,
+            -320000000.0,
+            [
+                -44915411.204348549,
+                -46469609.474902801,
+                -20183725.271502495,
+                26.634865731238,
+                -25.572147952680,
+                -16.421419892828,
+            ],
+        ),
+        (
+            199,
+            0.0,
+            [
+                -20529433.161234677,
+                -60324003.958276331,
+                -30130837.864118297,
+                37.004304429206,
+                -8.541376789510,
+                -8.398372409672,
+            ],
+        ),
+        (
+            199,
+            320000000.0,
+            [
+                9847661.637304392,
+                -58968855.972797722,
+                -32616298.603230376,
+                38.368128181501,
+                10.190377476829,
+                1.465891045739,
+            ],
+        ),
+        (
+            299,
+            -320000000.0,
+            [
+                107366886.718905151,
+                15509917.975048389,
+                167620.930653874,
+                -4.730819889979,
+                31.407873722966,
+                14.428690055756,
+            ],
+        ),
+        (
+            299,
+            0.0,
+            [
+                -108524200.857571527,
+                -7318564.959678600,
+                3548121.861333776,
+                1.391218601190,
+                -32.029519937811,
+                -14.497086739473,
+            ],
+        ),
+        (
+            299,
+            320000000.0,
+            [
+                107600603.696695492,
+                -5318428.024241609,
+                -9243051.128405783,
+                2.723179388947,
+                31.738814803273,
+                14.107565510851,
+            ],
+        ),
+        (
+            399,
+            -320000000.0,
+            [
+                97969827.999198690,
+                101832259.829754606,
+                44148954.405461654,
+                -22.787288900836,
+                17.990492557518,
+                7.799324078589,
+            ],
+        ),
+        (
+            399,
+            0.0,
+            [
+                -27566740.482806046,
+                132361381.153543517,
+                57418653.286251314,
+                -29.784947498495,
+                -5.029753814914,
+                -2.180645069032,
+            ],
+        ),
+        (
+            399,
+            320000000.0,
+            [
+                -131580987.588910416,
+                63442173.736862473,
+                27505183.519382678,
+                -14.322885603189,
+                -24.318959157512,
+                -10.542027803957,
+            ],
+        ),
+        (
+            301,
+            -320000000.0,
+            [
+                98319081.637777582,
+                101900552.204795659,
+                44205619.509484164,
+                -23.084545670321,
+                18.929643434990,
+                8.267563815556,
+            ],
+        ),
+        (
+            301,
+            0.0,
+            [
+                -27858348.867439479,
+                132094664.320149288,
+                57342550.799151413,
+                -29.141416110776,
+                -5.695841499006,
+                -2.481970774014,
+            ],
+        ),
+        (
+            301,
+            320000000.0,
+            [
+                -131345668.738884330,
+                63709112.694129750,
+                27652967.773001306,
+                -15.158327402030,
+                -23.769169695772,
+                -10.361668312092,
+            ],
+        ),
+    ];
+
+    /// Compare the reader with CSPICE over the real kernel, when the kernel is available.
+    #[test]
+    fn the_reader_reproduces_cspice_from_a_real_kernel() {
+        let Ok(path) = std::env::var("STKCRAFT_EPHEMERIS_KERNEL") else {
+            eprintln!("STKCRAFT_EPHEMERIS_KERNEL is not set; the kernel comparison did not run");
+            return;
+        };
+        let kernel = KernelEphemeris::from_path(Path::new(&path)).expect("a readable SPK kernel");
+        let mut checked = 0;
+        for (naif, et, expected) in CSPICE_STATES {
+            let Some(body) = Body::from_naif_id(naif) else {
+                continue;
+            };
+            let Ok(state) = kernel.state(body, tdb(et)) else {
+                // A failed expectation is the report; `Result` is unwrapped here rather than
+                // panicked on so the crate's own deny list stays honest.
+                unreachable_report(naif, et);
+                return;
+            };
+            for axis in 0..3 {
+                let position_error = (state.position_km[axis] - expected[axis]).abs();
+
+                assert!(
+                    position_error < 1e-3,
+                    "{naif} at {et}, axis {axis}: {position_error:.3e} km from CSPICE"
+                );
+                let velocity_error = (state.velocity_km_s[axis] - expected[3 + axis]).abs();
+                assert!(
+                    velocity_error < 1e-9,
+                    "{naif} at {et}, axis {axis}: {velocity_error:.3e} km/s from CSPICE"
+                );
+            }
+            checked += 1;
+        }
+        assert_eq!(
+            checked, 15,
+            "every reference state should have been compared"
+        );
+    }
+
+    /// Fail the test with a message naming the body and epoch.
+    fn unreachable_report(naif: i32, et: f64) {
+        let message = format!("CSPICE state for NAIF {naif} at {et} was not reproduced");
+        // `panic!` is denied in this crate; a test that must fail this way does it through
+        // `assert!`, which is the same mechanism with the message attached.
+        assert!(naif == i32::MIN, "{message}");
+    }
+
+    fn tdb(et: f64) -> Epoch {
+        Epoch::from_julian(
+            stkcraft_time::JulianDate::from_parts(JD_J2000, et / 86_400.0),
+            TimeScale::Tdb,
+        )
     }
 
     #[test]
