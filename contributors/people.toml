@@ -1,0 +1,19 @@
+# Contributor credits, by GitHub username.
+#
+# This file holds the names people chose for themselves. `contributors/contributors.json`, which
+# the About window reads, is generated from the git history plus the entries here; it is never
+# hand-edited.
+#
+# One entry per person. Only add an entry for yourself. Never add, edit or guess an entry for
+# anyone else -- if someone's username is missing, they can add their own.
+#
+# Fields:
+#   name  The display name to credit. Optional; without it the username is shown.
+#
+# Example:
+#
+#   [people.octocat]
+#   name = "The Octocat"
+
+[people.stone]
+name = "stone"
