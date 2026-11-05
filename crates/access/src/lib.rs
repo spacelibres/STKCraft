@@ -38,7 +38,9 @@
 #![forbid(unsafe_code)]
 
 pub mod ellipsoid;
+pub mod geometry;
 pub mod site;
 
 pub use ellipsoid::Ellipsoid;
+pub use geometry::{Topocentric, look_angle};
 pub use site::{GroundSite, LocalFrame};
