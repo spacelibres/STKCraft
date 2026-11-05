@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -19,10 +19,10 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-core = { path = "crates/core", version = "0.0.3" }
-stkcraft-time = { path = "crates/time", version = "0.0.3" }
-stkcraft-frames = { path = "crates/frames", version = "0.0.3" }
-stkcraft-sgp4 = { path = "crates/sgp4", version = "0.0.3" }
+stkcraft-core = { path = "crates/core", version = "0.0.4" }
+stkcraft-time = { path = "crates/time", version = "0.0.4" }
+stkcraft-frames = { path = "crates/frames", version = "0.0.4" }
+stkcraft-sgp4 = { path = "crates/sgp4", version = "0.0.4" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.

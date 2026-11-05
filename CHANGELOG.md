@@ -13,6 +13,84 @@ yet.
 
 Nothing yet.
 
+## [0.0.4] — From a TEME vector to a usable position
+
+0.0.3 could compute where a satellite is but nothing could use the answer: SGP4 is defined in
+TEME, a frame tied to the mean equinox of date, so the position was not comparable with a
+ground station, a star or a 3D view. `stkcraft-frames` now carries the whole conversion
+chain, and both of its endpoints reproduce the published worked example to `1e-6 km`.
+
+### Added
+
+- **`stkcraft-frames` gains the frame chain, in five tested layers.** Each is a separate module
+  with its own reference, so a mistake is caught where it is made rather than at the end:
+  - `arguments` — the five IAU-80 Delaunay arguments, checked against ERFA and Vallado to
+    `1e-13 rad`.
+  - `nutation` — the 106-term IAU-80 series and the mean obliquity. The two references agree
+    with each other to `3e-15 rad`, and this crate agrees with both to `1e-14`.
+  - `precession` — the IAU-77 angles and matrix, matching the reference matrix to fifteen
+    digits.
+  - `sidereal` — Greenwich mean sidereal time, matching the reference to `1e-12 rad`.
+  - `teme` — the composite conversions, reproducing the worked example to `1e-6 km`.
+- **`teme_to_gcrf`.** TEME to the inertial frame as `P · N · E`, where `E` is the geometric
+  part of the equation of the equinoxes. This is the frame an ephemeris, a star field or a
+  coverage grid should be expressed in.
+- **`teme_to_itrf`.** TEME to the Earth-fixed frame as `W · R3(gmst)`, including the
+  `ω × r` term that distinguishes a rotating-frame velocity from a merely rotated one. That
+  term is about `0.5 km/s` at low Earth orbit, so a conversion that omitted it would look
+  right and be badly wrong.
+- **`CartesianState`, `EarthOrientation` and `EquinoxTerms`.** `EarthOrientation` never
+  defaults silently: `negligible()` is named so that ignoring `UT1 − UTC` and polar motion is
+  a visible decision, because the omission costs about a kilometre of ground position.
+  `EquinoxTerms` is an explicit argument because the standard changed in 1997 and the wrong
+  branch costs about 15 m.
+- **`docs/plans/2026-11-05-frames-teme-conversion.md`** records the arc, the reference values
+  and the reasoning for each layer.
+
+### Correctness
+
+Every claim names the test that holds it.
+
+- **The GCRF conversion reproduces the published example** to `1e-6 km` in position and
+  velocity. (`teme_to_gcrf_reproduces_the_worked_example`)
+- **The Earth-fixed conversion reproduces both of its published references** — the kinematic
+  terms that apply after 1997 and the geometric ones that applied before — to `1e-6 km`.
+  (`teme_to_itrf_with_kinematic_terms_reproduces_the_worked_example`,
+  `teme_to_itrf_with_geometric_terms_reproduces_its_own_reference`)
+- **The Earth-fixed velocity really is Earth-fixed.** A test compares it against a plain
+  rotation and fails if the `ω × r` term is missing. (`the_earth_fixed_velocity_carries_the_rotation_term`)
+- **A frame change preserves the radius,** and an inertial one preserves the speed. This is
+  the only check that catches a transposed rotation without a reference table at hand.
+  (`a_frame_change_preserves_radius_and_speed`)
+- **The 106-term nutation table is the published one.** The transcription was diffed field by
+  field against its source: 106 rows, zero mismatches. The test also asserts the length and
+  the first and last rows, so a truncated paste fails. (`the_table_has_all_published_terms`)
+- **Nutation stays inside its published envelope** of 20″ in longitude and 10″ in obliquity
+  for every year from 1900 to 2100. (`nutation_stays_inside_its_published_envelope`)
+- **Precession is exactly the identity at J2000,** and the matrix agrees with the angles it
+  was built from. (`precession_is_the_identity_at_j2000`,
+  `precession_accumulates_forty_six_arcseconds_a_century`)
+- **Impossible Earth orientation is refused rather than applied.** A pole coordinate of a
+  radian is a degrees-where-radians-belong mistake and would tilt the Earth by thousands of
+  kilometres. (`impossible_earth_orientation_is_refused`)
+
+### Verification
+
+- `cargo xtask ci --offline` passes all six gates: fmt, clippy `-D warnings`, **121 tests**
+  workspace-wide, assets, layers, and the wasm build of all four portable crates.
+- 41 of those tests are in `stkcraft-frames`, up from 17.
+
+### Known limitations
+
+- **No Earth orientation file loader.** `UT1 − UTC` and the polar motion coordinates are
+  caller inputs until an IERS `finals2000A` reader exists. They are validated against the
+  IERS ranges, never guessed.
+- **The ground-station local horizon is not here yet.** It needs an ellipsoid and a site,
+  which belong with the access geometry rather than the frame chain.
+- **No single call from TLE to GCRF.** The conversion takes a `CartesianState`; joining it to
+  `stkcraft_sgp4`'s output is the engine's job, and there is no engine yet.
+- **TEME only in.** There is no inverse (`gcrf_to_teme`) because nothing needs one yet.
+
 ## [0.0.3] — Deep-space propagation made exact
 
 Deep-space (SDP4) propagation was the one known-wrong numerical layer in 0.0.2: worst case
@@ -225,7 +303,8 @@ These are the properties the numerical layers guarantee, each with a regression 
 - **Converting a uniform-scale epoch back to UTC is not implemented** and returns
   `Error::Unsupported`, because it needs the leap offset at that instant.
 
-[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/spacelibres/STKCraft/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/spacelibres/STKCraft/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/spacelibres/STKCraft/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/spacelibres/STKCraft/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/spacelibres/STKCraft/releases/tag/v0.0.1
