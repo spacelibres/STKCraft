@@ -89,9 +89,12 @@ terms only and a test that pins the known mismatch. This is the first thing to f
 
 - `trait Ephemeris { fn state(&self, body: Body, t: Epoch) -> Result<StateVector>; }` returning
   ICRF position and velocity, with a TDB time argument.
-- **Backend A (built in, offline):** truncated VSOP87 (Bretagnon & Francou 1988) for the planets
-  and truncated ELP2000-82B for the Moon, rotated to the ICRF with the IAU 2006 obliquity. Small
-  generated tables, no data files.
+- **Backend A (built in, offline) — landed as JPL's Keplerian elements, not VSOP87.** The offline
+  backend uses *Keplerian Elements for Approximate Positions of the Major Planets* (JPL SSD,
+  Table 1, 1800–2050) rather than the VSOP87/ELP2000 series: it is the same publisher, a far smaller
+  transcription, and its accuracy is stated by JPL and checked against CSPICE in the tests (15″ to
+  600″). A VSOP87/ELP2000 backend would be more accurate and much larger; it is the next accuracy
+  step, not a correction.
 - **Backend B (optional):** a NAIF DAF/SPK reader implemented here (Type 2 and 3) over
   `de440s.bsp` (32 MB) and the JPL satellite kernels. Data is not committed: it is fetched with a
   pinned SHA-256, and CI skips the backend offline without failing.
@@ -127,13 +130,16 @@ Sun appear to have no records at all.
 - **Still to do:** sites on another body's ellipsoid, and an access problem in that body's
   body-fixed frame (the body crate's `Orientation` supplies the rotation).
 
-### Phase 5 — planetary systems
+### Phase 5 — planetary systems — **core landed**
 
 ### Phase 4 — central body in the engine (`stkcraft-engine`) — **core landed**
 
-- Moons (Phobos, Deimos, the Galileans, Titan and the rest) as second-level bodies whose central
-  body is their planet, with accuracy taken from the kernels. The analytic backend returns
-  `Error::Unsupported` for them rather than guessing.
+- **Landed:** Phobos, Deimos, Io, Europa, Ganymede, Callisto and Titan are bodies with IAU 2015
+  constants and rotation models, and their ephemerides are in the CSPICE table (eight planets and
+  seven moons, 51 reference states, three epochs each, better than a metre). Triton is in the body
+  table but no fetched kernel carries its ephemeris, so a backend refuses it by name.
+- **Not done:** an explicit "central body of each moon" link in the engine (the chain is resolved by
+  the ephemeris kernels, not by the document), and Triton's kernel (`nep097xl-801.bsp`, 2 GB).
 
 ## Not in scope
 
