@@ -253,7 +253,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "stkcraft"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "log",
  "stkcraft-core",
@@ -263,14 +263,23 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "stkcraft-frames"
-version = "0.0.1"
+version = "0.0.2"
+dependencies = [
+ "serde",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
+name = "stkcraft-sgp4"
+version = "0.0.2"
 dependencies = [
  "serde",
  "stkcraft-core",
@@ -279,7 +288,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-time"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chrono",
  "serde",
@@ -490,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "toml",
 ]

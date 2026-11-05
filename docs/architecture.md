@@ -10,6 +10,7 @@ the crates fit together and why they are split the way they are.
 L0  core      units (Angle, Distance, Duration, EpochOffset), the Error type, Vector3
 L1  time      time scales, the IERS leap-second table, Julian dates and epochs
 L2  frames    reference frames and rotations
+L2  sgp4      SGP4/SDP4 propagation from a two-line element set
 ```
 
 Planned, in the order they will land:
@@ -17,7 +18,6 @@ Planned, in the order they will land:
 ```text
 L0  geom      conic sections, coordinate transforms on the sphere, intersection routines
 L1  astro     low-precision Sun, Moon and planet positions
-L2  sgp4      SGP4/SDP4 propagation, verified against the published test vectors
 L2  ephemeris SP3 and CCSDS OEM/OPM/OMM readers
 L2  atmos     neutral atmosphere density
 L3  access    line of sight, elevation masks, eclipse and interference geometry
@@ -85,3 +85,19 @@ Every numerical layer is finished only when it matches a published reference. Th
 vectors live next to the code that uses them, and the constant or formula they verify is
 cited in a comment beside it. See `AGENTS.md` for the standard a layer must meet before it
 is called done.
+
+`stkcraft-sgp4` is the first layer to meet that standard, and it is worth looking at as the
+pattern:
+
+- The verification data is a transcription of the AIAA 2006-6753 archive — the 33 element
+  sets and the reference implementation's own output for them — kept in
+  `crates/sgp4/src/tests/vectors/data.rs` with its source named.
+- The tests compare against that data in two groups, because the two halves of the theory are
+  in different states. The near-Earth half is held to `4e-9 km`, which is the limit of what
+  a table printed to eight decimals can express; the deep-space half is held to the accuracy
+  it actually has today, and `CHANGELOG.md` says plainly that it is not yet exact.
+- The tolerances are set to the measured accuracy, never to the intended accuracy, so a
+  regression fails the test instead of being absorbed by a loose bound.
+
+A tolerance that a wrong answer can pass is not a test. That is why the deep-space bound is
+documented as a limitation rather than presented as a result.

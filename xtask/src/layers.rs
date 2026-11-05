@@ -75,6 +75,11 @@ pub const LAYOUT: &[CrateSpec] = &[
         layer: 2,
     },
     CrateSpec {
+        name: "stkcraft-sgp4",
+        path: "crates/sgp4",
+        layer: 2,
+    },
+    CrateSpec {
         name: "stkcraft",
         path: "apps/stkcraft",
         layer: APP_LAYER,

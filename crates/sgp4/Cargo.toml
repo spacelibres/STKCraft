@@ -1,0 +1,16 @@
+[package]
+name = "stkcraft-sgp4"
+description = "SGP4/SDP4 near-Earth and deep-space propagation for STKCraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+stkcraft-core.workspace = true
+stkcraft-time.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

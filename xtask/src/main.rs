@@ -378,7 +378,12 @@ fn collect_assets(dir: &Path, visit: &mut dyn FnMut(&Path)) -> Result<(), String
 /// The analysis layers carry no platform code, so a WebAssembly build is a check that no
 /// one has pulled in a file-system or threading dependency by accident. The app and xtask
 /// are deliberately absent: the first is the native shell, the second is a build tool.
-const PORTABLE_CRATES: [&str; 3] = ["stkcraft-core", "stkcraft-time", "stkcraft-frames"];
+const PORTABLE_CRATES: [&str; 4] = [
+    "stkcraft-core",
+    "stkcraft-time",
+    "stkcraft-frames",
+    "stkcraft-sgp4",
+];
 
 fn task_wasm() -> Result<(), String> {
     for crate_name in PORTABLE_CRATES {
@@ -424,15 +429,37 @@ fn task_version(args: &[String]) -> Result<(), String> {
             };
             validate_version(new)?;
             let mut replaced = 0_usize;
+            let mut in_workspace_deps = false;
             let out: Vec<String> = text
                 .lines()
                 .map(|line| {
-                    if line.trim_start().starts_with("version = ") {
-                        replaced += 1;
-                        format!("version = \"{new}\"")
-                    } else {
-                        line.to_owned()
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with('[') {
+                        in_workspace_deps = trimmed.starts_with("[workspace.dependencies]");
                     }
+                    if trimmed.starts_with("version = ") && !in_workspace_deps {
+                        replaced += 1;
+                        return format!("version = \"{new}\"");
+                    }
+                    // The workspace's own crates are pinned to the workspace version in
+                    // `[workspace.dependencies]`. Leaving those pins behind makes the next
+                    // `cargo update` fail, because every member then asks for a version the
+                    // path dependency no longer provides.
+                    if in_workspace_deps
+                        && trimmed.starts_with("stkcraft-")
+                        && let Some(start) = line.find("version = \"")
+                    {
+                        let rest = &line[start + "version = \"".len()..];
+                        if let Some(end) = rest.find('"') {
+                            replaced += 1;
+                            return format!(
+                                "{}version = \"{new}\"{}",
+                                &line[..start],
+                                &rest[end + 1..]
+                            );
+                        }
+                    }
+                    line.to_owned()
                 })
                 .collect();
             if replaced == 0 {
