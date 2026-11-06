@@ -9,6 +9,46 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.47] — Every CCSDS publication, hashed and searchable
+
+The engine claims to implement CCSDS formats; the knowledge base could search four of the books. Now it
+can search **all of them**: 495 documents, 548 MB, 393 468 passages, every one downloaded, hashed and
+verified.
+
+### Added
+
+- **`cargo xtask standards`** — downloads the entire public CCSDS catalogue from
+  `https://public.ccsds.org/Pubs/` into `data/standards/` (which `.gitignore` excludes), and verifies
+  each file against the SHA-256 in `xtask/src/main.rs`. The table stores the name and the hash only, and
+  the URL is derived: a table of five hundred near-identical URLs is a table where one typo is
+  invisible.
+- **`docs/guides/ccsds-standards.md`** — all 495 rows, plus what each family covers (1xx mission
+  operations, 2xx onboard interface, 3xx cross support, 4xx space link, 5xx data exchange — the ODM,
+  TDM, ADM and CDM this project parses — 6xx internetworking, 7xx system engineering, 9xx space traffic
+  coordination), and where the alignment stops.
+- **Verified twice**: `cargo xtask standards` re-hashed all 495 files it had just downloaded
+  ("0 fetched, 495 already present") and the knowledge base then read the same files: **495 documents,
+  393 468 passages**, 496 of them cited by page.
+
+### Measured
+
+- **cold open 66 s** (495 PDFs parsed and indexed), **warm open 1.6 s** — the interned index and the
+  key-value cache from 0.1.35 doing exactly what they were built for at ten times the scale they were
+  measured on.
+- A search for `ORB_AVERAGING allowed values` lands on `922x27o1.pdf:page 41`, which is the SANA
+  registry's "Allowed Values Column Symbols" — the document that *defines* the keyword the ODM book
+  merely refers to.
+
+### Not built yet — and now visible
+
+- **Two documents extracted badly**: `101x0b1s.pdf` (41 pages, 2 passages) and `102x0b1s-1.pdf`
+  (59 pages, 5 passages). Both are almost certainly image-only or built from fonts with no usable
+  `ToUnicode` map, which is the OCR limit the changelog has carried since 0.1.38 — now measured on real
+  files instead of asserted. They remain in the library, visible in the listing with their passage
+  count, rather than silently dropped.
+- **Alignment is partial and the doc says which parts**: 5xx is implemented; 1xx–4xx, 6xx and 7xx are
+  collected and searchable, and nothing here implements them yet.
+
 ## [0.1.46] — Compaction that remembers, because the model writes down what it loses
 
 F2 of the foundation. A long conversation used to be trimmed by dropping the oldest turns and leaving
