@@ -59,6 +59,7 @@ fn main() -> ExitCode {
         Some("release") => tag_release(&workspace_root()),
         Some("fetch-data") => task_fetch_data(args.get(1..).unwrap_or_default()),
         Some("papers" | "fetch-papers") => task_fetch_papers(args.get(1..).unwrap_or_default()),
+        Some("math-regions") => task_math_regions(args.get(1..).unwrap_or_default()),
         Some("standards" | "fetch-standards") => {
             task_fetch_standards(args.get(1..).unwrap_or_default())
         }
@@ -127,7 +128,9 @@ Tasks:
             (`i18n`, `i18n report`, `i18n translate --language de`)
   papers    download the paper corpus the knowledge base is tested against, verified
   standards download every CCSDS publication, verified (the set we align to)
+  math-regions  print the formula regions of a PDF as TSV, for the transcription table
   standards download every CCSDS publication, verified (the set we align to)
+  math-regions  print the formula regions of a PDF as TSV, for the transcription table
   fetch-data  download the ephemeris kernels and tables, verified
   lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
@@ -854,6 +857,46 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
         "data: {} file(s), {fetched} fetched, {verified} already present, {} on disk",
         DATA_FILES.len(),
         human_size(bytes)
+    );
+    Ok(())
+}
+
+/// Print the formula regions of a PDF as TSV: the rows the transcription table is built from.
+///
+/// The transcription table (`docs/design/mathematics.md`) is how "recognised well" gets measured instead
+/// of asserted, and its rows have to come from a real extraction rather than from memory: this task prints
+/// what the current pipeline finds, so a person can paste the correct rows into the table and then have
+/// the table fail when the pipeline drifts.
+///
+/// A row is `page<TAB>x0<TAB>y0<TAB>x1<TAB>y1<TAB>problem<TAB>unicode`, with tabs inside a field replaced
+/// by spaces and an absent problem written as `-`.
+fn task_math_regions(args: &[String]) -> Result<(), String> {
+    let Some(path) = args.iter().find(|argument| !argument.starts_with('-')) else {
+        return Err(
+            "math-regions needs a PDF: `cargo xtask math-regions data/standards/502x0b1s.pdf`"
+                .to_owned(),
+        );
+    };
+    let bytes = fs::read(path).map_err(|error| format!("could not read {path}: {error}"))?;
+    let extracted = stkcraft_agent_knowledge::extract(&bytes, 64 << 20)
+        .map_err(|error| format!("{path}: {error}"))?;
+    let clean = |text: &str| text.replace(['\t', '\n'], " ");
+    for (region, problem) in extracted.regions.iter().zip(&extracted.problems) {
+        println!(
+            "{}\t{:.0}\t{:.0}\t{:.0}\t{:.0}\t{}\t{}",
+            region.page,
+            region.x0,
+            region.y0,
+            region.x1,
+            region.y1,
+            problem.as_deref().map_or_else(|| "-".to_owned(), clean),
+            clean(&region.unicode)
+        );
+    }
+    eprintln!(
+        "{} region(s) in {} page(s) of {path}",
+        extracted.regions.len(),
+        extracted.pages.len()
     );
     Ok(())
 }

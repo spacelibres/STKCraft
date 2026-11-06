@@ -13,6 +13,9 @@ serde_json.workspace = true
 stkcraft-agent-runtime.workspace = true
 stkcraft-astro-engine.workspace = true
 stkcraft-framework-i18n.workspace = true
+# The transcription tool reads PDFs with the same extractor the library uses, so a row it prints is a
+# row the search would find.
+stkcraft-agent-knowledge.workspace = true
 toml = "0.8"
 
 [lints]

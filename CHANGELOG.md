@@ -9,6 +9,44 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.61] — The transcription tool, and what it immediately said about layer 2
+
+`cargo xtask math-regions <pdf>` prints the formula regions of a document as TSV — page, box, introducing
+sentence, reading — so the transcription table has rows that came from a real extraction rather than from
+memory, and so a person can *look* at what the pipeline claims.
+
+The first thing it showed is that **0.1.59's numbers were not what the changelog implied**. The ODM book
+reported 7 regions; the tool prints them, and they are:
+
+- two table rows (`Maneuver duration (If = 0, impulsive maneuver)`, `Mass change during maneuver (value is < 0)`);
+- two multi-line prose paragraphs from the numbering-rules section, centred and full of `+`/`-`/`<=`;
+- two short keyword lines (`Keyword = Value Notation`, `International Terrestrial Reference Frame`);
+- one lone `=`.
+
+**No equation.** Layer 2 promotes anything centred or indented that holds a relation, and in a standard
+written in numbered prose that is mostly prose and tables. So `502x0b1s.pdf` stands at **0 real
+formulas**, and the same doubt now applies to `101x0b4s.pdf`'s 150.
+
+A first tightening was applied and measured: a display region must now be *sentence-like-free* and short
+(≤ 80 characters, no `. ` inside), which removed the largest blocks. It did not remove the table rows, and
+the count went 7 → 6.
+
+### Added
+
+- **`cargo xtask math-regions <pdf>`** — the transcription tool.
+
+### Changed
+
+- **A display region must be a line, not a paragraph**: `pdf::regions_of` marks a span display only when
+  it is short and holds no sentence break.
+
+### Stated plainly
+
+- **Layer 2 is not good enough yet.** Its rule — centred or indented plus a relation — cannot tell an
+  equation from a centred table row in a document that has no equations set in mathematics. The next step
+  is the transcription table with **negative rows** (these six ODM regions must *not* be formulas), which
+  is exactly the instrument for turning this from a judgement into a test.
+
 ## [0.1.60] — A formula is a search hit, and its citation is a box
 
 Formulas are in the index. A question about a concept now finds the *equation*, not only the prose around

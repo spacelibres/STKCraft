@@ -437,6 +437,10 @@ fn regions_of(spans: &[Span]) -> Vec<crate::math::Region> {
             let own = f64::midpoint(span.x0, span.x1);
             let centred =
                 (span.x1 - span.x0) < 0.8 * (widest - margin) && (own - centre).abs() < em;
+            // A display equation is a *line*, not a paragraph: the transcription tool showed layer 2
+            // promoting list paragraphs and multi-line prose blocks that happened to be centred and
+            // hold a relation. A formula a person can cite is short.
+            let sentence_like = span.text.chars().count() > 80 || span.text.contains(". ");
             crate::math::Run {
                 page: 1,
                 text: span.text.clone(),
@@ -446,7 +450,7 @@ fn regions_of(spans: &[Span]) -> Vec<crate::math::Region> {
                 em: span.em,
                 fonts: span.fonts.clone(),
                 baselines: span.baselines,
-                display: indented || centred,
+                display: (indented || centred) && !sentence_like,
             }
         })
         .collect();
