@@ -22,6 +22,8 @@ stkcraft-mcp.workspace = true
 # every lookup shows English.
 stkcraft-i18n.workspace = true
 stkcraft-knowledge.workspace = true
+# One crate owns persistence: the record, the cache and the vector store.
+stkcraft-storage.workspace = true
 # The family's shared UI library: the interface font stack (installed system fonts included, which
 # is what makes a CJK interface render), theme tokens and the widgets the Craft apps share.
 craft-ui.workspace = true
@@ -45,6 +47,8 @@ bytemuck = { workspace = true }
 # a window that translates itself and a translator's catalog describe the same interface.
 stkcraft-i18n.workspace = true
 stkcraft-knowledge.workspace = true
+# One crate owns persistence: the record, the cache and the vector store.
+stkcraft-storage.workspace = true
 # The family's shared UI library: the interface font stack (installed system fonts included, which
 # is what makes a CJK interface render), theme tokens and the widgets the Craft apps share.
 craft-ui.workspace = true

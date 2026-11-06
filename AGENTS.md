@@ -170,6 +170,7 @@ cargo xtask api-docs                           # regenerate the API reference
 cargo run --release -p stkcraft -- extensions  # what extension packages are installed
 cargo run --release -p stkcraft -- knowledge   # the documents a model answers from
 cargo run --release -p stkcraft -- knowledge "maximum off-nadir angle"
+cargo run --release -p stkcraft -- history     # what this installation has computed
 ```
 
 ### Version control and the changelog

@@ -29,6 +29,8 @@ pub enum Invocation {
     Chat,
     /// List the extension packages installed for this person.
     Extensions,
+    /// Show what this installation has computed, newest first.
+    History,
     /// List or search the person's knowledge base.
     Knowledge(KnowledgeRequest),
 }
@@ -78,6 +80,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Ask(question) => ask(&question),
         Invocation::Chat => chat(),
         Invocation::Extensions => crate::extensions::list(),
+        Invocation::History => history(),
         Invocation::Knowledge(request) => knowledge(&request),
     }
 }
@@ -103,6 +106,7 @@ COMMANDS
     ask         Ask DeepSeek a question; it answers by running the engine's commands
     chat        Ask questions in one conversation, reading them from standard input
     extensions  List the extension packages installed for this person
+    history     Show what this installation has computed, newest first
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
     version     Print the version
@@ -161,6 +165,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "mcp" => Ok(Invocation::Mcp),
         "chat" => Ok(Invocation::Chat),
         "extensions" => Ok(Invocation::Extensions),
+        "history" => Ok(Invocation::History),
         "knowledge" => Ok(Invocation::Knowledge(KnowledgeRequest {
             query: arguments.next(),
         })),
@@ -235,6 +240,74 @@ fn next_number<I: Iterator<Item = String>>(arguments: &mut I, flag: &str) -> Res
 }
 
 /// Run the `passes` subcommand through the command registry.
+/// Record what a run computed, so the number can be traced back to its inputs.
+///
+/// A failure to record is reported on stderr and never fails the run: the analysis already happened,
+/// and refusing to print it because a database was busy would be the tail wagging the dog. What is
+/// *not* optional is that the record carries the inputs' digest — a row without it cannot be
+/// reproduced, and the storage layer refuses to pretend otherwise.
+fn record_run(
+    command: &str,
+    parameters: &str,
+    inputs: &str,
+    summary: &str,
+    windows: &[stkcraft_storage::AccessWindowRecord],
+) {
+    let Ok(paths) = stkcraft_storage::Paths::for_user() else {
+        eprintln!("stkcraft: the run was not recorded: no data directory");
+        return;
+    };
+    if let Err(message) = record_run_at(&paths, command, parameters, inputs, summary, windows) {
+        eprintln!("stkcraft: the run was not recorded: {message}");
+    }
+}
+
+/// [`record_run`] against an explicit data directory, which is what a test uses.
+fn record_run_at(
+    paths: &stkcraft_storage::Paths,
+    command: &str,
+    parameters: &str,
+    inputs: &str,
+    summary: &str,
+    windows: &[stkcraft_storage::AccessWindowRecord],
+) -> Result<(), String> {
+    let mut store =
+        stkcraft_storage::Store::open(&paths.record()).map_err(|error| error.to_string())?;
+    let id = store
+        .record_computation(&stkcraft_storage::Computation {
+            scenario_name: "CLI".to_owned(),
+            scenario_revision: None,
+            command: command.to_owned(),
+            parameters: parameters.to_owned(),
+            engine_version: env!("CARGO_PKG_VERSION").to_owned(),
+            inputs_digest: stkcraft_storage::digest(inputs.as_bytes()),
+            summary: summary.to_owned(),
+        })
+        .map_err(|error| error.to_string())?;
+    for window in windows {
+        store
+            .record_window(id, window)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// The UTC text of an instant, for a stored window.
+fn utc_text(epoch: stkcraft_time::Epoch, offset_seconds: f64) -> String {
+    let instant = stkcraft_time::Epoch::from_julian(
+        epoch.julian().plus_seconds(offset_seconds),
+        epoch.scale(),
+    );
+    instant
+        .to_utc()
+        .ok()
+        .and_then(|utc| stkcraft_time::julian_to_utc_naive(utc.julian()))
+        .map_or_else(
+            || format!("JD {:.6}", instant.julian().sum()),
+            |datetime| datetime.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        )
+}
+
 fn passes(request: &PassRequest) -> Result<(), String> {
     // The whole point of the exercise: build a scenario with the engine's own commands, then
     // ask the registry to compute. Nothing in this file propagates or intersects anything.
@@ -291,6 +364,32 @@ fn passes(request: &PassRequest) -> Result<(), String> {
         .map_err(|error| format!("could not compute access: {error}"))?;
 
     let results = outcome.access.unwrap_or_default();
+
+    // The provenance: what ran, on what, with which parameters.
+    let mut windows = Vec::new();
+    for access in &results {
+        for window in &access.windows {
+            windows.push(stkcraft_storage::AccessWindowRecord {
+                satellite: satellite_name.clone(),
+                station: request.name.clone(),
+                start_utc: utc_text(epoch, window.start.as_seconds()),
+                end_utc: utc_text(epoch, window.end.as_seconds()),
+                start_seconds: window.start.as_seconds(),
+                duration_seconds: window.duration().as_seconds(),
+                minimum_elevation_deg: request.minimum_elevation_deg,
+            });
+        }
+    }
+    record_run(
+        "access.compute",
+        &format!(
+            "{{\"step-seconds\":{},\"hours\":{}}}",
+            request.step_seconds, request.hours
+        ),
+        &format!("{}{}{}", request.line1, request.line2, request.name),
+        &outcome.summary,
+        &windows,
+    );
 
     print!(
         "{}",
@@ -520,6 +619,48 @@ pub fn skills_directory() -> std::path::PathBuf {
     std::path::PathBuf::from("share/skills")
 }
 
+/// Print what this installation has computed, newest first.
+///
+/// The provenance a stored run carries — command, parameters, engine version and the digest of its
+/// inputs — is what makes a number in a report checkable months later. A record that cannot be opened
+/// is reported rather than hidden: an empty history and an unreadable one are different facts.
+fn history() -> Result<(), String> {
+    let paths = stkcraft_storage::Paths::for_user().map_err(|error| error.to_string())?;
+    println!(
+        "STKCraft {} — history from {}",
+        env!("CARGO_PKG_VERSION"),
+        paths.record().display()
+    );
+    let store =
+        stkcraft_storage::Store::open(&paths.record()).map_err(|error| error.to_string())?;
+    let computations = store.computations(20).map_err(|error| error.to_string())?;
+    if computations.is_empty() {
+        println!("  nothing recorded yet");
+        return Ok(());
+    }
+    for computation in computations {
+        println!(
+            "  {}  {}  {}  {} window(s)  {} ms",
+            computation.started_at,
+            computation.record.command,
+            computation.record.scenario_name,
+            computation.windows,
+            computation.duration.as_millis()
+        );
+        println!(
+            "      inputs {}…  engine {}  {}",
+            computation
+                .record
+                .inputs_digest
+                .get(..12)
+                .unwrap_or_default(),
+            computation.record.engine_version,
+            computation.record.summary
+        );
+    }
+    Ok(())
+}
+
 /// The user's knowledge base: `--knowledge <dir>`, or `STKCRAFT_KNOWLEDGE`, or the configuration
 /// directory's `knowledge/`.
 ///
@@ -609,4 +750,63 @@ pub struct KnowledgeRequest {
 /// The scenario an MCP session starts with.
 fn app_demo_scenario() -> Result<stkcraft_engine::Scenario, String> {
     crate::app::demo_scenario()
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_run_is_recorded_with_its_provenance_and_its_windows() {
+        // The property the record exists for: months later, a quoted number traces back to the
+        // command, the engine version and the digest of the inputs it ran on.
+        let directory = std::env::temp_dir().join("stkcraft-cli-record");
+        let _ = std::fs::remove_dir_all(&directory);
+        let paths = stkcraft_storage::Paths::at(&directory);
+        let windows = vec![stkcraft_storage::AccessWindowRecord {
+            satellite: "ISS".to_owned(),
+            station: "London".to_owned(),
+            start_utc: "2024-01-01T09:12:04Z".to_owned(),
+            end_utc: "2024-01-01T09:18:16Z".to_owned(),
+            start_seconds: 372.0,
+            duration_seconds: 372.0,
+            minimum_elevation_deg: 5.0,
+        }];
+        record_run_at(
+            &paths,
+            "access.compute",
+            "{\"step-seconds\":30}",
+            "1 25544U ...2 25544 ...London",
+            "Computed access: 1 pair(s), 1 window(s)",
+            &windows,
+        )
+        .expect("recorded");
+
+        let store = stkcraft_storage::Store::open(&paths.record()).expect("a record");
+        let computations = store.computations(5).expect("read");
+        assert_eq!(computations.len(), 1);
+        let computation = &computations[0];
+        assert_eq!(computation.record.command, "access.compute");
+        assert_eq!(computation.record.engine_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(computation.windows, 1);
+        // The digest is of the inputs as given, so two runs of the same inputs share it and a
+        // different scenario does not.
+        assert_eq!(
+            computation.record.inputs_digest,
+            stkcraft_storage::digest(b"1 25544U ...2 25544 ...London")
+        );
+        let stored = store.windows(computation.id).expect("read");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].start_utc, "2024-01-01T09:12:04Z");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_recorded_instant_is_utc_text() {
+        let epoch = stkcraft_time::Epoch::from_jd(2_460_311.5, stkcraft_time::TimeScale::Tai);
+        let text = utc_text(epoch, 0.0);
+        assert!(text.ends_with('Z'), "{text}");
+        assert_eq!(text.len(), 20, "{text}");
+    }
 }

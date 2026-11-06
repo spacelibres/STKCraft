@@ -116,11 +116,23 @@ without copying a byte of derived data — and deleting `cache/` never loses a d
   this document first; a stray JSON file beside the executable is the failure this section exists to
   prevent.
 
-## 6. What is not built
+## 6. What is built, and what is not
 
-- **The storage crate itself**: this release fixes the design; the SQLite record, the key-value cache
-  and the vector table land as one crate in the next storage step, with the schema above.
-- **No PostgreSQL path.** The schema is chosen to be portable, and the driver swap is deferred.
-- **No embeddings and no vector index**, for the reason in §3.
-- **No corpus fetcher yet**: the papers the knowledge base should hold need a pinned, checksummed
-  download like `cargo xtask fetch-data`, and that is its own step.
+`crates/framework/storage` implements this document: `Store` (SQLite, `STRICT`, WAL, foreign keys,
+forward-only migrations from `PRAGMA user_version`), `Cache` (one file per key, the key never used as a
+path, CRC-32 per value, a damaged value is a miss), and `Vectors` (model and dimension checked, cosine
+by brute force, a flat format for the cache). The record carries the schema of §1 except the two tables
+that have no writer yet: `translation_row` and `extension_package` exist and are not filled.
+
+The first real consumer is provenance: `stkcraft passes` and `stkcraft planet` record a `computation`
+row — command, parameters, engine version, the **digest of their inputs** — and the access windows they
+found, and `stkcraft history` lists them. A number quoted from a report can therefore be traced to the
+run that produced it and to what that run read.
+
+- **No PostgreSQL path.** The schema is portable and the driver swap is deferred.
+- **No embeddings and no vector index in use**: the store exists and is tested, and it holds nothing
+  until an embedding model is chosen. The lexical index in `stkcraft-knowledge` is the retrieval.
+- **The knowledge index is not cached in the KV store yet**: a library is re-tokenized at start. That
+  is the next consumer, and it is what makes a paper corpus practical.
+- **No corpus fetcher**: the papers the knowledge base should hold need a pinned, checksummed download
+  like `cargo xtask fetch-data`.

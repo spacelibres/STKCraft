@@ -19,7 +19,7 @@ here.
 | API documentation | this document, §4 | `cargo xtask api-docs check` | built, see §4 |
 | UI library and fonts | `storytold/craft-libs` (`craft-ui`), `storytold/egui` fork | `cargo test`, `[patch.crates-io]` | built |
 | Crate taxonomy | this document, §7 | `cargo xtask layers` | built |
-| Storage | `docs/design/storage.md` | design fixed; implementation next | partial, see §8 |
+| Storage | `docs/design/storage.md` | `cargo test` (schema, cache, vectors, provenance) | built, see §8 |
 | Layering | `AGENTS.md`, `xtask/src/layers.rs` | `cargo xtask layers` | built |
 | Version and release | `AGENTS.md` | `cargo xtask version`, `cargo xtask release` | built |
 
@@ -242,8 +242,10 @@ reader asks of it, and `docs/design/storage.md` is the decision record:
 - **Config is what a person decided, data is what the program produced.** They live in different
   directories, and deleting the cache never loses a decision.
 - **Every stored value that came from outside carries its digest**, so a record can be reproduced.
-- **Not built:** the storage crate itself, the PostgreSQL path, embeddings, and the corpus fetcher.
-  `docs/design/storage.md` §6 states each.
+- **Built:** `crates/framework/storage` — the SQLite record with forward-only migrations, the key-value
+  cache, the vector store, and the provenance wiring that makes `stkcraft history` possible.
+- **Not built:** the PostgreSQL path, an embedding model and a filled vector index, the knowledge
+  index cache, and the corpus fetcher. `docs/design/storage.md` §6 states each.
 
 ## 9. Repository layout
 

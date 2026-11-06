@@ -138,6 +138,13 @@ pub const LAYOUT: &[CrateSpec] = &[
         path: "crates/framework/extensions",
         layer: 3,
     },
+    // Persistence: the record, the cache and the vector store. One crate owns it, so no other crate
+    // opens a database or writes a key-value file (docs/design/storage.md).
+    CrateSpec {
+        name: "stkcraft-storage",
+        path: "crates/framework/storage",
+        layer: 3,
+    },
     CrateSpec {
         name: "stkcraft-engine",
         path: "crates/astro/engine",

@@ -9,6 +9,48 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.34] — Storage, and the provenance that makes a number checkable
+
+The storage design was fixed last release; this one implements it in `crates/framework/storage`, and
+gives it its first real consumer. `stkcraft passes` and `stkcraft planet` now record what they computed
+— the command, its parameters, the engine version and **the SHA-256 of the inputs they ran on** — and
+the access windows they found. `stkcraft history` reads them back. A number quoted from a report can be
+traced to the run that produced it.
+
+### Added
+
+- **`Store`** — the relational record: SQLite with `STRICT` tables, WAL, foreign keys on, and
+  forward-only migrations keyed on `PRAGMA user_version`. Scenarios and their append-only revisions,
+  satellites and stations, computations, access windows, knowledge documents, citations, translation
+  rows and installed packages; every table carries the type it means, so a `REAL` cannot quietly become
+  `TEXT` and make an analysis unreproducible.
+- **`Cache`** — one file per key, and the key is **never** a file name: the name is the key's SHA-256 and
+  the key is stored in the header and compared on read, so `../../etc/passwd` is a hash and not a path.
+  Every value carries a CRC-32; a truncated, flipped or foreign file is a *miss*, not an error and not a
+  panic, because the premise of a cache is that the value can be recomputed. Writes go through a
+  temporary file and a rename, so a crash leaves the old entry rather than a half-written one.
+- **`Vectors`** — a set from one model, with the dimension checked on insert *and* on query: comparing a
+  query against another model's embedding space produces a number that looks meaningful and is not, and
+  that is the one mistake this store makes impossible. Non-finite components are refused. Brute-force
+  cosine at this scale is milliseconds, and an approximate index is a change to the index, not the
+  format.
+- **`stkcraft history`**, and provenance recording in `passes` and `planet` — command, parameters, engine
+  version, inputs digest, the windows' UTC instants, and how many windows the run stored.
+
+### Changed
+
+- **`docs/design/storage.md` §6** now says what is built and what is not: the record, the cache and the
+  vector store exist; PostgreSQL, an embedding model, the knowledge index cache and the corpus fetcher
+  do not.
+
+### Not built yet
+
+- **The knowledge index is not cached yet** — a library is re-tokenized at start. That is the next
+  consumer and the precondition for a paper corpus.
+- **No embedding model and no filled vector index**, for the reason above: the store is ready, the
+  model that would fill it is a decision.
+- **The control channel**, **PDF ingestion** and the **paper corpus** are still the next three steps.
+
 ## [0.1.33] — The repository root is a map, and content is not mixed with code
 
 The crate tree was regrouped last release; the root was not. `skills/` and `locales/` — content the
