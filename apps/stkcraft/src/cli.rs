@@ -1036,6 +1036,19 @@ fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
                 );
                 return Ok(());
             }
+            for hit in &search.formulas {
+                println!(
+                    "[{}] score {:.2} (formula)\n    {}{}",
+                    hit.cite(),
+                    hit.score,
+                    hit.formula.unicode,
+                    hit.formula
+                        .problem
+                        .as_deref()
+                        .map(|problem| format!("\n    introduced by: {problem}"))
+                        .unwrap_or_default()
+                );
+            }
             for hit in &search.hits {
                 println!("[{}] score {:.2}", hit.cite(), hit.score);
                 for line in hit.text.lines() {

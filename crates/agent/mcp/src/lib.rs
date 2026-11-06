@@ -466,10 +466,38 @@ impl Server {
                         hit.text
                     );
                 }
+                // Formulas are cited by their box, because a page has no lines: the sentence that
+                // introduces the equation is printed with it, since that is what it solves.
+                for hit in &search.formulas {
+                    let _ = write!(
+                        text,
+                        "\n\n[{}] score {:.2} (formula){}\n{}",
+                        hit.cite(),
+                        hit.score,
+                        hit.formula
+                            .problem
+                            .as_deref()
+                            .map(|problem| format!("\nintroduced by: {problem}"))
+                            .unwrap_or_default(),
+                        hit.formula.unicode
+                    );
+                }
                 let structured = json!({
                     "missed": search.missed,
                     "documents": search.documents,
                     "passages": search.passages,
+                    "formulas": search
+                        .formulas
+                        .iter()
+                        .map(|hit| json!({
+                            "path": hit.path,
+                            "page": hit.formula.page,
+                            "box": [hit.formula.x0, hit.formula.y0, hit.formula.x1, hit.formula.y1],
+                            "unicode": hit.formula.unicode,
+                            "problem": hit.formula.problem,
+                            "score": hit.score,
+                        }))
+                        .collect::<Vec<_>>(),
                     "hits": search
                         .hits
                         .iter()

@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.60] — A formula is a search hit, and its citation is a box
+
+Formulas are in the index. A question about a concept now finds the *equation*, not only the prose around
+it, and the hit prints `paper.pdf:page 12, formula at (120,340)-(300,352)` with the sentence that
+introduces it — because a page has no lines and the sentence says what the equation solves.
+
+The formulas get their own BM25 index, built over the introducing sentence and the text-layer reading.
+`knowledge.search` returns them in a separate list (`Search::formulas`, `FormulaHit::cite`) so one kind of
+hit never has to pretend to be the other, and `structuredContent` carries `page`, `box`, `unicode`,
+`problem` and `score` for a program.
+
+### Fixed by a test, not by inspection
+
+The first version applied the evidence floor to formulas with `retain(score >= threshold)` while passages
+were kept and the floor reported through `missed`. The test caught the difference: the same sentence
+scored the same in both lists, was returned as a passage and dropped as a formula. **One rule for both** —
+returned, with `missed` saying whether it clears the floor — or a caller has two rules to learn.
+
+### Added
+
+- **`Library::search` fills `Search::formulas`**, from a second interned index over `problem + unicode`.
+- **`FormulaHit`**, and `cite`, printing the box.
+- **`a_formula_is_a_hit_and_its_citation_is_a_box`** — a formula found through its introducing sentence,
+  with a control query that must find none.
+- **MCP and CLI output**: formula hits print with `(formula)`, the sentence and the box; the MCP
+  `structuredContent` gains a `formulas` array.
+
+### Not built yet
+
+- **A warm open reports no formulas** (the cache predates the formula index), so a corpus searched from
+  cache returns passages only until the cache is rebuilt. Stated in the code where it happens.
+- The transcription table, OCR and the model, Mathlib, `verify-formulas`.
+
 ## [0.1.59] — Layer 2: the page says "display", so an equation in the body face is found
 
 The ODM book's equations are set in Times with no operator, no Greek and no baseline shift — glyph

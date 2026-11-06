@@ -124,6 +124,25 @@ impl Formula {
     }
 }
 
+/// A formula that matched, with what its citation needs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormulaHit {
+    /// The document, relative to the library root.
+    pub path: String,
+    /// The formula itself.
+    pub formula: Formula,
+    /// The score, for ordering.
+    pub score: f64,
+}
+
+impl FormulaHit {
+    /// `paper.pdf:page 12, formula at (120,340)-(300,388)`.
+    #[must_use]
+    pub fn cite(&self) -> String {
+        self.formula.cite(&self.path)
+    }
+}
+
 /// One passage that matched, with what a citation needs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
@@ -164,6 +183,9 @@ pub struct Search {
     /// not cover this" behaves differently from one that is handed three weak passages and asked to
     /// be helpful.
     pub missed: bool,
+    /// The formulas that matched, best first: a separate list, because a formula is cited by its box
+    /// rather than by a line range (`docs/design/mathematics.md`).
+    pub formulas: Vec<FormulaHit>,
     /// How many documents and passages were searched.
     pub documents: usize,
     /// How many passages were searched.
@@ -206,6 +228,9 @@ pub struct Library {
     documents: Vec<Document>,
     /// The interned index over every passage of every document.
     index: crate::index::Index,
+    /// A second index over the formulas: their text-layer reading and the sentence that introduces them,
+    /// so a question about a concept finds the equation rather than only the prose around it.
+    formula_index: crate::index::Index,
     /// The score a hit needs to count as evidence.
     threshold: f64,
 }
@@ -220,6 +245,7 @@ impl Default for Library {
             root: PathBuf::new(),
             documents: Vec::new(),
             index: crate::index::Index::default(),
+            formula_index: crate::index::Index::default(),
             threshold: DEFAULT_THRESHOLD,
         }
     }
@@ -280,6 +306,10 @@ impl Library {
                     root: directory.to_path_buf(),
                     documents,
                     index,
+                    // A cached library was stored before formulas were indexed, so the formula index is
+                    // empty until the next cold open: the search reports no formula hits rather than
+                    // pretending the corpus has none.
+                    formula_index: crate::index::Index::default(),
                     threshold: DEFAULT_THRESHOLD,
                 },
                 reuse,
@@ -332,10 +362,29 @@ impl Library {
                     .map(move |(chunk, passage)| (document, chunk, passage.text.as_str()))
             },
         ));
+        // The formulas get their own index over `problem + unicode`: the sentence that introduces an
+        // equation is the words a person searches with, and the reading is what the equation says.
+        let formula_index = crate::index::Index::build(documents.iter().enumerate().flat_map(
+            |(document, entry)| {
+                entry
+                    .formulas
+                    .iter()
+                    .enumerate()
+                    .map(move |(index, formula)| {
+                        let text = format!(
+                            "{}{}",
+                            formula.problem.as_deref().unwrap_or_default(),
+                            format_args!(" {}", formula.unicode)
+                        );
+                        (document, index, text.leak() as &str)
+                    })
+            },
+        ));
         Self {
             root: root.to_path_buf(),
             documents,
             index,
+            formula_index,
             threshold: DEFAULT_THRESHOLD,
         }
     }
@@ -451,8 +500,37 @@ impl Library {
         // query and a weak match are the same fact to a caller.
         let missed = hits.is_empty() || best < self.threshold;
         hits.truncate(limit);
+        // The formulas, scored the same way and held to the same evidence floor: a concept a paper
+        // states as an equation is a hit, and its citation is the box.
+        let mut formulas: Vec<FormulaHit> = self
+            .formula_index
+            .score(query)
+            .into_iter()
+            .filter_map(|(passage, score)| {
+                let (document, index) = self.formula_index.owner(passage)?;
+                let entry = self.documents.get(document)?;
+                let formula = entry.formulas.get(index)?;
+                Some(FormulaHit {
+                    path: entry.path.clone(),
+                    formula: formula.clone(),
+                    score,
+                })
+            })
+            .collect();
+        formulas.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.formula.page.cmp(&b.formula.page))
+        });
+        // The evidence floor is reported, not applied: `hits` keeps a passage that scores below the
+        // threshold and lets `missed` say so, and formulas must behave the same way or a caller would
+        // have two rules to learn. Consistency is the test that caught the difference.
+        formulas.truncate(limit);
         Search {
             hits,
+            formulas,
             missed,
             documents: self.documents.len(),
             passages,
@@ -997,5 +1075,38 @@ mod tests {
         let documents = load_directory(&root, limits).expect("loaded");
         assert_eq!(documents.len(), 2, "the document cap was not applied");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_formula_is_a_hit_and_its_citation_is_a_box() {
+        // The whole point of a separate index: a question about a concept finds the *equation*, not only
+        // the prose around it, and the citation is a place on a page that has no lines.
+        let mut document = document(
+            "paper.pdf",
+            "The slant range is computed from the law of cosines.",
+        );
+        document.formulas.push(Formula {
+            page: 12,
+            x0: 120.0,
+            y0: 340.0,
+            x1: 300.0,
+            y1: 352.0,
+            unicode: "r2 = h2 + R2 - 2hR cos(psi)".to_owned(),
+            problem: Some("The slant range follows from the law of cosines:".to_owned()),
+        });
+        let library = Library::from_documents(Path::new("/knowledge"), vec![document]);
+        let search = library.search("law of cosines", 3);
+        assert!(!search.formulas.is_empty(), "{search:#?}");
+        let hit = &search.formulas[0];
+        assert_eq!(hit.path, "paper.pdf");
+        assert_eq!(hit.formula.page, 12);
+        assert!(
+            hit.cite().contains("formula at (120,340)-(300,352)"),
+            "{}",
+            hit.cite()
+        );
+        // The control: a query the formula does not contain finds no formula.
+        let other = library.search("radiator area", 3);
+        assert!(other.formulas.is_empty(), "{:?}", other.formulas);
     }
 }
