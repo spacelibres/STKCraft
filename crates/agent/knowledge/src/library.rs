@@ -19,16 +19,9 @@
 //! cover this" — instead of letting a model fill the gap from memory. A search that always returns
 //! something is a search that always lies about its evidence.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::chunk::{Chunk, chunk};
-
-/// The BM25 parameters, from the original formulation (Robertson & Zaragoza 2009, "The Probabilistic
-/// Relevance Framework"). Left at the published values: this library is small enough that tuning
-/// would be superstition.
-const K1: f64 = 1.2;
-const B: f64 = 0.75;
 
 /// The score below which a hit is not evidence.
 ///
@@ -121,18 +114,22 @@ pub struct Search {
     pub passages: usize,
 }
 
+/// A library and what opening it cost.
+#[derive(Debug, Clone)]
+pub struct Opened {
+    /// The documents, indexed.
+    pub library: Library,
+    /// How many were parsed and how many came from the cache.
+    pub reuse: crate::cache::Reuse,
+}
+
 /// The user's documents, indexed for search.
 #[derive(Debug, Clone, Default)]
 pub struct Library {
     root: PathBuf,
     documents: Vec<Document>,
-    /// document index, chunk index, term → frequency
-    term_frequencies: Vec<Vec<BTreeMap<String, usize>>>,
-    /// term → number of passages containing it
-    document_frequencies: BTreeMap<String, usize>,
-    /// passage lengths in tokens, and their mean
-    lengths: Vec<usize>,
-    mean_length: f64,
+    /// The interned index over every passage of every document.
+    index: crate::index::Index,
     /// The score a hit needs to count as evidence.
     threshold: f64,
 }
@@ -154,44 +151,97 @@ impl Library {
     ///
     /// As [`Self::open`].
     pub fn open_with(directory: &Path, limits: Limits) -> Result<Self, String> {
-        let documents = load_directory(directory, limits)?;
-        Ok(Self::from_documents(directory, documents))
+        Ok(Self::open_cached(directory, limits, None)?.library)
+    }
+
+    /// Open a directory, reusing the derived index of every file whose size and modification time
+    /// have not changed.
+    ///
+    /// This is what makes a paper corpus practical: the first open parses everything, and every open
+    /// after it is a directory walk plus a cache read. `None` parses everything, which is what a test
+    /// and a one-off run want.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::open`].
+    pub fn open_cached(
+        directory: &Path,
+        limits: Limits,
+        cache: Option<&stkcraft_storage::Cache>,
+    ) -> Result<Opened, String> {
+        let files = scan(directory, limits)?;
+        let manifest = files
+            .iter()
+            .map(|file| format!("{}\t{}\t{}", file.relative, file.bytes, file.modified))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let key = crate::cache::library_key(&manifest);
+        // Warm: the whole library — documents and index — in one read.
+        if let Some(cache) = cache
+            && let Some((documents, index)) = crate::cache::load_library(cache, &key)
+        {
+            let reuse = crate::cache::Reuse {
+                parsed: 0,
+                reused: documents.len(),
+            };
+            return Ok(Opened {
+                library: Self {
+                    root: directory.to_path_buf(),
+                    documents,
+                    index,
+                    threshold: DEFAULT_THRESHOLD,
+                },
+                reuse,
+            });
+        }
+        // Cold: read and index every file, then remember the whole thing.
+        let mut documents = Vec::with_capacity(files.len());
+        for file in &files {
+            let Ok(text) = std::fs::read_to_string(&file.absolute) else {
+                // Not UTF-8: a binary dressed as text, skipped rather than decoded on a guess.
+                continue;
+            };
+            documents.push(Document {
+                path: file.relative.clone(),
+                bytes: text.len(),
+                chunks: chunk(&text),
+            });
+        }
+        let passaged = documents.len();
+        let library = Self::from_documents(directory, documents);
+        if let Some(cache) = cache {
+            crate::cache::store_library(cache, &key, library.documents(), library.index());
+            // One assembled library at a time: the previous revision of an edited corpus is not an
+            // index anybody will read again.
+            crate::cache::prune_libraries(cache, &key);
+        }
+        Ok(Opened {
+            library,
+            reuse: crate::cache::Reuse {
+                parsed: passaged,
+                reused: 0,
+            },
+        })
     }
 
     /// Build a library from documents already in memory, which is what a test does.
     #[must_use]
     pub fn from_documents(root: &Path, documents: Vec<Document>) -> Self {
-        let mut term_frequencies = Vec::new();
-        let mut document_frequencies: BTreeMap<String, usize> = BTreeMap::new();
-        let mut lengths = Vec::new();
-        for document in &documents {
-            let mut per_chunk = Vec::new();
-            for chunk in &document.chunks {
-                let mut frequencies: BTreeMap<String, usize> = BTreeMap::new();
-                for token in &chunk.tokens {
-                    *frequencies.entry(token.clone()).or_insert(0) += 1;
-                }
-                for term in frequencies.keys() {
-                    *document_frequencies.entry(term.clone()).or_insert(0) += 1;
-                }
-                lengths.push(chunk.tokens.len());
-                per_chunk.push(frequencies);
-            }
-            term_frequencies.push(per_chunk);
-        }
-        let total: usize = lengths.iter().sum();
-        let mean_length = if lengths.is_empty() {
-            0.0
-        } else {
-            total as f64 / lengths.len() as f64
-        };
+        // The passages are handed to the index with the document each belongs to, so a hit resolves
+        // back to a document and a line range without a second structure.
+        let index = crate::index::Index::build(documents.iter().enumerate().flat_map(
+            |(document, entry)| {
+                entry
+                    .chunks
+                    .iter()
+                    .enumerate()
+                    .map(move |(chunk, passage)| (document, chunk, passage.text.as_str()))
+            },
+        ));
         Self {
             root: root.to_path_buf(),
             documents,
-            term_frequencies,
-            document_frequencies,
-            lengths,
-            mean_length,
+            index,
             threshold: DEFAULT_THRESHOLD,
         }
     }
@@ -206,6 +256,12 @@ impl Library {
     #[must_use]
     pub fn documents(&self) -> &[Document] {
         &self.documents
+    }
+
+    /// The index, for a caller that wants its size or its terms.
+    #[must_use]
+    pub fn index(&self) -> &crate::index::Index {
+        &self.index
     }
 
     /// The score a passage needs to count as evidence.
@@ -224,10 +280,7 @@ impl Library {
     /// How many passages the library holds.
     #[must_use]
     pub fn passages(&self) -> usize {
-        self.documents
-            .iter()
-            .map(|document| document.chunks.len())
-            .sum()
+        self.index.passages()
     }
 
     /// Whether the library has no documents at all.
@@ -242,151 +295,100 @@ impl Library {
     /// is set instead, because "no evidence" is a fact the interface has to be able to state.
     #[must_use]
     pub fn search(&self, query: &str, limit: usize) -> Search {
-        let query_tokens = crate::tokens::query_tokens(query);
-        let mut scored: Vec<Hit> = Vec::new();
         let passages = self.passages();
-        if query_tokens.is_empty() || passages == 0 {
-            return Search {
-                hits: Vec::new(),
-                missed: true,
-                documents: self.documents.len(),
-                passages,
-            };
-        }
-        let unique: Vec<&String> = {
-            let mut seen: Vec<&String> = Vec::new();
-            for token in &query_tokens {
-                if !seen.contains(&token) {
-                    seen.push(token);
-                }
-            }
-            seen
-        };
-        for (document_index, document) in self.documents.iter().enumerate() {
-            let Some(per_chunk) = self.term_frequencies.get(document_index) else {
-                continue;
-            };
-            for (chunk_index, chunk) in document.chunks.iter().enumerate() {
-                let Some(frequencies) = per_chunk.get(chunk_index) else {
-                    continue;
-                };
-                let length = self
-                    .lengths
-                    .get(chunk_index_global(self, document_index, chunk_index))
-                    .copied()
-                    .unwrap_or(chunk.tokens.len());
-                let score = self.score(frequencies, &unique, length, passages);
-                if score <= 0.0 {
-                    continue;
-                }
-                scored.push(Hit {
+        let mut hits: Vec<Hit> = self
+            .index
+            .score(query)
+            .into_iter()
+            .filter_map(|(passage, score)| {
+                let (document, chunk) = self.index.owner(passage)?;
+                let document = self.documents.get(document)?;
+                let chunk = document.chunks.get(chunk)?;
+                Some(Hit {
                     path: document.path.clone(),
                     line_start: chunk.line_start,
                     line_end: chunk.line_end,
                     score,
                     text: chunk.text.clone(),
-                });
-            }
-        }
-        // Best first, then by path and line so the order is total and a test can assert it.
-        scored.sort_by(|a, b| {
+                })
+            })
+            .collect();
+        // The index already ordered by score; re-sort for a total order across equal scores, so a
+        // library renders the same list on every machine.
+        hits.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.path.cmp(&b.path))
                 .then_with(|| a.line_start.cmp(&b.line_start))
         });
-        let best = scored.first().map_or(0.0, |hit| hit.score);
-        scored.truncate(limit);
+        let best = hits.first().map_or(0.0, |hit| hit.score);
+        hits.truncate(limit);
         Search {
-            hits: scored,
+            hits,
             missed: best < self.threshold,
             documents: self.documents.len(),
             passages,
         }
     }
-
-    /// BM25 for one passage.
-    fn score(
-        &self,
-        frequencies: &BTreeMap<String, usize>,
-        query: &[&String],
-        length: usize,
-        passages: usize,
-    ) -> f64 {
-        let mut score = 0.0;
-        for term in query {
-            let Some(frequency) = frequencies.get(*term).copied() else {
-                continue;
-            };
-            let document_frequency = self
-                .document_frequencies
-                .get(term.as_str())
-                .copied()
-                .unwrap_or(0);
-            if document_frequency == 0 {
-                continue;
-            }
-            let idf = inverse_document_frequency(document_frequency, passages);
-            let frequency = frequency as f64;
-            let normalised = if self.mean_length > 0.0 {
-                length as f64 / self.mean_length
-            } else {
-                1.0
-            };
-            score += idf * (frequency * (K1 + 1.0)) / (frequency + K1 * (1.0 - B + B * normalised));
-        }
-        score
-    }
-}
-
-/// The global passage index of a (document, chunk) pair.
-///
-/// The lengths vector is flat, so this walks the documents before it. It is a small library — a few
-/// thousand passages — and an index map would be a second structure to keep in step for no gain.
-fn chunk_index_global(library: &Library, document: usize, chunk: usize) -> usize {
-    let before: usize = library
-        .documents
-        .iter()
-        .take(document)
-        .map(|document| document.chunks.len())
-        .sum();
-    before + chunk
-}
-
-/// The BM25 inverse document frequency, with the `+0.5` smoothing that keeps a term in every passage
-/// from having a negative weight.
-fn inverse_document_frequency(document_frequency: usize, passages: usize) -> f64 {
-    let n = passages as f64;
-    let df = document_frequency as f64;
-    ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
 }
 
 /// Read every readable document under `directory`.
 ///
 /// # Errors
 ///
-/// A message when the directory cannot be listed. Unreadable files are skipped and counted rather
-/// than failing the whole library: one broken file must not make the other nine hundred unusable.
+/// A message when the directory cannot be listed. Unreadable files are skipped rather than failing the
+/// whole library: one broken file must not make the other nine hundred unusable.
 pub fn load_directory(directory: &Path, limits: Limits) -> Result<Vec<Document>, String> {
-    if limits.max_documents == 0 || limits.max_bytes == 0 {
-        return Ok(Vec::new());
-    }
     let mut documents = Vec::new();
-    walk(directory, directory, 0, limits, &mut documents)?;
-    documents.sort_by(|a, b| a.path.cmp(&b.path));
+    for file in scan(directory, limits)? {
+        let Ok(text) = std::fs::read_to_string(&file.absolute) else {
+            continue;
+        };
+        documents.push(Document {
+            path: file.relative,
+            bytes: text.len(),
+            chunks: chunk(&text),
+        });
+    }
     Ok(documents)
 }
 
-/// The recursive half of [`load_directory`].
-fn walk(
+/// One file the library would index: where it is, what it is called inside the library, and the
+/// metadata that decides whether a cached index still describes it.
+#[derive(Debug, Clone)]
+struct File {
+    /// The path on disk.
+    absolute: PathBuf,
+    /// The path relative to the library root, with `/` separators.
+    relative: String,
+    /// Its size in bytes.
+    bytes: u64,
+    /// Its modification time in nanoseconds since the Unix epoch; `0` when the system does not say.
+    modified: u128,
+}
+
+/// List the files a library would index, in a stable order, applying the limits before reading.
+fn scan(directory: &Path, limits: Limits) -> Result<Vec<File>, String> {
+    let mut files = Vec::new();
+    if limits.max_documents == 0 || limits.max_bytes == 0 {
+        return Ok(files);
+    }
+    scan_into(directory, directory, 0, limits, &mut files)?;
+    files.sort_by(|a, b| a.relative.cmp(&b.relative));
+    files.truncate(limits.max_documents);
+    Ok(files)
+}
+
+/// The recursive half of [`scan`].
+fn scan_into(
     root: &Path,
     directory: &Path,
     depth: usize,
     limits: Limits,
-    documents: &mut Vec<Document>,
+    files: &mut Vec<File>,
 ) -> Result<(), String> {
-    if depth > limits.max_depth || documents.len() >= limits.max_documents {
+    if depth > limits.max_depth || files.len() >= limits.max_documents {
         return Ok(());
     }
     let entries = std::fs::read_dir(directory)
@@ -397,7 +399,7 @@ fn walk(
         .collect();
     paths.sort();
     for path in paths {
-        if documents.len() >= limits.max_documents {
+        if files.len() >= limits.max_documents {
             return Ok(());
         }
         let Ok(metadata) = std::fs::symlink_metadata(&path) else {
@@ -415,10 +417,10 @@ fn walk(
             metadata
         };
         if resolved.is_dir() {
-            walk(root, &path, depth + 1, limits, documents)?;
+            scan_into(root, &path, depth + 1, limits, files)?;
             continue;
         }
-        if !resolved.is_file() {
+        if !resolved.is_file() || !is_readable(&path) {
             continue;
         }
         // Skip a directory's own bookkeeping: a `.git` or an editor's swap file is not a document.
@@ -428,26 +430,23 @@ fn walk(
         {
             continue;
         }
-        if !is_readable(&path) {
+        if resolved.len() > limits.max_bytes as u64 {
             continue;
         }
-        let bytes = usize::try_from(resolved.len()).unwrap_or(usize::MAX);
-        if bytes > limits.max_bytes {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            // Not UTF-8: a binary dressed as text, skipped rather than decoded on a guess.
-            continue;
-        };
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        documents.push(Document {
-            path: relative,
-            bytes: text.len(),
-            chunks: chunk(&text),
+        let modified = resolved
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |since| since.as_nanos());
+        files.push(File {
+            absolute: path.clone(),
+            relative: path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/"),
+            bytes: resolved.len(),
+            modified,
         });
     }
     Ok(())
@@ -570,6 +569,70 @@ mod tests {
                 "the hits are not in score order"
             );
         }
+    }
+
+    #[test]
+    fn a_second_open_reuses_what_did_not_change() {
+        // The property a paper corpus depends on: the first open parses, the second is a walk.
+        let root = std::env::temp_dir().join("stkcraft-knowledge-cache");
+        let _ = std::fs::remove_dir_all(&root);
+        let cache_directory = root.join("cache");
+        std::fs::create_dir_all(&root).expect("a directory");
+        std::fs::write(root.join("spec.md"), "Maximum off-nadir angle 45 degrees.")
+            .expect("written");
+        std::fs::write(root.join("thermal.txt"), "Radiator 2.4 square metres.").expect("written");
+        let cache = stkcraft_storage::Cache::at(&cache_directory);
+
+        let cold = Library::open_cached(&root, Limits::default(), Some(&cache)).expect("opened");
+        assert_eq!(cold.reuse.parsed, 2, "the first open parsed nothing");
+        assert_eq!(cold.reuse.reused, 0);
+        assert!(!cold.library.is_empty());
+
+        let warm = Library::open_cached(&root, Limits::default(), Some(&cache)).expect("opened");
+        assert_eq!(warm.reuse.reused, 2, "the second open re-parsed");
+        assert_eq!(warm.reuse.parsed, 0);
+        // And the reused index answers the same way: a cache that changes an answer is a bug.
+        let before = cold.library.search("maximum off-nadir angle", 3);
+        let after = warm.library.search("maximum off-nadir angle", 3);
+        assert_eq!(before.hits, after.hits);
+        assert_eq!(before.missed, after.missed);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_edited_file_is_parsed_again_and_a_deleted_one_leaves_no_entry() {
+        let root = std::env::temp_dir().join("stkcraft-knowledge-cache-edit");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a directory");
+        std::fs::write(root.join("a.md"), "first version").expect("written");
+        std::fs::write(root.join("b.md"), "second document").expect("written");
+        let cache = stkcraft_storage::Cache::at(root.join("cache"));
+        Library::open_cached(&root, Limits::default(), Some(&cache)).expect("opened");
+        let cached = cache.len();
+
+        std::fs::write(root.join("a.md"), "first version, edited and longer").expect("written");
+        std::fs::remove_file(root.join("b.md")).expect("removed");
+        let again = Library::open_cached(&root, Limits::default(), Some(&cache)).expect("opened");
+        assert_eq!(again.reuse.parsed, 1, "the edited file was not re-parsed");
+        assert_eq!(again.reuse.reused, 0);
+        // The deleted file's entry is gone: the cache does not accumulate a copy of every revision.
+        assert!(
+            cache.len() <= cached,
+            "the cache grew by keeping a deleted document"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn opening_without_a_cache_behaves_as_before() {
+        let root = std::env::temp_dir().join("stkcraft-knowledge-no-cache");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a directory");
+        std::fs::write(root.join("a.md"), "Maximum off-nadir angle 45 degrees.").expect("written");
+        let opened = Library::open_cached(&root, Limits::default(), None).expect("opened");
+        assert_eq!(opened.reuse.parsed, 1);
+        assert_eq!(opened.reuse.total(), 1);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

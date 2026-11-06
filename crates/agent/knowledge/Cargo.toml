@@ -8,6 +8,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+# The derived index is cached in the key-value store (docs/design/storage.md).
+stkcraft-storage.workspace = true
 
 [lints]
 workspace = true

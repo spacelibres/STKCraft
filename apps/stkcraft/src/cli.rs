@@ -668,6 +668,11 @@ fn history() -> Result<(), String> {
 /// platform at their documents deserves to know it read nothing, rather than getting answers that
 /// silently came from memory.
 fn knowledge_library() -> Result<stkcraft_knowledge::Library, String> {
+    Ok(knowledge_opened()?.library)
+}
+
+/// The library and what opening it cost, so the command can say whether the cache worked.
+fn knowledge_opened() -> Result<stkcraft_knowledge::Opened, String> {
     let explicit = std::env::var("STKCRAFT_KNOWLEDGE")
         .ok()
         .map(std::path::PathBuf::from);
@@ -685,14 +690,27 @@ fn knowledge_library() -> Result<stkcraft_knowledge::Library, String> {
             ));
         }
         // No library yet is the normal state of a fresh install, and it is not an error.
-        return Ok(stkcraft_knowledge::Library::default());
+        return Ok(stkcraft_knowledge::Opened {
+            library: stkcraft_knowledge::Library::default(),
+            reuse: stkcraft_knowledge::Reuse::default(),
+        });
     }
-    stkcraft_knowledge::Library::open(&directory)
+    // The derived index is cached under the data directory, so a second run over a paper corpus is a
+    // directory walk rather than a re-parse of every document.
+    let cache = stkcraft_storage::Paths::for_user()
+        .ok()
+        .map(|paths| stkcraft_storage::Cache::at(paths.cache().join("knowledge")));
+    stkcraft_knowledge::Library::open_cached(
+        &directory,
+        stkcraft_knowledge::Limits::default(),
+        cache.as_ref(),
+    )
 }
 
 /// Run the `knowledge` subcommand: list the library, or search it.
 fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
-    let library = knowledge_library()?;
+    let opened = knowledge_opened()?;
+    let library = &opened.library;
     match &request.query {
         None => {
             println!(
@@ -705,9 +723,11 @@ fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
                 return Ok(());
             }
             println!(
-                "  {} document(s), {} passage(s)",
+                "  {} document(s), {} passage(s), {} parsed / {} reused from the index cache",
                 library.documents().len(),
-                library.passages()
+                library.passages(),
+                opened.reuse.parsed,
+                opened.reuse.reused
             );
             for document in library.documents() {
                 println!(

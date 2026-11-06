@@ -9,6 +9,47 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.35] — A paper corpus opens in half a second, because the index is interned and cached
+
+This was supposed to be "put the knowledge index in the key-value cache". Measuring first said the
+cache was not the problem: on a 27 MB corpus of 2 000 documents the library took 2.4 s to open and
+**416 MB of memory**, and skipping the parse saved 0.4 s. The cost was the index itself — a `String`
+per token and a map per passage — and no cache hides that.
+
+So the index was rewritten before it was cached:
+
+- **Tokens are interned.** Every distinct word becomes one `u32` in a dictionary; a passage stores
+  term ids and counts instead of strings. Memory on that corpus fell from 416 MB to 173 MB cold, and
+  the cold open from 2.4 s to 1.4 s.
+- **The whole assembled library is cached**, documents and index, keyed by a manifest of every file's
+  path, size and modification time. A re-open is one read: **1.43 s → 0.55 s**, 124 MB, and a search
+  over 20 000 passages still answers with a citation (`paper-0812.md:lines 1-24`).
+- **One library at a time in the cache.** A corpus is re-keyed whenever a file changes, so an edited
+  library would otherwise leave the whole corpus behind on every save; the previous entry is pruned.
+
+### Added
+
+- **`stkcraft-knowledge::index`** — the inverted index: a dictionary of interned terms, one posting per
+  passage, document frequencies, and BM25 scoring by term id. It serialises and reads back with a
+  bounds-checked reader, so a truncated cache file is a rebuild rather than a panic or a wrong answer.
+- **`stkcraft_knowledge::cache`** — the derived library in the key-value store, with the key changing
+  when any file's metadata does, and the manifest kept so the cache holds one corpus rather than every
+  revision of it.
+- **`Library::open_cached`**, and `stkcraft knowledge` reports `parsed / reused` so a person can see
+  whether the cache worked.
+
+### Fixed
+
+- **A hit could resolve to the wrong passage.** The index kept the passage's global position where it
+  meant the passage's position within its document, so every document after the first resolved to
+  nothing — a ranking bug that looked like "one document matched". Caught by a test that asserted the
+  right document comes first, and now pinned by `owner()` returning the two indices separately.
+
+### Not built yet
+
+- **No embedding model and no filled vector index** — the store is ready; the model is a decision.
+- **The control channel**, **PDF ingestion** and the **paper corpus fetcher** are the next three steps.
+
 ## [0.1.34] — Storage, and the provenance that makes a number checkable
 
 The storage design was fixed last release; this one implements it in `crates/framework/storage`, and

@@ -132,7 +132,9 @@ run that produced it and to what that run read.
 - **No PostgreSQL path.** The schema is portable and the driver swap is deferred.
 - **No embeddings and no vector index in use**: the store exists and is tested, and it holds nothing
   until an embedding model is chosen. The lexical index in `stkcraft-knowledge` is the retrieval.
-- **The knowledge index is not cached in the KV store yet**: a library is re-tokenized at start. That
-  is the next consumer, and it is what makes a paper corpus practical.
+- **The knowledge index is cached in the KV store**: the whole assembled library — documents and index —
+  under a key derived from every file's path, size and modification time, so a re-open is one read and
+  an edited corpus replaces its entry rather than accumulating one per save. That is measured in
+  `CHANGELOG.md` 0.1.35: 1.43 s → 0.55 s and 173 MB → 124 MB on a 2 000-document corpus.
 - **No corpus fetcher**: the papers the knowledge base should hold need a pinned, checksummed download
   like `cargo xtask fetch-data`.

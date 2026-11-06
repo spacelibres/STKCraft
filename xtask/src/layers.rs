@@ -91,6 +91,13 @@ pub const LAYOUT: &[CrateSpec] = &[
         path: "crates/framework/i18n",
         layer: 0,
     },
+    // Persistence is infrastructure: the record, the cache and the vector store depend on `core` and
+    // nothing else, and every layer above reads through them (docs/design/storage.md).
+    CrateSpec {
+        name: "stkcraft-storage",
+        path: "crates/framework/storage",
+        layer: 1,
+    },
     CrateSpec {
         name: "stkcraft-time",
         path: "crates/framework/time",
@@ -136,13 +143,6 @@ pub const LAYOUT: &[CrateSpec] = &[
     CrateSpec {
         name: "stkcraft-extensions",
         path: "crates/framework/extensions",
-        layer: 3,
-    },
-    // Persistence: the record, the cache and the vector store. One crate owns it, so no other crate
-    // opens a database or writes a key-value file (docs/design/storage.md).
-    CrateSpec {
-        name: "stkcraft-storage",
-        path: "crates/framework/storage",
         layer: 3,
     },
     CrateSpec {

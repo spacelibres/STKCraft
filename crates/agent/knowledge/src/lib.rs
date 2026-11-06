@@ -34,6 +34,9 @@
 //!   invent a number.
 //! - **Hostile input is bounded before it is read**: file count, file size, a directory depth and a
 //!   skip list, so pointing the library at `/` is slow rather than fatal.
+//! - **A re-open costs only what changed.** The derived index is cached in the key-value store, keyed
+//!   by each file's path, size and modification time, so a paper corpus is parsed once and a second
+//!   run is a directory walk.
 //!
 //! # What it deliberately is not
 //!
@@ -53,10 +56,14 @@
 )]
 #![forbid(unsafe_code)]
 
+pub mod cache;
 pub mod chunk;
+pub mod index;
 pub mod library;
 pub mod tokens;
 
+pub use cache::Reuse;
 pub use chunk::{Chunk, chunk};
-pub use library::{Document, Hit, Library, Limits, Search, load_directory};
+pub use index::Index;
+pub use library::{Document, Hit, Library, Limits, Opened, Search, load_directory};
 pub use tokens::{query_tokens, tokenize, tokens};

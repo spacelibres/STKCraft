@@ -28,9 +28,12 @@ pub struct Chunk {
     /// One-based last line, inclusive.
     pub line_end: usize,
     /// The lines themselves, joined with `\n`.
+    ///
+    /// The passage holds no tokens of its own: a `String` per token costs 24 bytes plus its heap for
+    /// every word in the corpus, which on a paper library is hundreds of megabytes for text that is
+    /// already here. The index interns each token once and stores `u32` ids instead
+    /// ([`crate::index::Index`]).
     pub text: String,
-    /// The tokens of `text`, in order — the index's view of the passage.
-    pub tokens: Vec<String>,
 }
 
 impl Chunk {
@@ -112,7 +115,6 @@ fn build(index: usize, start: usize, end: usize, lines: &[&str]) -> Chunk {
         index,
         line_start: start + 1,
         line_end: end,
-        tokens: crate::tokens::tokenize(&text),
         text,
     }
 }
