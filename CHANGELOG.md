@@ -9,6 +9,21 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.18] — A fetch that says whether it fetched anything
+
+`cargo xtask fetch-data` now ends with a line you can read at a glance — `12 file(s), 3 fetched,
+9 already present, 6.6 GB on disk` — and takes `--force` to re-download everything it already has.
+Both exist because "did it run?" was a question the output did not answer: a run that found every
+file in place printed twelve identical "present and verified" lines and looked like it had done
+nothing.
+
+### Added
+
+- **A summary line** ending every run, counting what was fetched and what was already there.
+- **`--force`**, which re-downloads and re-verifies, for proving the download path works without
+  deleting files by hand first.
+- **Readable sizes** in the per-file line: `32.7 MB` rather than `0.0 GB`.
+
 ## [0.1.17] — All the bulk data, fetched in the background
 
 `cargo xtask fetch-data` now knows every bulk file this project will need, not only the ephemerides:

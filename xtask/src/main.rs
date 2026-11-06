@@ -713,9 +713,16 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
     // correctness one — the checksum is what decides whether a download was any good.
     let mut directory = root.join("data");
     let mut jobs = DOWNLOAD_JOBS;
+    let mut force = false;
     let mut positional = 0_usize;
     let mut arguments = args.iter();
     while let Some(argument) = arguments.next() {
+        if argument == "--force" || argument == "-f" {
+            // Re-download even when the file is already there and correct: the way to prove the
+            // download path works without deleting anything by hand.
+            force = true;
+            continue;
+        }
         if argument == "--jobs" || argument == "-j" {
             let value = arguments
                 .next()
@@ -737,12 +744,20 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
     }
     fs::create_dir_all(&directory)
         .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+    let mut fetched = 0_usize;
+    let mut verified = 0_usize;
+    let mut bytes = 0_u64;
     for (name, url, expected) in DATA_FILES {
         let path = directory.join(name);
+        if path.exists() && force {
+            fs::remove_file(&path).map_err(|error| format!("{name}: {error}"))?;
+        }
         if path.exists() {
             let actual = sha256_of(&path)?;
             if actual == expected {
                 println!("{name}: present and verified");
+                verified += 1;
+                bytes += fs::metadata(&path).map_or(0, |meta| meta.len());
                 continue;
             }
             return Err(format!(
@@ -752,6 +767,8 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
         }
         fetch_file(name, url, &path, jobs)?;
         let actual = sha256_of(&path)?;
+        fetched += 1;
+        bytes += fs::metadata(&path).map_or(0, |meta| meta.len());
         if actual != expected {
             return Err(format!(
                 "{name}: downloaded file hashes {actual}, expected {expected}"
@@ -759,6 +776,13 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
         }
         println!("{name}: fetched and verified");
     }
+    // A summary is what makes "did it actually run?" a question the output answers: a run that
+    // found everything already in place says so, in numbers.
+    println!(
+        "data: {} file(s), {fetched} fetched, {verified} already present, {} on disk",
+        DATA_FILES.len(),
+        human_size(bytes)
+    );
     Ok(())
 }
 
@@ -774,14 +798,26 @@ const MAX_DOWNLOAD_JOBS: usize = 32;
 /// Files below this size are fetched in one request: the bookkeeping would cost more than it saves.
 const PARALLEL_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024;
 
+/// A byte count a person can read: megabytes below a gigabyte, gigabytes above.
+fn human_size(bytes: u64) -> String {
+    let gb = 1e9_f64;
+    let mb = 1e6_f64;
+    let size = bytes as f64;
+    if size >= gb {
+        format!("{:.1} GB", size / gb)
+    } else {
+        format!("{:.1} MB", size / mb)
+    }
+}
+
 /// Fetch one file, in parallel ranges when it is large enough to be worth it.
 fn fetch_file(name: &str, url: &str, path: &Path, jobs: usize) -> Result<(), String> {
     let size = remote_size(url)?;
     match size {
         Some(size) if size >= PARALLEL_THRESHOLD_BYTES && jobs > 1 => {
             println!(
-                "{name}: fetching {url} in {jobs} parallel ranges ({:.1} GB)",
-                size as f64 / 1e9
+                "{name}: fetching {url} in {jobs} parallel ranges ({})",
+                human_size(size)
             );
             download_ranges(name, url, path, size, jobs)
         }
