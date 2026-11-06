@@ -11,6 +11,7 @@ use stkcraft_astro_engine::{Arg, Args, Registry, Scenario};
 use stkcraft_astro_sgp4::TwoLineElement;
 use stkcraft_framework_core::Angle;
 
+use crate::knowledge::{library as knowledge_library, opened as knowledge_opened};
 use crate::render;
 
 /// What the CLI can be asked to do.
@@ -924,16 +925,6 @@ fn history() -> Result<(), String> {
     Ok(())
 }
 
-/// The user's knowledge base: `--knowledge <dir>`, or `STKCRAFT_KNOWLEDGE`, or the configuration
-/// directory's `knowledge/`.
-///
-/// A `--knowledge` path that does not exist is an error with the path in it: a person who pointed the
-/// platform at their documents deserves to know it read nothing, rather than getting answers that
-/// silently came from memory.
-fn knowledge_library() -> Result<stkcraft_agent_knowledge::Library, String> {
-    Ok(knowledge_opened()?.library)
-}
-
 /// Say which files in the directory are not in the library, and why.
 ///
 /// A person who dropped a paper in the folder and cannot search it is owed the reason rather than a
@@ -946,43 +937,6 @@ fn knowledge_skipped(opened: &stkcraft_agent_knowledge::Opened) {
     for skipped in &opened.skipped {
         println!("    {skipped}");
     }
-}
-
-/// The library and what opening it cost, so the command can say whether the cache worked.
-fn knowledge_opened() -> Result<stkcraft_agent_knowledge::Opened, String> {
-    let explicit = std::env::var("STKCRAFT_KNOWLEDGE")
-        .ok()
-        .map(std::path::PathBuf::from);
-    let directory = match explicit {
-        Some(directory) => directory,
-        None => crate::prefs::knowledge_dir().ok_or_else(|| {
-            "this platform has no configuration directory for a knowledge base".to_owned()
-        })?,
-    };
-    if !directory.is_dir() {
-        if std::env::var_os("STKCRAFT_KNOWLEDGE").is_some() {
-            return Err(format!(
-                "STKCRAFT_KNOWLEDGE points at {}, which is not a directory",
-                directory.display()
-            ));
-        }
-        // No library yet is the normal state of a fresh install, and it is not an error.
-        return Ok(stkcraft_agent_knowledge::Opened {
-            library: stkcraft_agent_knowledge::Library::default(),
-            reuse: stkcraft_agent_knowledge::Reuse::default(),
-            skipped: Vec::new(),
-        });
-    }
-    // The derived index is cached under the data directory, so a second run over a paper corpus is a
-    // directory walk rather than a re-parse of every document.
-    let cache = stkcraft_framework_storage::Paths::for_user()
-        .ok()
-        .map(|paths| stkcraft_framework_storage::Cache::at(paths.cache().join("knowledge")));
-    stkcraft_agent_knowledge::Library::open_cached(
-        &directory,
-        stkcraft_agent_knowledge::Limits::default(),
-        cache.as_ref(),
-    )
 }
 
 /// Run the `knowledge` subcommand: list the library, or search it.

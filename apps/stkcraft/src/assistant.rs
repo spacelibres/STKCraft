@@ -121,11 +121,22 @@ impl Responder for DeepSeekResponder {
 /// Build the real responder, or say why it cannot exist.
 fn deepseek(skills: &std::path::Path, scenario: &Scenario) -> Result<Box<dyn Responder>, String> {
     let model = crate::prefs::model_provider()?;
-    let server =
-        stkcraft_agent_mcp::Server::new(scenario.clone(), stkcraft_agent_mcp::load_skills(skills));
+    let server = session_server(skills, scenario, crate::knowledge::library)?;
     Ok(Box::new(DeepSeekResponder {
         agent: stkcraft_agent_runtime::Agent::new(model, server),
     }))
+}
+
+/// Construct the assistant's tool session without creating a model client.
+fn session_server(
+    skills: &std::path::Path,
+    scenario: &Scenario,
+    load_library: impl FnOnce() -> Result<stkcraft_agent_knowledge::Library, String>,
+) -> Result<stkcraft_agent_mcp::Server, String> {
+    Ok(
+        stkcraft_agent_mcp::Server::new(scenario.clone(), stkcraft_agent_mcp::load_skills(skills))
+            .with_knowledge(load_library()?),
+    )
 }
 
 /// The assistant panel's state.
@@ -581,5 +592,56 @@ mod tests {
             State::Failed(message) => assert!(message.contains("Type a question")),
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod knowledge_tests {
+    use super::*;
+    #[test]
+    fn initialization_attaches_library_without_model() {
+        let mut server = session_server(
+            std::path::Path::new("missing-skills"),
+            &Scenario::empty("test"),
+            || {
+                let doc = stkcraft_agent_knowledge::Document {
+                    path: "sensor.md".into(),
+                    bytes: 40,
+                    pages: None,
+                    limited: false,
+                    ocr_pages: 0,
+                    formulas: vec![],
+                    chunks: stkcraft_agent_knowledge::chunk::chunk(
+                        "Maximum off-nadir angle is 45 degrees.",
+                    ),
+                };
+                Ok(stkcraft_agent_knowledge::Library::from_documents(
+                    std::path::Path::new("."),
+                    vec![doc],
+                ))
+            },
+        )
+        .unwrap();
+        let response = server.handle(&serde_json::json!({"jsonrpc":"2.0", "id":1, "method":"tools/call", "params":{"name":"knowledge.search", "arguments":{"query":"maximum off-nadir angle"}}})).unwrap();
+        let text = response
+            .pointer("/result/content/0/text")
+            .and_then(serde_json::Value::as_str)
+            .unwrap();
+        assert!(text.contains("sensor.md:lines 1-1"), "{text}");
+        assert!(text.contains("45 degrees"), "{text}");
+        assert_eq!(
+            response.pointer("/result/structuredContent/missed"),
+            Some(&serde_json::json!(false))
+        );
+    }
+    #[test]
+    fn initialization_surfaces_loader_error() {
+        let result = session_server(
+            std::path::Path::new("missing-skills"),
+            &Scenario::empty("test"),
+            || Err("library unavailable".into()),
+        );
+        assert_eq!(result.err().unwrap(), "library unavailable");
     }
 }

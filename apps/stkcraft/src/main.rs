@@ -36,6 +36,7 @@ mod control;
 mod extensions;
 mod fonts;
 mod frame_builder;
+mod knowledge;
 mod prefs;
 mod render;
 mod screenshot;

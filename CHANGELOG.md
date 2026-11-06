@@ -9,6 +9,16 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.81] — The window's assistant reads the configured library
+
+### Fixed
+
+- The assistant now loads the same configured knowledge directory and cache as CLI and MCP
+  sessions. Documents that could be searched from the terminal are no longer absent solely
+  because a question was asked in the window.
+- An explicitly configured missing knowledge directory is reported during assistant initialization;
+  a fresh installation without a default library remains a valid empty-library session.
+
 ## [0.1.80] — Malformed model calls cannot become default actions
 
 ### Fixed
