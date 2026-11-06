@@ -623,6 +623,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn the_entropy_device_is_read_for_a_stated_length() {
         // The regression: reading `/dev/urandom` to the end allocates until the machine dies. This
         // test cannot prove the absence of a runaway on its own — a hang is a hang — but it pins the

@@ -81,6 +81,8 @@ pub fn store_credential_at(path: &std::path::Path, key: &str) -> Result<(), Stri
 }
 
 /// Make a file readable only by its owner, on the platforms that have modes.
+// Keep the fallible Unix signature on other platforms too.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn restrict(path: &std::path::Path) -> Result<(), String> {
     #[cfg(unix)]
     {

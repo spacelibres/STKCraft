@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 mod api_docs;
+mod downloads;
 mod i18n;
 mod layers;
 mod translate;
@@ -1301,7 +1302,7 @@ fn task_fetch_standards(args: &[String]) -> Result<(), String> {
         .zip(urls.iter())
         .map(|((name, hash, _), url)| (*name, url.as_str(), *hash))
         .collect();
-    let (fetched, verified, bytes) = fetch_verified(&entries, &directory, jobs, force)?;
+    let (fetched, verified, bytes) = downloads::fetch_verified(&entries, &directory, jobs, force)?;
     println!(
         "standards: {} file(s), {fetched} fetched, {verified} already present, {} on disk",
         STANDARD_FILES.len(),
@@ -4263,20 +4264,48 @@ fn run_curl(
     Ok(())
 }
 
-/// The lower-case hex SHA-256 of a file, computed with `sha256sum`.
+/// The lower-case hex SHA-256 of an ordinary file, streamed with bounded memory.
 fn sha256_of(path: &Path) -> Result<String, String> {
-    let output = std::process::Command::new("sha256sum")
-        .arg(path)
-        .output()
-        .map_err(|error| format!("could not run sha256sum: {error}"))?;
-    if !output.status.success() {
-        return Err(format!("sha256sum failed for {}", path.display()));
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    use std::io::Read;
+
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("could not inspect {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("not a regular file: {}", path.display()));
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.split_whitespace()
-        .next()
-        .map(str::to_owned)
-        .ok_or_else(|| "sha256sum printed nothing".to_owned())
+    let mut file = fs::File::open(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+    if !file
+        .metadata()
+        .map_err(|error| format!("could not inspect {}: {error}", path.display()))?
+        .is_file()
+    {
+        return Err(format!("not a regular file: {}", path.display()));
+    }
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = match file.read(&mut buffer) {
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(format!("could not read {}: {error}", path.display())),
+        };
+        if count == 0 {
+            break;
+        }
+        let bytes = buffer
+            .get(..count)
+            .ok_or_else(|| format!("invalid read length for {}", path.display()))?;
+        hasher.update(bytes);
+    }
+    let mut hex = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        write!(&mut hex, "{byte:02x}")
+            .map_err(|error| format!("could not format SHA-256: {error}"))?;
+    }
+    Ok(hex)
 }
 
 /// Run `git` in the workspace root and fail with its output if it does.
@@ -4310,6 +4339,69 @@ fn validate_version(text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_handles_spaces_and_unicode_paths() -> Result<(), String> {
+        let directory =
+            std::env::temp_dir().join(format!("stkcraft sha256 星 {}", std::process::id()));
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let path = directory.join("known bytes 星.txt");
+        fs::write(&path, b"abc").map_err(|error| error.to_string())?;
+        let actual = sha256_of(&path);
+        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        // NIST FIPS 180-4 SHA-256 example message "abc".
+        assert_eq!(
+            actual.as_deref(),
+            Ok("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_matches_empty_and_multi_buffer_vectors() -> Result<(), String> {
+        let directory =
+            std::env::temp_dir().join(format!("stkcraft-hash-vectors-{}", std::process::id()));
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let empty = directory.join("empty");
+        let million_a = directory.join("million-a");
+        fs::write(&empty, b"").map_err(|error| error.to_string())?;
+        fs::write(&million_a, vec![b'a'; 1_000_000]).map_err(|error| error.to_string())?;
+        let empty_hash = sha256_of(&empty);
+        let million_a_hash = sha256_of(&million_a);
+        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        // SHA-256 standard vectors: empty message and NIST's one million ASCII 'a' bytes.
+        assert_eq!(
+            empty_hash.as_deref(),
+            Ok("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+        assert_eq!(
+            million_a_hash.as_deref(),
+            Ok("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_rejects_missing_files_and_directories() -> Result<(), String> {
+        let directory =
+            std::env::temp_dir().join(format!("stkcraft-hash-invalid-{}", std::process::id()));
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let missing = sha256_of(&directory.join("missing"));
+        let not_file = sha256_of(&directory);
+        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        assert!(matches!(missing, Err(error) if error.contains("could not inspect")));
+        assert!(matches!(not_file, Err(error) if error.contains("not a regular file")));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sha256_rejects_devices_before_reading() {
+        assert!(matches!(
+            sha256_of(Path::new("/dev/zero")),
+            Err(error) if error.contains("not a regular file")
+        ));
+    }
 
     #[test]
     fn the_smallest_component_is_the_one_that_moves() {

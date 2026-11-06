@@ -9,6 +9,31 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.79] — Development data verifies on Windows
+
+### Fixed
+
+- The data and document downloaders compute SHA-256 in Rust instead of invoking `sha256sum`.
+  Windows developers no longer need a separate Unix checksum utility, and paths containing
+  backslashes, spaces or non-ASCII names no longer make correctly downloaded files fail verification.
+  Hashing uses a fixed-size buffer and rejects non-regular files before reading them; published
+  URLs and expected checksums remain unchanged.
+- The Windows quality gate no longer requires the Unix-only `/dev/urandom` regression to run,
+  and accepts the shared fallible permission-setting signature on platforms without Unix modes.
+- Configured OCR commands use the native Windows command shell on Windows, with the PDF path and
+  page passed through environment variables. Unix keeps its existing shell syntax.
+
+### Changed
+
+- The CCSDS corpus downloader uses `--jobs` for bounded concurrent document downloads. Each document
+  still has to match its pinned checksum, and an independent failure no longer prevents the remaining
+  documents from being attempted; failures are collected and reported at the end.
+
+### Not built yet
+
+- This changes local verification, not upstream availability: a changed or unavailable source
+  still fails acquisition rather than bypassing its recorded checksum.
+
 ## [0.1.78] — The arc closes with its evidence in one place
 
 A final verification pass, and the roadmap rewritten to say what is shipped rather than what was planned.
