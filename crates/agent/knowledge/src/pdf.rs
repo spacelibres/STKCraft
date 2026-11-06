@@ -79,7 +79,7 @@ pub struct Page {
 }
 
 /// What a PDF yielded.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Extracted {
     /// The pages read, in order. A page with no text is here too, with empty text.
     pub pages: Vec<Page>,
@@ -89,6 +89,14 @@ pub struct Extracted {
     pub unnamed: usize,
     /// How many pages were left unread because a bound was reached.
     pub skipped: usize,
+    /// The regions the text layer says are mathematics, with their boxes.
+    ///
+    /// Layer 1 of `docs/design/mathematics.md`: characters and baselines, no model. The font evidence
+    /// needs the face's *name*, which the interpreter exposes only as an identifier, so it is not used
+    /// yet — stated here rather than left for a reader to discover from a miss.
+    pub regions: Vec<crate::math::Region>,
+    /// For each region, in the same order, the sentence that introduces it: what it solves.
+    pub problems: Vec<Option<String>>,
 }
 
 impl Extracted {
@@ -215,9 +223,16 @@ pub fn extract_with(bytes: &[u8], bounds: &Bounds) -> Result<Extracted, PdfError
         extracted.glyphs += device.glyphs;
         extracted.unnamed += device.unnamed;
         let exhausted = device.exhausted;
+        let (text, mut regions, problems) = device.into_parts();
+        // The page number each region is on, and the sentences, travel with the regions.
+        for (region, problem) in regions.iter_mut().zip(problems) {
+            region.page = index + 1;
+            extracted.problems.push(problem);
+        }
+        extracted.regions.append(&mut regions);
         extracted.pages.push(Page {
             number: index + 1,
-            text: device.into_text(),
+            text,
         });
         if exhausted {
             // The page was cut short, so everything after it is unread.
@@ -327,13 +342,18 @@ impl TextDevice {
         }
     }
 
-    /// The page's text: lines top to bottom, paragraph breaks as blank lines.
-    fn into_text(self) -> String {
+    /// The page's text, and the regions on it that are mathematics.
+    ///
+    /// One pass over the fragments, because the segmenter needs the same spans the text is assembled
+    /// from: a region that disagreed with the text about where a line is would cite a box the reader
+    /// cannot find.
+    fn into_parts(self) -> (String, Vec<crate::math::Region>, Vec<Option<String>>) {
         let spans = order(fragments(self.placed), MAX_COLUMN_DEPTH);
+        let regions = regions_of(&spans);
         let mut text = String::new();
         let mut current: Option<(f64, f64, String)> = None;
         let mut last: Option<(f64, f64)> = None;
-        for span in spans {
+        for span in &spans {
             let same_line = current
                 .as_ref()
                 .is_some_and(|(y, em, _)| (span.y - *y).abs() <= 0.4 * em.max(span.em));
@@ -350,15 +370,64 @@ impl TextDevice {
                 if let Some((y, em, assembled)) = current.take() {
                     emit(&mut text, &mut last, y, em, &assembled);
                 }
-                current = Some((span.y, span.em, span.text));
+                current = Some((span.y, span.em, span.text.clone()));
             }
         }
         if let Some((y, em, assembled)) = current {
             emit(&mut text, &mut last, y, em, &assembled);
         }
-        text
+        let problems = regions
+            .iter()
+            .map(|region| introducing_sentence(&spans, region))
+            .collect();
+        (text, regions, problems)
     }
 }
+
+/// The mathematics on one page, as regions of text the layer can see.
+///
+/// The evidence is the characters a span carries. A span is one baseline by construction, so the
+/// baseline-shift evidence would need the sub- and superscript grouping the interpreter performs, and the
+/// font evidence needs a face name it exposes only as an identifier: both are stated as missing in
+/// [`Extracted::regions`] rather than quietly assumed.
+fn regions_of(spans: &[Span]) -> Vec<crate::math::Region> {
+    let runs: Vec<crate::math::Run> = spans
+        .iter()
+        .map(|span| crate::math::Run {
+            page: 1,
+            text: span.text.clone(),
+            x0: span.x0,
+            x1: span.x1,
+            y: span.y,
+            em: span.em,
+            fonts: Vec::new(),
+            baselines: 1,
+        })
+        .collect();
+    crate::math::segment(&runs)
+}
+
+/// The sentence that introduces a region: the nearest text line above it, when there is one close by.
+///
+/// "What problem does this formula solve" is answered by the paper's own words, so the sentence is taken
+/// from the line above and never written by us. A formula at the top of a page, or one separated by more
+/// than [`PROBLEM_GAP_EM`] from anything, has no sentence — `None`, not an invented caption.
+fn introducing_sentence(spans: &[Span], region: &crate::math::Region) -> Option<String> {
+    spans
+        .iter()
+        .filter(|span| {
+            span.y < region.y0 && region.y0 - span.y <= PROBLEM_GAP_EM * span.em.max(1.0)
+        })
+        .max_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|span| span.text.trim().to_owned())
+        .filter(|text| !text.is_empty())
+}
+
+/// How far above a formula its introducing sentence may be, in ems.
+///
+/// Two lines of leading is a caption under a figure or a sentence above a display equation; further than
+/// that and the line above is the end of an unrelated paragraph.
+pub const PROBLEM_GAP_EM: f64 = 4.0;
 
 impl<'a> Device<'a> for TextDevice {
     fn set_soft_mask(&mut self, _: Option<SoftMask<'a>>) {}
@@ -930,5 +999,53 @@ mod tests {
             extracted.pages[0].text,
             "Maximum off-nadir angle is 45 degrees.\n"
         );
+    }
+
+    #[test]
+    fn a_display_equation_in_a_real_pdf_becomes_a_region_with_its_sentence() {
+        // The wiring, end to end: a PDF with a sentence and an equation under it. The region must land
+        // on the equation's own box, and the sentence — the paper's words, not ours — must come with it.
+        let content = format!(
+            "{}BT /F1 12 Tf 72 700 Td (The slant range follows from the law of cosines:) Tj ET\n\
+             BT /F1 12 Tf 72 660 Td (\\050r\\0512 = h2 + R2 \\261 2hR cos\\050\\056\\051) Tj ET\n",
+            crate::pdf::test_line("4.2 Range and geometry", 740),
+        );
+        let extracted = extract(&single(&content), 1 << 20).expect("a readable page");
+        assert!(
+            !extracted.regions.is_empty(),
+            "no region found; text was {:?}",
+            extracted.pages[0].text
+        );
+        let region = &extracted.regions[0];
+        assert_eq!(region.page, 1);
+        // The box is the equation's line, not the whole page.
+        assert!(
+            (region.y0 - region.y1).abs() < 1.0,
+            "the region spans several lines: {region:?}"
+        );
+        assert!(
+            extracted.pages[0].text.contains("cos"),
+            "the text layer lost the equation: {:?}",
+            extracted.pages[0].text
+        );
+        // The sentence above it is the answer to "what does this formula solve", taken from the paper.
+        assert_eq!(
+            extracted.problems[0].as_deref(),
+            Some("The slant range follows from the law of cosines:"),
+            "{:?}",
+            extracted.problems
+        );
+    }
+
+    #[test]
+    fn a_page_of_prose_has_no_regions() {
+        let content = format!(
+            "{}{}",
+            crate::pdf::test_line("The satellite is in a low orbit.", 720),
+            crate::pdf::test_line("Its period is about ninety minutes.", 704),
+        );
+        let extracted = extract(&single(&content), 1 << 20).expect("a readable page");
+        assert_eq!(extracted.regions.len(), 0, "{:?}", extracted.regions);
+        assert_eq!(extracted.problems.len(), 0);
     }
 }

@@ -9,6 +9,43 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.55] — Segmentation reaches the real PDF pipeline, and the sentence comes with it
+
+Step 1 of `docs/design/mathematics.md` is wired in: `pdf::extract` now runs `math::segment` over the
+fragments it already builds, so a real document produces **regions with boxes** as it is read, and each
+region carries the sentence above it — the paper's own words answering *what does this formula solve*.
+
+`Extracted` gained `regions` and `problems`, both filled in the same pass that assembles the text. That
+sameness is the point: a region that disagreed with the text about where a line is would cite a box a
+reader cannot find.
+
+### Added
+
+- **`Extracted::{regions, problems}`**, and `pdf::introducing_sentence`, which takes the nearest line
+  above a region within 4 em and returns `None` — not an invented caption — when there is nothing there.
+- **`PROBLEM_GAP_EM`**, the bound on "close enough to be the sentence that introduces it".
+
+### Stated, not hidden
+
+- **The evidence used today is the characters, and only the characters.** The font evidence needs a
+  face *name*, which the interpreter exposes only as an identifier, and the baseline-shift evidence needs
+  the sub/superscript grouping the interpreter performs. Both are recorded as missing in
+  `Extracted::regions` rather than quietly assumed — which is why the test that proves the wiring feeds
+  the equation a real mathematical operator (`±`): without one, a formula set in body face is
+  indistinguishable from prose at this layer, and the test says so instead of pretending otherwise.
+
+### Verified
+
+`cargo test -p stkcraft-agent-knowledge`: 66 tests. Two new ones: a real PDF with a sentence and an
+equation yields one region, a single-line box, and the sentence as its `problem`; a page of prose yields
+no regions at all. On the real corpus, the 495-document CCSDS index still builds and still reports
+393 468 passages — the wiring did not disturb what was already measured.
+
+### Not built yet
+
+- **The index and the reader**: formulas are produced but not yet stored (the store exists; the library
+  does not hold one) or searchable, and `knowledge.search` does not return them yet.
+
 ## [0.1.54] — Formulas can be written and read back, and the box is the key
 
 0.1.53 added the table; this makes it usable: `Store::record_formula` and `Store::formulas`, with the
