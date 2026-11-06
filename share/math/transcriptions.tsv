@@ -1,0 +1,20 @@
+# The transcription table: what the pipeline must find, and what it must NOT find.
+#
+# `docs/design/mathematics.md` calls this the instrument that measures recognition instead of asserting it.
+# Columns, tab-separated:
+#
+#   document  page  x0  y0  x1  y1  expect        note
+#
+# `expect` is `formula` (a region must cover this box, within two points) or `not-formula` (no region may
+# cover it). The negative rows below were taken from a real run of `cargo xtask math-regions` on
+# data/standards/502x0b1s.pdf: they are table rows, numbered-rule prose and keyword lines that layer 2
+# promoted, and they are what 0.1.61's changelog says layer 2 gets wrong.
+#
+# Run `cargo xtask formulas` to check; it is not part of `cargo xtask ci`, because it needs the corpus and
+# because a red measurement is a fact to report, not a reason to block a build.
+502x0b1s.pdf	17	190	223	198	223	not-formula	a lone equals sign in a table cell
+502x0b1s.pdf	19	211	497	409	497	not-formula	a table row: Maneuver duration (If = 0, ...)
+502x0b1s.pdf	19	211	511	395	511	not-formula	a table row: Mass change during maneuver
+502x0b1s.pdf	23	144	247	543	323	not-formula	numbered rules prose, centred, full of + and -
+502x0b1s.pdf	33	117	585	543	693	not-formula	numbered rules prose: integer and float notation
+502x0b1s.pdf	43	198	456	332	456	not-formula	a keyword line: Keyword = Value Notation

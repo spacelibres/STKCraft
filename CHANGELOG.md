@@ -9,6 +9,45 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.63] — The transcription table, and it is red on purpose
+
+`share/math/transcriptions.tsv` and `cargo xtask formulas` are the instrument
+`docs/design/mathematics.md` asked for: a table of regions the pipeline must find (`formula`) and regions it
+must **not** (`not-formula`), checked against the real corpus.
+
+The first table is deliberately made of **negative rows only** — the six regions that 0.1.61's
+`math-regions` printed from the ODM book, each a table row, a numbered-rules paragraph or a keyword line.
+Running it:
+
+```
+formulas: 502x0b1s.pdf:page 17: FALSE POSITIVE (a lone equals sign in a table cell)
+formulas: 502x0b1s.pdf:page 19: FALSE POSITIVE (a table row: Maneuver duration (If = 0, ...))
+formulas: 502x0b1s.pdf:page 19: FALSE POSITIVE (a table row: Mass change during maneuver)
+formulas: 502x0b1s.pdf:page 23: FALSE POSITIVE (numbered rules prose, centred, full of + and -)
+formulas: 502x0b1s.pdf:page 33: FALSE POSITIVE (numbered rules prose: integer and float notation)
+formulas: 502x0b1s.pdf:page 43: FALSE POSITIVE (a keyword line: Keyword = Value Notation)
+formulas: 6 row(s) checked, 0 correct, 6 wrong
+```
+
+**This is the point.** The table is red because layer 2 is wrong, and it says so in six specific places
+with the reason for each. From here, fixing layer 2 is a matter of making rows go green, and no claim about
+formula recognition can be made that the table does not support.
+
+### Added
+
+- **`share/math/transcriptions.tsv`** — the table, with its column meaning written at the top: document,
+  page, box, expectation, note.
+- **`cargo xtask formulas`** — checks it against `data/standards/`, printing every row that is wrong and
+  exiting with a failure. Deliberately **not** part of `cargo xtask ci`: it needs the 548 MB corpus, and a
+  red measurement is a fact to report rather than a reason to block a build.
+
+### Not built yet
+
+- **Layer 2 is still wrong for these six**, and the positive rows — the equations that must be found — are
+  absent because the ODM book has none set in a way the current pipeline can see. The next step is to fix
+  the rule (a table row is not an equation) and add positive rows from a document that does typeset
+  mathematics.
+
 ## [0.1.62] — OCR that runs, and says how much of a document came from a scan
 
 The OCR interface is no longer a promise: `STKCRAFT_OCR` is a command, and the library runs it on every

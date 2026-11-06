@@ -60,6 +60,7 @@ fn main() -> ExitCode {
         Some("fetch-data") => task_fetch_data(args.get(1..).unwrap_or_default()),
         Some("papers" | "fetch-papers") => task_fetch_papers(args.get(1..).unwrap_or_default()),
         Some("math-regions") => task_math_regions(args.get(1..).unwrap_or_default()),
+        Some("formulas") => task_formulas(args.get(1..).unwrap_or_default()),
         Some("standards" | "fetch-standards") => {
             task_fetch_standards(args.get(1..).unwrap_or_default())
         }
@@ -129,8 +130,10 @@ Tasks:
   papers    download the paper corpus the knowledge base is tested against, verified
   standards download every CCSDS publication, verified (the set we align to)
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
+  formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   standards download every CCSDS publication, verified (the set we align to)
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
+  formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   fetch-data  download the ephemeris kernels and tables, verified
   lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
@@ -870,6 +873,82 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
 ///
 /// A row is `page<TAB>x0<TAB>y0<TAB>x1<TAB>y1<TAB>problem<TAB>unicode`, with tabs inside a field replaced
 /// by spaces and an absent problem written as `-`.
+/// Check the transcription table: the regions the pipeline must find, and the ones it must not.
+///
+/// `share/math/transcriptions.tsv` is the table; `data/standards/` is the corpus. Every `not-formula` row
+/// that a region covers is a false positive, and every `formula` row that no region covers is a miss, and
+/// both are printed with the row that caused them. The exit status is the count of failures, so a caller
+/// (and a person) can tell "measured, and wrong" from "measured, and right".
+fn task_formulas(_args: &[String]) -> Result<(), String> {
+    let root = workspace_root();
+    let table = fs::read_to_string(root.join("share/math/transcriptions.tsv"))
+        .map_err(|error| format!("could not read the transcription table: {error}"))?;
+    let corpus = root.join("data/standards");
+    let mut checked = 0_usize;
+    let mut failures = Vec::new();
+    for line in table.lines() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [document, page, x0, y0, x1, y1, expect, note] = fields[..] else {
+            failures.push(format!("malformed row: {line}"));
+            continue;
+        };
+        let number = |text: &str| {
+            text.parse::<f64>()
+                .map_err(|_| format!("`{text}` is not a number"))
+        };
+        let (page, x0, y0, x1, y1) = (
+            page.parse::<usize>().map_err(|_| "bad page".to_owned())?,
+            number(x0)?,
+            number(y0)?,
+            number(x1)?,
+            number(y1)?,
+        );
+        let bytes = fs::read(corpus.join(document)).map_err(|error| {
+            format!("could not read {document} (run `cargo xtask standards`): {error}")
+        })?;
+        let extracted = stkcraft_agent_knowledge::extract(&bytes, 64 << 20)
+            .map_err(|error| format!("{document}: {error}"))?;
+        let covering = extracted.regions.iter().any(|region| {
+            region.page == page
+                && (region.x0 - x0).abs() <= 2.0
+                && (region.y0 - y0).abs() <= 2.0
+                && (region.x1 - x1).abs() <= 2.0
+                && (region.y1 - y1).abs() <= 2.0
+        });
+        checked += 1;
+        match expect {
+            "formula" if !covering => {
+                failures.push(format!(
+                    "{document}:page {page}: MISSED, expected a region ({note})"
+                ));
+            }
+            "not-formula" if covering => {
+                failures.push(format!("{document}:page {page}: FALSE POSITIVE ({note})"));
+            }
+            "formula" | "not-formula" => {}
+            other => failures.push(format!(
+                "{document}:page {page}: unknown expectation `{other}`"
+            )),
+        }
+    }
+    for failure in &failures {
+        eprintln!("formulas: {failure}");
+    }
+    println!(
+        "formulas: {checked} row(s) checked, {} correct, {} wrong",
+        checked.saturating_sub(failures.len()),
+        failures.len()
+    );
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} transcription row(s) are wrong", failures.len()))
+    }
+}
+
 fn task_math_regions(args: &[String]) -> Result<(), String> {
     let Some(path) = args.iter().find(|argument| !argument.starts_with('-')) else {
         return Err(
