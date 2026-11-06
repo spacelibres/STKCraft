@@ -18,6 +18,8 @@ stkcraft-extensions.workspace = true
 stkcraft-viewport.workspace = true
 # The agent interface: `stkcraft mcp` serves the command registry over stdio.
 stkcraft-mcp.workspace = true
+# The control channel a launcher or a sibling app drives this session through.
+stkcraft-control.workspace = true
 # The interface strings and their catalogs. The catalogs are an optional build input: without any,
 # every lookup shows English.
 stkcraft-i18n.workspace = true

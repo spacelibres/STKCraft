@@ -59,6 +59,19 @@ the same session. An MCP client sees the library as two tools — `knowledge.sea
   spec.pdf spec.txt` — and the library indexes it.
 - **No writing.** The library is read-only: the platform never edits, moves or deletes a document.
 
+## A conversation outlives the process
+
+The agent's memory is a **session**: a transcript at
+`~/.local/share/stkcraft/sessions/<id>.jsonl`, one JSON object per message, written as the
+conversation happens. `stkcraft chat --sessions` lists them and `chat --session <id>` resumes one, so
+closing the terminal costs nothing but the typing.
+
+When a session outgrows the context budget (`CONTEXT_BUDGET_CHARS`), the oldest *turns* are dropped —
+never half a turn, because a tool result whose call is gone is a request a model API rejects — and the
+transcript gains a note saying so. The model therefore knows the conversation has a past it cannot
+see, instead of silently believing it began this morning. That is the same shape a harness keeps its
+own sessions in.
+
 ## Where this is going
 
 - Page-level citations for PDF, and a `.docx`/`.xlsx` text extraction, so a citation can name a page.

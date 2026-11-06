@@ -60,6 +60,7 @@ fn main() -> ExitCode {
         Some("fetch-data") => task_fetch_data(args.get(1..).unwrap_or_default()),
         Some("i18n") => task_i18n(args.get(1..).unwrap_or_default()),
         Some("api-docs") => task_api_docs(args.get(1..).unwrap_or_default()),
+        Some("lockfile") => task_lockfile_check(),
         Some("help" | "-h" | "--help") | None => {
             print_help();
             Ok(())
@@ -80,19 +81,47 @@ fn main() -> ExitCode {
     }
 }
 
+/// The workflow's lockfile check, as a task of its own: the file matches what is committed.
+fn task_lockfile_check() -> Result<(), String> {
+    let root = workspace_root();
+    let status = Command::new("git")
+        .args(["diff", "--exit-code", "--", "Cargo.lock"])
+        .current_dir(&root)
+        .status();
+    match status {
+        Ok(status) if status.success() => {
+            println!("lockfile: Cargo.lock matches the repository");
+            Ok(())
+        }
+        Ok(_) => Err(
+            "Cargo.lock changed during the gate: commit it, because a build against a lockfile that \
+             is not in the repository is not the build CI runs"
+                .to_owned(),
+        ),
+        // No git, or no repository: the check is about what a commit contains, and a source tarball
+        // has no commits.
+        Err(_) => {
+            println!("lockfile: no git checkout, skipping");
+            Ok(())
+        }
+    }
+}
+
 fn print_help() {
     println!(
         "\
 Usage: cargo xtask <task>
 
 Tasks:
-  ci        fmt check, clippy, tests, assets, layers, wasm (the gate before a commit)
+  ci        fmt check, clippy, tests, assets, layers, wasm, i18n, api-docs, version and the
+            lockfile check — what the GitHub Actions gate runs, in one command
   fmt       cargo fmt --check over the workspace
   layers    enforce crate layering (a crate may depend only on lower layers)
   assets    every asset in the repo has a row in ATTRIBUTION.md
   wasm      cargo check --target wasm32-unknown-unknown for the portable crates
   i18n      interface catalogs: check them, report coverage, translate
             (`i18n`, `i18n report`, `i18n translate --language de`)
+  lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
             (`api-docs translate --language de` translates it)
   version   print or set the workspace version (`version set 0.2.0`)
@@ -142,10 +171,26 @@ fn task_ci() -> Result<(), String> {
         ("version", task_version_check),
     ];
 
+    // The workflow's last check is `git diff --exit-code -- Cargo.lock`: a gate that changed the
+    // lockfile built against a lockfile that is not the one in the repository. Locally the same fact
+    // is "this run did not change it", which is what a before/after digest says — comparing against
+    // `HEAD` instead would fail on a dependency that is *about* to be committed, which is the normal
+    // case for the person running the gate.
+    let lockfile = workspace_root().join("Cargo.lock");
+    let before = fs::read(&lockfile).ok();
     for (name, step) in steps {
         println!("==> {name}");
         step()?;
     }
+    let after = fs::read(&lockfile).ok();
+    if before != after {
+        return Err(
+            "Cargo.lock changed during the gate: the build re-resolved a dependency, so the \
+             lockfile in the repository is not the one this gate ran against"
+                .to_owned(),
+        );
+    }
+    println!("lockfile: unchanged by the gate");
     println!("==> ci: all gates passed");
     Ok(())
 }

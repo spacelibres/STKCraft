@@ -174,6 +174,13 @@ pub const LAYOUT: &[CrateSpec] = &[
         path: "crates/agent/runtime",
         layer: APP_LAYER - 1,
     },
+    // The control channel is the same relationship for a launcher instead of a model: it drives the
+    // registry through the MCP server, so it sits at the agent's height rather than the server's.
+    CrateSpec {
+        name: "stkcraft-control",
+        path: "crates/agent/control",
+        layer: APP_LAYER - 1,
+    },
     CrateSpec {
         name: "stkcraft",
         path: "apps/stkcraft",

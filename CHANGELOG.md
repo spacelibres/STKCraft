@@ -9,6 +9,49 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.36] — The launcher's socket, sessions that outlive the process, and the machine-freeze bug
+
+Three things this release, and the third is the one that mattered most.
+
+### Fixed
+
+- **A library read that took a machine down.** `new_token()` read `/dev/urandom` with
+  `std::fs::read`, which reads *to the end of the file* — and a device file never ends. The buffer grew
+  until the kernel OOM-killed the process at **130 GB RSS**, taking the desktop with it (`journalctl`
+  shows the kill, and two other processes failing with `oom-kill`). It now reads a stated 32 bytes with
+  `read_exact`, and `AGENTS.md` states the rule: a device file is never read to the end.
+- **An empty library claimed a match.** `Library::default()` left the evidence threshold at `0.0`, so a
+  search of no documents reported `missed: false` with zero hits and the tool told a model to "quote
+  them". A derived `Default` and a threshold of zero is a search that always finds something.
+- **`cargo xtask ci` now ends with the workflow's lockfile check**, done as a before/after digest: the
+  gate must not re-resolve a dependency. Comparing against `HEAD` instead would fail on a dependency
+  that is about to be committed, which is the normal case.
+
+### Added
+
+- **`crates/agent/control`** — the launcher-facing socket, the family's shape: `stkcraft control --port
+  7979`, a token in `$XDG_RUNTIME_DIR/stkcraft/control-<port>.token` with mode `0600`, `auth` required
+  before anything else, and a constant-time token comparison. Methods: `version`,
+  `engine.commands`, `engine.execute`, `scenario.read`, `knowledge.search`, `knowledge.documents` — all
+  of them through the MCP server, so the registry stays the single source of what can be done.
+- **Sessions.** A conversation is a transcript on disk (`~/.local/share/stkcraft/sessions/<id>.jsonl`),
+  one JSON object per message, appended as it happens: `chat` prints its id, `chat --sessions` lists
+  them and `chat --session <id>` resumes one. When the conversation outgrows the context budget the
+  oldest turns are dropped at a user message and the transcript gains a note, so the model knows it has
+  a past it cannot see. This is the shape a harness keeps its own sessions in.
+
+### Changed
+
+- **`docs/standards.md` §7** describes `crates/agent/` as the *driving* surfaces — a model and a
+  launcher are the same thing from the engine's side — and §6 records the control channel as built,
+  with the window-side integration still open.
+
+### Not built yet
+
+- **The window does not open the control channel** and `ui.screenshot` is not a method, so a launcher
+  can drive the engine but not photograph the window.
+- **PDF ingestion** and the **paper corpus fetcher** are the next two steps.
+
 ## [0.1.35] — A paper corpus opens in half a second, because the index is interned and cached
 
 This was supposed to be "put the knowledge index in the key-value cache". Measuring first said the

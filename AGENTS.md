@@ -144,8 +144,16 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 - **Units are types.** `Angle`, `Distance`, `Duration` and `EpochOffset` exist so a
   degrees/radians mix-up is a compile error. Do not add `From<f64>` conversions.
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
-- **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`,
-  tests, assets, i18n, layers, wasm, version). Commit after every arc that builds and passes.
+- **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`, tests, assets,
+  i18n, api-docs, layers, wasm, version, and the lockfile check the workflow ends with). It is the
+  same gate `.github/workflows/ci.yml` runs through the shared `gate.yml`, so a commit that passes it
+  locally is a commit whose CI gate passes on Linux. Two things it cannot check locally and CI can:
+  the other matrix legs (macOS, Windows) and the packaging lint. Commit after every arc that builds
+  and passes.
+- **A device file is never read to the end.** `std::fs::read` on `/dev/urandom` (or any device)
+  allocates until the machine dies — it did exactly that on 2026-11-06, taking a machine's memory to
+  130 GB and getting the process OOM-killed along with the desktop. Read a stated number of bytes with
+  `read_exact`, and bound every read whose length comes from outside the repository.
 - **Every commit is a version.** See "Version control and the changelog" below: the smallest
   version component goes up by one and `CHANGELOG.md` gains the section that names it, in the
   same commit. `cargo xtask ci` fails if the two disagree.
@@ -171,6 +179,10 @@ cargo run --release -p stkcraft -- extensions  # what extension packages are ins
 cargo run --release -p stkcraft -- knowledge   # the documents a model answers from
 cargo run --release -p stkcraft -- knowledge "maximum off-nadir angle"
 cargo run --release -p stkcraft -- history     # what this installation has computed
+cargo run --release -p stkcraft -- chat --sessions          # stored conversations
+cargo run --release -p stkcraft -- chat --session <id>      # resume one
+cargo run --release -p stkcraft -- control --port 7979      # the launcher-facing socket
+cargo xtask lockfile                           # Cargo.lock matches what is committed
 ```
 
 ### Version control and the changelog

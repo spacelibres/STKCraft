@@ -124,7 +124,7 @@ pub struct Opened {
 }
 
 /// The user's documents, indexed for search.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Library {
     root: PathBuf,
     documents: Vec<Document>,
@@ -132,6 +132,21 @@ pub struct Library {
     index: crate::index::Index,
     /// The score a hit needs to count as evidence.
     threshold: f64,
+}
+
+impl Default for Library {
+    /// An empty library, with the evidence threshold at its published default.
+    ///
+    /// A derived `Default` would leave the threshold at `0.0`, which makes every search "found
+    /// something" — including a search of an empty library. A session with no documents must say so.
+    fn default() -> Self {
+        Self {
+            root: PathBuf::new(),
+            documents: Vec::new(),
+            index: crate::index::Index::default(),
+            threshold: DEFAULT_THRESHOLD,
+        }
+    }
 }
 
 impl Library {
@@ -323,10 +338,13 @@ impl Library {
                 .then_with(|| a.line_start.cmp(&b.line_start))
         });
         let best = hits.first().map_or(0.0, |hit| hit.score);
+        // Nothing found is a miss whatever the threshold says: an empty library, an unanswerable
+        // query and a weak match are the same fact to a caller.
+        let missed = hits.is_empty() || best < self.threshold;
         hits.truncate(limit);
         Search {
             hits,
-            missed: best < self.threshold,
+            missed,
             documents: self.documents.len(),
             passages,
         }

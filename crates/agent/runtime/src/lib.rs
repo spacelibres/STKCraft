@@ -44,6 +44,7 @@ use std::io::Write as _;
 use serde_json::{Value, json};
 use stkcraft_mcp::Server;
 
+pub mod session;
 pub mod translate;
 
 /// How many model turns one question may take before the loop stops.
@@ -114,6 +115,9 @@ pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1/chat/completions
 pub const DEFAULT_MODEL: &str = "deepseek-chat";
 
 /// One message in the conversation the model sees.
+///
+/// The same values are what a [`session::Session`] writes to disk, so a conversation survives the
+/// process: the transcript is this enum, one JSON object per line.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     /// The instruction the model starts from.
@@ -373,6 +377,8 @@ pub struct Agent<M: ChatModel> {
     server: Server,
     /// How many turns one question may take.
     pub max_turns: usize,
+    /// The transcript this conversation is written to and resumed from, when there is one.
+    session: Option<crate::session::Session>,
     /// The conversation so far, including the system prompt once it exists.
     ///
     /// Kept across questions so a follow-up can refer to the previous answer: "and the day after?"
@@ -390,7 +396,36 @@ impl<M: ChatModel> Agent<M> {
             server,
             max_turns: MAX_TURNS,
             messages: Vec::new(),
+            session: None,
         }
+    }
+
+    /// Continue a stored conversation, or write a new one to `session`.
+    ///
+    /// The messages the session already holds become the conversation's past, so a resumed session
+    /// answers "and the day after?" with the scenario and the answers of yesterday's questions still
+    /// in front of it.
+    #[must_use]
+    pub fn with_session(mut self, session: crate::session::Session) -> Self {
+        self.messages.clone_from(&session.messages);
+        self.session = Some(session);
+        self
+    }
+
+    /// The session, when this agent keeps one.
+    #[must_use]
+    pub fn session(&self) -> Option<&crate::session::Session> {
+        self.session.as_ref()
+    }
+
+    /// Record a message in the conversation and, when there is one, in its transcript.
+    fn push(&mut self, message: Message) {
+        if let Some(session) = &mut self.session {
+            // A failed write costs the resume, not the answer: it is reported once, by the session,
+            // and the conversation continues in memory.
+            let _ = session.record(message.clone());
+        }
+        self.messages.push(message);
     }
 
     /// How many messages the conversation holds, system prompt included.
@@ -503,10 +538,11 @@ impl<M: ChatModel> Agent<M> {
     ) -> Result<Answer, String> {
         if self.messages.is_empty() {
             let system = self.system_prompt();
-            self.messages.push(Message::System(system));
+            self.push(Message::System(system));
         }
-        self.messages.push(Message::User(question.to_owned()));
+        self.push(Message::User(question.to_owned()));
         self.trim_history();
+        self.compact_session();
 
         let mut answer = Answer::default();
         let tools = self.tools_with_skill_reader();
@@ -514,13 +550,13 @@ impl<M: ChatModel> Agent<M> {
             let turn = self.model.complete(&self.messages, &tools)?;
             if turn.calls.is_empty() {
                 answer.text.clone_from(&turn.text);
-                self.messages.push(Message::Assistant {
+                self.push(Message::Assistant {
                     text: turn.text,
                     calls: Vec::new(),
                 });
                 return Ok(answer);
             }
-            self.messages.push(Message::Assistant {
+            self.push(Message::Assistant {
                 text: turn.text.clone(),
                 calls: turn.calls.clone(),
             });
@@ -528,7 +564,7 @@ impl<M: ChatModel> Agent<M> {
                 let (content, summary) = self.run_tool(&call);
                 observer(&summary);
                 answer.trace.push(summary);
-                self.messages.push(Message::Tool {
+                self.push(Message::Tool {
                     call_id: call.id,
                     content,
                 });
@@ -566,6 +602,25 @@ impl<M: ChatModel> Agent<M> {
             }
             self.messages.drain(first..second);
         }
+    }
+
+    /// Compact the transcript when it outgrows the context budget.
+    ///
+    /// The oldest turns are dropped at a user message and the transcript gains a note, so the model
+    /// knows the conversation has a past it cannot see. This mirrors how a harness keeps a long
+    /// session inside a context window: the recent turns stay exact, the old ones stop being sent,
+    /// and the record says so rather than pretending the conversation began yesterday.
+    fn compact_session(&mut self) {
+        let Some(session) = &mut self.session else {
+            return;
+        };
+        let dropped = session.compact();
+        if dropped == 0 {
+            return;
+        }
+        let note = session.compaction_note();
+        session.messages.clone_into(&mut self.messages);
+        let _ = session.note(&note);
     }
 
     /// Forget the conversation, keeping the system prompt.
@@ -795,6 +850,61 @@ mod tests {
         assert_eq!(seen.len(), 2);
         assert!(seen[0].starts_with("scenario.rename("), "{}", seen[0]);
         assert_eq!(seen[1], "skill.read(compute-passes)");
+    }
+
+    #[test]
+    fn a_session_survives_the_process_and_resumes_where_it_stopped() {
+        // The property the transcript exists for: a conversation is not a process's memory. Close
+        // the terminal, come back, and the previous questions and answers are still in front of the
+        // model.
+        let directory = std::env::temp_dir().join("stkcraft-agent-session");
+        let _ = std::fs::remove_dir_all(&directory);
+        let session = crate::session::Session::create(&directory).expect("a session");
+        let mut agent = agent(vec![
+            Turn {
+                text: "Renamed.".to_owned(),
+                calls: Vec::new(),
+            },
+            Turn {
+                text: "It is still Gemini.".to_owned(),
+                calls: Vec::new(),
+            },
+        ])
+        .with_session(session.clone());
+        agent.ask("Rename it").expect("the first answer");
+        let id = agent.session().expect("a session").id.clone();
+        assert_eq!(
+            agent.history_len(),
+            3,
+            "the transcript is not in the conversation"
+        );
+
+        // A new process: a new agent, the same session on disk.
+        let resumed = crate::session::Session::open(&directory, &id).expect("reopened");
+        assert_eq!(resumed.messages.len(), 3);
+        let mut agent = Agent::new(
+            Script {
+                turns: std::cell::RefCell::new(vec![Turn {
+                    text: "Still Gemini.".to_owned(),
+                    calls: Vec::new(),
+                }]),
+            },
+            Server::new(Scenario::empty("session test"), Vec::new()),
+        )
+        .with_session(resumed);
+        agent
+            .ask("What is it called?")
+            .expect("the follow-up answer");
+        let history = &agent.messages;
+        let questions: Vec<&str> = history
+            .iter()
+            .filter_map(|message| match message {
+                Message::User(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(questions, vec!["Rename it", "What is it called?"]);
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]

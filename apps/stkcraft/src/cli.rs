@@ -26,11 +26,13 @@ pub enum Invocation {
     /// Ask a model a question; it answers by running the engine's commands.
     Ask(String),
     /// Ask questions one after another, in one conversation, on standard input.
-    Chat,
+    Chat(ChatRequest),
     /// List the extension packages installed for this person.
     Extensions,
     /// Show what this installation has computed, newest first.
     History,
+    /// Serve the control channel on a loopback port.
+    Control(ControlRequest),
     /// List or search the person's knowledge base.
     Knowledge(KnowledgeRequest),
 }
@@ -78,9 +80,10 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Planet(request) => planet(&request),
         Invocation::Mcp => mcp(),
         Invocation::Ask(question) => ask(&question),
-        Invocation::Chat => chat(),
+        Invocation::Chat(request) => chat(&request),
         Invocation::Extensions => crate::extensions::list(),
         Invocation::History => history(),
+        Invocation::Control(request) => control(&request),
         Invocation::Knowledge(request) => knowledge(&request),
     }
 }
@@ -105,8 +108,10 @@ COMMANDS
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
     chat        Ask questions in one conversation, reading them from standard input
+                (`chat --session <id>` resumes one; `chat --sessions` lists them)
     extensions  List the extension packages installed for this person
     history     Show what this installation has computed, newest first
+    control     Serve the control channel on loopback (`control --port 7979`)
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
     version     Print the version
@@ -163,9 +168,10 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "passes" => parse_passes(arguments),
         "planet" => parse_planet(arguments),
         "mcp" => Ok(Invocation::Mcp),
-        "chat" => Ok(Invocation::Chat),
+        "chat" => parse_chat(arguments),
         "extensions" => Ok(Invocation::Extensions),
         "history" => Ok(Invocation::History),
+        "control" => parse_control(arguments),
         "knowledge" => Ok(Invocation::Knowledge(KnowledgeRequest {
             query: arguments.next(),
         })),
@@ -559,16 +565,74 @@ fn ask(question: &str) -> Result<(), String> {
 ///
 /// A message when the model cannot be configured, which is the same one `ask` gives: the difference
 /// between the two commands is the number of questions, not what they need to work.
-fn chat() -> Result<(), String> {
+/// What the `chat` subcommand was asked for.
+pub struct ChatRequest {
+    /// The session to resume, if any.
+    session: Option<String>,
+    /// Whether to list the stored sessions instead of chatting.
+    list: bool,
+}
+
+/// Parse `chat [--session <id>] [--sessions]`.
+fn parse_chat<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let mut request = ChatRequest {
+        session: None,
+        list: false,
+    };
+    while let Some(flag) = arguments.next() {
+        match flag.as_str() {
+            "--session" => {
+                request.session = Some(arguments.next().ok_or_else(|| {
+                    "`--session` needs an id; `--sessions` lists them".to_owned()
+                })?);
+            }
+            "--sessions" => request.list = true,
+            other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
+        }
+    }
+    Ok(Invocation::Chat(request))
+}
+
+/// Where a conversation is stored: the data directory's `sessions/`.
+fn sessions_directory() -> Result<std::path::PathBuf, String> {
+    let paths = stkcraft_storage::Paths::for_user().map_err(|error| error.to_string())?;
+    Ok(paths.root().join("sessions"))
+}
+
+fn chat(request: &ChatRequest) -> Result<(), String> {
+    let directory = sessions_directory()?;
+    if request.list {
+        println!(
+            "STKCraft {} — stored conversations in {}",
+            env!("CARGO_PKG_VERSION"),
+            directory.display()
+        );
+        let sessions = stkcraft_agent::session::Session::list(&directory);
+        if sessions.is_empty() {
+            println!("  none yet: `stkcraft chat` starts one");
+        }
+        for id in sessions {
+            println!("  {id}");
+        }
+        return Ok(());
+    }
     let model = stkcraft_agent::DeepSeek::from_environment()?;
     let server = stkcraft_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_mcp::load_skills(&skills_directory()),
     )
     .with_knowledge(knowledge_library()?);
-    let mut agent = stkcraft_agent::Agent::new(model, server);
+    // A conversation is a session on disk, so closing the terminal does not lose it: `--session`
+    // resumes one and the id is printed for next time. This is the same shape a harness keeps its own
+    // sessions in — a transcript that outlives the process.
+    let session = match &request.session {
+        Some(id) => stkcraft_agent::session::Session::open(&directory, id)?,
+        None => stkcraft_agent::session::Session::create(&directory)?,
+    };
+    let id = session.id.clone();
+    let mut agent = stkcraft_agent::Agent::new(model, server).with_session(session);
     println!(
-        "STKCraft {} — ask about the scenario; `exit` ends the conversation.",
+        "STKCraft {} — session {id}; `exit` ends it, `stkcraft chat --session {id}` resumes it.",
         env!("CARGO_PKG_VERSION")
     );
     let stdin = std::io::stdin();
@@ -617,6 +681,48 @@ pub fn skills_directory() -> std::path::PathBuf {
         return path;
     }
     std::path::PathBuf::from("share/skills")
+}
+
+/// What the `control` subcommand was asked for.
+pub struct ControlRequest {
+    /// The loopback port to listen on.
+    port: u16,
+}
+
+/// Parse `control --port <p>`.
+fn parse_control<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let mut port = 7979_u16;
+    while let Some(flag) = arguments.next() {
+        match flag.as_str() {
+            "--port" => {
+                let text = arguments
+                    .next()
+                    .ok_or_else(|| "`--port` needs a number".to_owned())?;
+                port = text
+                    .parse::<u16>()
+                    .map_err(|_| format!("`{text}` is not a port number"))?;
+                if port == 0 {
+                    return Err("`--port 0` would not be reachable; give a real port".to_owned());
+                }
+            }
+            other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
+        }
+    }
+    Ok(Invocation::Control(ControlRequest { port }))
+}
+
+/// Serve the control channel: the same registry, driven over a loopback socket.
+///
+/// The token is written where a client looks (`$XDG_RUNTIME_DIR/stkcraft/control-<port>.token`) and
+/// printed nowhere else: a token on standard output ends up in a terminal scrollback and a log.
+fn control(request: &ControlRequest) -> Result<(), String> {
+    let server = stkcraft_mcp::Server::new(
+        app_demo_scenario()?,
+        stkcraft_mcp::load_skills(&skills_directory()),
+    )
+    .with_knowledge(knowledge_library()?);
+    let session = stkcraft_control::Control::new(server, stkcraft_control::new_token());
+    stkcraft_control::serve(request.port, session)
 }
 
 /// Print what this installation has computed, newest first.

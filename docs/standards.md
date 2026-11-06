@@ -198,10 +198,12 @@ fixed from the start rather than retrofitted.
   stack.
 - **Fonts, bulk data and corpora stay outside the repository**: `craft-fonts`, the NASA kernels via
   `cargo xtask fetch-data`, and the user's own documents in their configuration directory.
-- **Not built: the control channel.** The siblings expose `--control <port>` with a token file so a
-  launcher or another app can drive them; STKCraft has a CLI and an MCP server but no control socket
-  yet, so a launcher cannot drive it the way it drives GridCraft. That is the first interop item on
-  the list, and it is named here so it cannot be forgotten.
+- **The control channel exists**: `stkcraft control --port 7979` writes a token to
+  `$XDG_RUNTIME_DIR/stkcraft/control-<port>.token` (mode `0600`), requires `auth` as the first request,
+  and answers `engine.commands`, `engine.execute`, `scenario.read` and the knowledge tools — the same
+  registry, driven over loopback. **Not built:** the *window* does not open the channel yet (the CLI
+  session does), and `ui.screenshot`, so a launcher can drive the engine but not photograph the
+  window.
 
 ## 7. Crate taxonomy
 
@@ -213,7 +215,7 @@ grouped by subject and every group has a rule about what may live in it.
 |---|---|---|
 | `crates/framework/` | the platform: units, time, translations, persistence, the extension contract | nothing here may know what an orbit is. A name like `body` or `access` appearing here is a bug |
 | `crates/astro/` | the orbital-analysis domain: bodies, frames, ephemerides, propagation, access geometry, the engine | the astronomy lives here and nowhere else. Every constant and formula carries its source |
-| `crates/agent/` | the model-facing surface: the knowledge base, the MCP server, the agent runtime | a crate here drives the engine through the command registry and may not reach past it |
+| `crates/agent/` | the *driving* surfaces: the knowledge base, the MCP server, the agent runtime and the control channel | a crate here drives the engine through the command registry and may not reach past it. Two of them (the shell of the group's name — a model — and the launcher socket) are the same thing from the engine's side |
 | `crates/ui/` | presentation | may use GPU and windowing crates; may not compute physics |
 | `apps/` | the deliverable: window, CLI, MCP server and assistant wiring | thin: every behaviour it offers is a command or a transport |
 | `xtask/` | the build tool | sits outside the layer graph |
