@@ -2266,7 +2266,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stkcraft"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "bytemuck",
  "eframe",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-access"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "serde",
  "stkcraft-body",
@@ -2295,7 +2295,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-body"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "serde",
  "stkcraft-core",
@@ -2304,14 +2304,14 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-core"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "stkcraft-engine"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "serde",
  "serde_json",
@@ -2325,7 +2325,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-ephemeris"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "stkcraft-body",
  "stkcraft-core",
@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-frames"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "serde",
  "stkcraft-core",
@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-sgp4"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "serde",
  "stkcraft-core",
@@ -2352,7 +2352,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-time"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "chrono",
  "serde",
@@ -2363,7 +2363,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-viewport"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "bytemuck",
  "egui",
@@ -3402,7 +3402,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "toml",
 ]

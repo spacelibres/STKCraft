@@ -9,6 +9,28 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.16] — Downloads in parallel
+
+`cargo xtask fetch-data` now fetches large kernels as parallel byte ranges: `curl` processes on
+several threads, joined and then verified, with `--jobs` to trade breadth for bandwidth. The 2.1 GB
+Triton kernel is the reason — one connection took minutes per hundred megabytes.
+
+### Added
+
+- **Parallel ranged downloads** in `fetch-data`, for files of 16 MB and over (eight ranges by
+  default, `--jobs 1..32`). Each range is checked for length before the pieces are joined, a short
+  range is an error rather than a short file, and the recorded SHA-256 still decides whether the
+  result is usable.
+- **`--jobs <n>`** on the task, because the right number depends on the link rather than on a
+  constant this repository can guess.
+
+### Fixed
+
+- **The task's own options were being eaten by the arg parser**: every argument starting with a dash
+  was dropped as though it belonged to cargo, when only the leading ones before the task name do.
+- **`curl`'s `-r` and `-o` were passed in the wrong order**, which made a ranged fetch write the
+  response to standard output instead of the file.
+
 ## [0.1.15] — Triton
 
 Triton was the one body in the table that no fetched kernel could place: the Neptune system file

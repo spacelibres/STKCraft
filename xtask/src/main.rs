@@ -36,11 +36,14 @@ fn workspace_root() -> PathBuf {
 
 fn main() -> ExitCode {
     // Cargo passes `--offline` and similar flags through to the xtask binary; they belong to
-    // cargo, not to the task, so drop everything that starts with a dash before parsing.
-    let args: Vec<String> = env::args()
-        .skip(1)
-        .filter(|a| !a.starts_with('-'))
-        .collect();
+    // cargo, not to the task, and they arrive *before* the task name. Only those leading flags are
+    // dropped: a task's own options come after its name and must survive (`fetch-data --jobs 8`).
+    let raw: Vec<String> = env::args().skip(1).collect();
+    let first_task = raw.iter().position(|argument| !argument.starts_with('-'));
+    let args: Vec<String> = match first_task {
+        Some(index) => raw.iter().skip(index).cloned().collect(),
+        None => Vec::new(),
+    };
     let task = args.first().map(String::as_str);
 
     let result = match task {
@@ -681,9 +684,32 @@ const DATA_FILES: [(&str, &str, &str); 7] = [
 /// `cargo xtask fetch-data [dir]` writes to `data/` by default, which `.gitignore` excludes.
 fn task_fetch_data(args: &[String]) -> Result<(), String> {
     let root = workspace_root();
-    let directory = args
-        .first()
-        .map_or_else(|| root.join("data"), |arg| root.join(arg));
+    // `cargo xtask fetch-data [dir] [--jobs N]`: a job count is a throughput choice, not a
+    // correctness one — the checksum is what decides whether a download was any good.
+    let mut directory = root.join("data");
+    let mut jobs = DOWNLOAD_JOBS;
+    let mut positional = 0_usize;
+    let mut arguments = args.iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--jobs" || argument == "-j" {
+            let value = arguments
+                .next()
+                .ok_or_else(|| "`--jobs` needs a number".to_owned())?;
+            jobs = value
+                .parse::<usize>()
+                .map_err(|_| format!("`{value}` is not a job count"))?
+                .clamp(1, MAX_DOWNLOAD_JOBS);
+            continue;
+        }
+        if argument.starts_with('-') {
+            return Err(format!("unknown option `{argument}`"));
+        }
+        positional += 1;
+        if positional > 1 {
+            return Err("fetch-data takes one directory".to_owned());
+        }
+        directory = root.join(argument);
+    }
     fs::create_dir_all(&directory)
         .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
     for (name, url, expected) in DATA_FILES {
@@ -699,16 +725,7 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
                  delete it and fetch again"
             ));
         }
-        println!("{name}: fetching {url}");
-        let status = std::process::Command::new("curl")
-            .args(["-sS", "--fail", "-L", "-o"])
-            .arg(&path)
-            .arg(url)
-            .status()
-            .map_err(|error| format!("could not run curl: {error}"))?;
-        if !status.success() {
-            return Err(format!("{name}: curl exited with {status}"));
-        }
+        fetch_file(name, url, &path, jobs)?;
         let actual = sha256_of(&path)?;
         if actual != expected {
             return Err(format!(
@@ -716,6 +733,168 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
             ));
         }
         println!("{name}: fetched and verified");
+    }
+    Ok(())
+}
+
+/// How many ranges a large file is split into by default.
+///
+/// Eight is where a satellite link stops being the limit and the server starts being one; the
+/// number is a parameter because a deployment may know better than this constant does.
+const DOWNLOAD_JOBS: usize = 8;
+
+/// The largest job count accepted: past this a download is hammering one server for no gain.
+const MAX_DOWNLOAD_JOBS: usize = 32;
+
+/// Files below this size are fetched in one request: the bookkeeping would cost more than it saves.
+const PARALLEL_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Fetch one file, in parallel ranges when it is large enough to be worth it.
+fn fetch_file(name: &str, url: &str, path: &Path, jobs: usize) -> Result<(), String> {
+    let size = remote_size(url)?;
+    match size {
+        Some(size) if size >= PARALLEL_THRESHOLD_BYTES && jobs > 1 => {
+            println!(
+                "{name}: fetching {url} in {jobs} parallel ranges ({:.1} GB)",
+                size as f64 / 1e9
+            );
+            download_ranges(name, url, path, size, jobs)
+        }
+        _ => {
+            println!("{name}: fetching {url}");
+            run_curl(&["-sS", "--fail", "-L"], Some(path), url, None)
+        }
+    }
+}
+
+/// The remote file's size from its `Content-Length`, if the server says.
+fn remote_size(url: &str) -> Result<Option<u64>, String> {
+    let output = std::process::Command::new("curl")
+        .args(["-sSIL", url])
+        .output()
+        .map_err(|error| format!("could not run curl: {error}"))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    // The last `content-length` in a redirect chain belongs to the final response.
+    let size = text
+        .lines()
+        .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower
+                .strip_prefix("content-length:")
+                .and_then(|rest| rest.trim().parse::<u64>().ok())
+        })
+        .next_back();
+    Ok(size)
+}
+
+/// Download a file as `jobs` byte ranges at once, then join the pieces.
+///
+/// Each range is its own `curl` process on its own thread: `curl` already knows how to resume, to
+/// follow redirects and to fail loudly, and the alternative — an HTTP client in the build tool —
+/// would be a dependency for one command. The pieces are checked for length before they are joined,
+/// so a truncated range is an error rather than a short file.
+fn download_ranges(
+    name: &str,
+    url: &str,
+    path: &Path,
+    size: u64,
+    jobs: usize,
+) -> Result<(), String> {
+    let chunk = size.div_ceil(u64::try_from(jobs).unwrap_or(1));
+    let mut handles = Vec::new();
+    for index in 0..jobs {
+        let start = chunk * u64::try_from(index).unwrap_or(0);
+        if start >= size {
+            break;
+        }
+        let end = (start + chunk).min(size) - 1;
+        let part = part_path(path, index);
+        let url = url.to_owned();
+        handles.push(std::thread::spawn(move || -> Result<(), String> {
+            run_curl(
+                &["-sS", "--fail", "-L", "-r"],
+                Some(&part),
+                &url,
+                Some((start, end)),
+            )?;
+            let expected = end - start + 1;
+            let actual = fs::metadata(&part)
+                .map_err(|error| format!("range {index}: {error}"))?
+                .len();
+            if actual != expected {
+                return Err(format!(
+                    "range {index}: got {actual} bytes, expected {expected}"
+                ));
+            }
+            Ok(())
+        }));
+    }
+    let mut failure = None;
+    for handle in handles {
+        match handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failure = Some(failure.unwrap_or(error)),
+            Err(_) => failure = Some("a download thread panicked".to_owned()),
+        }
+    }
+    if let Some(error) = failure {
+        // Leave no half-written target behind: a stale file would be caught by the checksum, but
+        // only after the next run has tried to use it.
+        let _ = fs::remove_file(path);
+        return Err(format!("{name}: {error}"));
+    }
+    let target = fs::File::create(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut writer = std::io::BufWriter::new(target);
+    for index in 0..jobs {
+        let part = part_path(path, index);
+        if !part.exists() {
+            break;
+        }
+        let mut reader =
+            fs::File::open(&part).map_err(|error| format!("{}: {error}", part.display()))?;
+        std::io::copy(&mut reader, &mut writer)
+            .map_err(|error| format!("{name}: could not join the pieces: {error}"))?;
+        let _ = fs::remove_file(&part);
+    }
+    std::io::Write::flush(&mut writer).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(())
+}
+
+/// Where one range lands while it is being fetched.
+fn part_path(path: &Path, index: usize) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".part{index}"));
+    path.with_file_name(name)
+}
+
+/// Run `curl` with an output file and, for a ranged fetch, the byte range.
+fn run_curl(
+    flags: &[&str],
+    output: Option<&Path>,
+    url: &str,
+    range: Option<(u64, u64)>,
+) -> Result<(), String> {
+    // Built as an explicit argument list rather than a chain of `arg` calls: the order of
+    // `-r <range>` and `-o <file>` decides whether curl writes to the file or to stdout, and that
+    // is exactly the mistake this function made once.
+    let mut arguments: Vec<String> = flags.iter().map(|flag| (*flag).to_owned()).collect();
+    if let Some((start, end)) = range {
+        arguments.push(format!("{start}-{end}"));
+    }
+    if let Some(output) = output {
+        arguments.push("-o".to_owned());
+        arguments.push(output.display().to_string());
+    }
+    arguments.push(url.to_owned());
+    let status = std::process::Command::new("curl")
+        .args(&arguments)
+        .status()
+        .map_err(|error| format!("could not run curl: {error}"))?;
+    if !status.success() {
+        return Err(format!("curl exited with {status}"));
     }
     Ok(())
 }
