@@ -50,10 +50,31 @@ Shipped, in the order it landed:
 | CCSDS and NAIF corpora, hashed and searchable | done | 0.1.47, 0.1.76 |
 | Sources register: who says what, and where they disagree | done | 0.1.76–0.1.77 |
 
-The engine speaks eight commands today: `scenario.rename`, `scenario.set-duration`, `satellite.add`,
-`satellite.remove`, `station.add`, `station.remove`, `access.compute`, `planet.access`.
+The current command catalogue is generated from the engine registry in
+[`docs/api/en/index.md`](docs/api/en/index.md); it includes sensors and target access as well as
+satellites, stations and planetary access. The registry is the capability list, not a second hand-written count.
 
 ## Next
+
+### Specialist-agent foundation
+
+[`docs/design/agents.md`](docs/design/agents.md) records the product and development execution domains,
+their permissions, task contracts and acceptance order. This programme reuses the existing engine,
+MCP and knowledge library; it does not move models or network clients into the numerical kernel.
+
+- **Development inputs ready:** all 540 files in the scientific, paper, CCSDS and NAIF manifests were
+  acquired and verified on 2026-11-07. The real-kernel test compared all 54 CSPICE states; the formula
+  table passed with zero drift. Local files and acquisition evidence remain outside version control.
+- **Response boundary shipped in 0.1.80:** invalid tool calls fail before dispatch; malformed
+  Unicode responses cannot crash the error-reporting path.
+- **Shared library initialization shipped in 0.1.81:** the window loads the configured knowledge
+  root using the CLI's policy. **Conflict-safe scene adoption shipped in 0.1.82:** a stale assistant
+  result cannot replace edits made while the request was running.
+- **Then:** explicit DeepSeek protocol/session compatibility, bounded model transport and usage,
+  role contracts, a controlled executor, and separately evaluated product/development pilots.
+
+The existing single-model loop is still the shipped runtime. A task graph, a role registry and
+development-tool execution are not claimed as implemented by this roadmap.
 
 ### Foundation, in this order — before any new domain feature
 

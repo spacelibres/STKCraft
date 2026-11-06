@@ -41,6 +41,8 @@ enum State {
         /// The model's final text.
         text: String,
     },
+    /// The document changed while the assistant was working.
+    Conflict,
     /// The loop failed, with the reason.
     Failed(String),
 }
@@ -153,6 +155,8 @@ pub struct Assistant {
     run: Option<(Receiver<String>, Receiver<Reply>)>,
     /// A scenario the model produced, waiting to be adopted by the window exactly once.
     adopt: Option<Scenario>,
+    /// Complete document captured when the current request was accepted.
+    base: Option<Scenario>,
     /// How a responder is built.
     factory: Factory,
     /// How many questions the session has answered, for the panel's own readout.
@@ -169,6 +173,7 @@ impl Default for Assistant {
             jobs: None,
             run: None,
             adopt: None,
+            base: None,
             factory: deepseek,
             answered: 0,
         }
@@ -263,6 +268,8 @@ impl Assistant {
         if self.is_running() {
             return;
         }
+        self.base = None;
+        self.adopt = None;
         self.worker(scenario, skills);
         let Some(jobs) = &self.jobs else {
             self.state = State::Failed("The assistant could not start.".to_owned());
@@ -282,6 +289,7 @@ impl Assistant {
                 State::Failed("The assistant stopped; ask again to restart it.".to_owned());
             return;
         }
+        self.base = Some(scenario.clone());
         self.trace.clear();
         self.state = State::Running;
         self.run = Some((trace_rx, result_rx));
@@ -321,13 +329,27 @@ impl Assistant {
             }
             Ok(Err(message)) => {
                 self.state = State::Failed(message);
+                self.base = None;
                 self.run = None;
             }
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
+                self.base = None;
                 self.state = State::Failed("The assistant stopped without an answer.".to_owned());
                 self.run = None;
             }
+        }
+    }
+
+    /// Consume a result only if the window still contains the request's complete base document.
+    fn take_candidate(&mut self, current: &Scenario) -> Option<Scenario> {
+        let candidate = self.adopt.take()?;
+        let base = self.base.take();
+        if base.as_ref() == Some(current) {
+            Some(candidate)
+        } else {
+            self.state = State::Conflict;
+            None
         }
     }
 
@@ -345,6 +367,7 @@ impl Assistant {
         language: &str,
     ) -> Option<Scenario> {
         self.poll();
+        let candidate = self.take_candidate(scenario);
         // The panel translates its own chrome from the same catalogs the rest of the window uses;
         // the answer itself is the model's text and stays in whatever language it answered in.
         macro_rules! tr {
@@ -434,12 +457,16 @@ impl Assistant {
                 ui.label(tr!("Answer"));
                 ui.label(text);
             }
+            State::Conflict => {
+                ui.separator();
+                ui.colored_label(egui::Color32::from_rgb(230, 170, 120), tr!("The scenario changed while the assistant was working. Its result was not applied. Ask again using the current scenario."));
+            }
             State::Failed(message) => {
                 ui.separator();
                 ui.colored_label(egui::Color32::from_rgb(230, 120, 120), message);
             }
         }
-        self.adopt.take()
+        candidate
     }
 }
 
@@ -527,6 +554,116 @@ mod tests {
         panic!("the panel never left the running state");
     }
 
+    fn draw(assistant: &mut Assistant, scenario: &Scenario) -> Option<Scenario> {
+        let ctx = egui::Context::default();
+        let translations =
+            stkcraft_framework_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+        let mut candidate = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                candidate = assistant.ui(
+                    ui,
+                    scenario,
+                    std::path::Path::new("skills"),
+                    &translations,
+                    "en",
+                );
+            });
+        });
+        output.textures_delta.clear();
+        candidate
+    }
+
+    #[test]
+    fn edits_during_request_survive_and_next_question_succeeds() {
+        let base = Scenario::empty("window");
+        let mut assistant = panel(twice);
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        let mut current = base;
+        current.duration_seconds += 60.0;
+        let preserved = current.clone();
+        settle(&mut assistant);
+        assert_eq!(draw(&mut assistant, &current), None);
+        assert_eq!(current, preserved);
+        assert!(matches!(assistant.state, State::Conflict));
+        assert!(assistant.base.is_none());
+        assert_eq!(draw(&mut assistant, &current), None);
+        assert!(matches!(assistant.state, State::Conflict));
+        assistant.start(&current, std::path::Path::new("skills"));
+        settle(&mut assistant);
+        assert!(draw(&mut assistant, &current).is_some());
+        assert_eq!(draw(&mut assistant, &current), None);
+    }
+
+    #[test]
+    fn renamed_scenario_rejects_pending_result() {
+        let base = Scenario::empty("original");
+        let mut assistant = panel(twice);
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        settle(&mut assistant);
+        let mut current = base;
+        current.name = "edited".into();
+        assert_eq!(draw(&mut assistant, &current), None);
+    }
+
+    #[test]
+    fn object_edits_reject_pending_result() {
+        let Ok(base) = crate::app::demo_scenario() else {
+            panic!("invalid demo");
+        };
+        let mut assistant = panel(twice);
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        let mut current = base;
+        let Some(satellite) = current.satellites.first_mut() else {
+            panic!("demo must contain a satellite");
+        };
+        satellite.color = [1, 2, 3];
+        settle(&mut assistant);
+        assert_eq!(draw(&mut assistant, &current), None);
+    }
+
+    #[test]
+    fn unchanged_scenario_accepts_once() {
+        let base = Scenario::empty("window");
+        let mut assistant = panel(twice);
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        settle(&mut assistant);
+        assert!(draw(&mut assistant, &base).is_some());
+        assert_eq!(draw(&mut assistant, &base), None);
+    }
+
+    #[test]
+    fn failed_enqueue_does_not_retain_a_base_or_candidate() {
+        let (jobs, receiver) = channel();
+        drop(receiver);
+        let mut assistant = panel(twice);
+        assistant.jobs = Some(jobs);
+        assistant.question = "compute".into();
+        assistant.start(&Scenario::empty("window"), std::path::Path::new("skills"));
+        assert!(matches!(assistant.state, State::Failed(_)));
+        assert!(assistant.base.is_none());
+        assert!(assistant.adopt.is_none());
+    }
+
+    #[test]
+    fn disconnected_reply_clears_accepted_base() {
+        let (jobs, receiver) = channel();
+        let mut assistant = panel(twice);
+        assistant.jobs = Some(jobs);
+        assistant.question = "compute".into();
+        assistant.start(&Scenario::empty("window"), std::path::Path::new("skills"));
+        assert!(assistant.base.is_some());
+        drop(receiver);
+        assistant.poll();
+        assert!(matches!(assistant.state, State::Failed(_)));
+        assert!(assistant.base.is_none());
+        assert!(assistant.adopt.is_none());
+    }
+
     #[test]
     fn two_questions_go_to_the_same_worker() {
         // The property that makes it a conversation: the second question must reach the responder
@@ -579,6 +716,7 @@ mod tests {
             other => panic!("expected a failure, got {other:?}"),
         }
         assert_eq!(assistant.trace, Vec::<String>::new());
+        assert!(assistant.base.is_none());
         assert_eq!(assistant.adopt.take(), None);
     }
 

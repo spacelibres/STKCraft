@@ -9,6 +9,22 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.82] — Assistant results preserve edits made while they run
+
+### Fixed
+
+- A completed assistant request is adopted only while the window still contains its original
+  scenario. Edits made through the window or control channel while inference runs are preserved;
+  an older result produces a visible conflict instead of silently replacing newer work.
+- A conflicted result is consumed once, and a new question can run against the current scenario.
+
+### Added
+
+- The specialist-agent architecture record defines separate product and development permissions,
+  task outcomes, evidence requirements and staged acceptance. The roadmap links it and uses the
+  generated command catalogue instead of an outdated manual command count. The multi-agent
+  executor remains future work; the shipped model loop is still a single-model loop.
+
 ## [0.1.81] — The window's assistant reads the configured library
 
 ### Fixed
