@@ -147,6 +147,16 @@ impl Server {
         &self.scenario
     }
 
+    /// Replace the scenario the tools act on.
+    ///
+    /// The document belongs to the window or to the client that loaded it, not to the session that
+    /// happens to be serving it, so a session has to be able to take the current document: a model
+    /// that kept answering against the scenario it started with would be answering about a file
+    /// nobody has open.
+    pub fn set_scenario(&mut self, scenario: Scenario) {
+        self.scenario = scenario;
+    }
+
     /// Answer one JSON-RPC message.
     ///
     /// Returns `None` for a notification, which by definition has no response.

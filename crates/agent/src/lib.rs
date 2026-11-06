@@ -50,6 +50,13 @@ use stkcraft_mcp::Server;
 /// better reported than paid for indefinitely.
 pub const MAX_TURNS: usize = 12;
 
+/// How many messages a conversation keeps before the oldest turn is dropped, system prompt aside.
+///
+/// A conversation that grows without bound is a conversation that eventually fails on a context
+/// limit, halfway through an analysis, with the answer already computed in the part that was cut.
+/// Twenty turns is far more than a session needs and far less than a limit anyone will hit.
+pub const MAX_HISTORY: usize = 40;
+
 /// The tool the model calls to read a skill in full.
 pub const SKILL_TOOL: &str = "skill.read";
 
@@ -310,6 +317,12 @@ pub struct Agent<M: ChatModel> {
     server: Server,
     /// How many turns one question may take.
     pub max_turns: usize,
+    /// The conversation so far, including the system prompt once it exists.
+    ///
+    /// Kept across questions so a follow-up can refer to the previous answer: "and the day after?"
+    /// is the natural way to ask, and an agent that forgot everything between questions would force
+    /// every question to restate the scenario it already established.
+    messages: Vec<Message>,
 }
 
 impl<M: ChatModel> Agent<M> {
@@ -320,13 +333,28 @@ impl<M: ChatModel> Agent<M> {
             model,
             server,
             max_turns: MAX_TURNS,
+            messages: Vec::new(),
         }
+    }
+
+    /// How many messages the conversation holds, system prompt included.
+    ///
+    /// Exposed for the panel, which shows a session length, and for tests, which assert that a
+    /// follow-up carries the earlier turns.
+    #[must_use]
+    pub fn history_len(&self) -> usize {
+        self.messages.len()
     }
 
     /// The session, for a caller that wants to read the scenario afterwards.
     #[must_use]
     pub fn server(&self) -> &Server {
         &self.server
+    }
+
+    /// The session, for a caller that has to hand the agent the current document.
+    pub fn server_mut(&mut self) -> &mut Server {
+        &mut self.server
     }
 
     /// The instruction the model starts from.
@@ -412,17 +440,26 @@ impl<M: ChatModel> Agent<M> {
         question: &str,
         observer: &mut F,
     ) -> Result<Answer, String> {
-        let system = self.system_prompt();
-        let mut messages = vec![Message::System(system), Message::User(question.to_owned())];
+        if self.messages.is_empty() {
+            let system = self.system_prompt();
+            self.messages.push(Message::System(system));
+        }
+        self.messages.push(Message::User(question.to_owned()));
+        self.trim_history();
+
         let mut answer = Answer::default();
         let tools = self.tools_with_skill_reader();
         for _ in 0..self.max_turns {
-            let turn = self.model.complete(&messages, &tools)?;
+            let turn = self.model.complete(&self.messages, &tools)?;
             if turn.calls.is_empty() {
-                answer.text = turn.text;
+                answer.text.clone_from(&turn.text);
+                self.messages.push(Message::Assistant {
+                    text: turn.text,
+                    calls: Vec::new(),
+                });
                 return Ok(answer);
             }
-            messages.push(Message::Assistant {
+            self.messages.push(Message::Assistant {
                 text: turn.text.clone(),
                 calls: turn.calls.clone(),
             });
@@ -430,7 +467,7 @@ impl<M: ChatModel> Agent<M> {
                 let (content, summary) = self.run_tool(&call);
                 observer(&summary);
                 answer.trace.push(summary);
-                messages.push(Message::Tool {
+                self.messages.push(Message::Tool {
                     call_id: call.id,
                     content,
                 });
@@ -441,6 +478,42 @@ impl<M: ChatModel> Agent<M> {
             self.max_turns,
             answer.trace.join("; ")
         ))
+    }
+
+    /// Drop the oldest turns when the conversation outgrows [`MAX_HISTORY`].
+    ///
+    /// A turn is cut at a user message, so a tool result is never separated from the call that
+    /// produced it: a conversation trimmed in the middle of a tool exchange is a request the model
+    /// API may reject, and the failure would arrive long after the cause.
+    fn trim_history(&mut self) {
+        while self.messages.len() > MAX_HISTORY {
+            let users: Vec<usize> = self
+                .messages
+                .iter()
+                .enumerate()
+                .filter(|(_, message)| matches!(message, Message::User(_)))
+                .map(|(index, _)| index)
+                .collect();
+            let (Some(&first), Some(&second)) = (users.first(), users.get(1)) else {
+                // One turn, or none: there is nothing older to drop.
+                return;
+            };
+            // A turn starts at a user message; the system prompt is the only thing before it and
+            // must stay, so a first index of zero would mean the invariant had already broken.
+            if first == 0 || second <= first {
+                return;
+            }
+            self.messages.drain(first..second);
+        }
+    }
+
+    /// Forget the conversation, keeping the system prompt.
+    ///
+    /// A session that has gone wrong should be recoverable without restarting the process: the
+    /// scenario lives in the server, so the tools still know everything the document says.
+    pub fn forget(&mut self) {
+        self.messages
+            .retain(|message| matches!(message, Message::System(_)));
     }
 
     /// The engine's tools plus the skill reader.
@@ -536,7 +609,7 @@ impl<M: ChatModel> Agent<M> {
 
 #[cfg(test)]
 #[expect(clippy::expect_used)]
-#[allow(clippy::indexing_slicing)]
+#[allow(clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use super::*;
     use std::cell::RefCell;
@@ -600,6 +673,117 @@ mod tests {
         assert_eq!(seen.len(), 2);
         assert!(seen[0].starts_with("scenario.rename("), "{}", seen[0]);
         assert_eq!(seen[1], "skill.read(compute-passes)");
+    }
+
+    #[test]
+    fn a_follow_up_carries_the_earlier_turns() {
+        // The point of a conversation: "and the day after?" must arrive with the scenario the first
+        // question built, or every follow-up has to restate the whole job.
+        struct Recorder {
+            turns: RefCell<Vec<Turn>>,
+            seen: RefCell<Vec<Vec<Message>>>,
+        }
+
+        impl ChatModel for Recorder {
+            fn complete(&self, messages: &[Message], _tools: &[Value]) -> Result<Turn, String> {
+                self.seen.borrow_mut().push(messages.to_vec());
+                let mut turns = self.turns.borrow_mut();
+                if turns.is_empty() {
+                    return Ok(Turn::default());
+                }
+                Ok(turns.remove(0))
+            }
+        }
+
+        let server = Server::new(Scenario::empty("history test"), Vec::new());
+        let mut agent = Agent::new(
+            Recorder {
+                turns: RefCell::new(vec![
+                    Turn {
+                        text: String::new(),
+                        calls: vec![ToolCall {
+                            id: "call-1".to_owned(),
+                            name: "scenario.rename".to_owned(),
+                            arguments: json!({"name": "Gemini"}),
+                        }],
+                    },
+                    Turn {
+                        text: "Renamed.".to_owned(),
+                        calls: Vec::new(),
+                    },
+                    Turn {
+                        text: "It is still called Gemini.".to_owned(),
+                        calls: Vec::new(),
+                    },
+                ]),
+                seen: RefCell::new(Vec::new()),
+            },
+            server,
+        );
+        agent.ask("Rename it to Gemini").expect("the first answer");
+        agent
+            .ask("What is it called?")
+            .expect("the follow-up answer");
+
+        let requests = agent.model.seen.borrow();
+        assert_eq!(requests.len(), 3);
+        let follow_up = &requests[2];
+        let roles: Vec<&str> = follow_up
+            .iter()
+            .map(|message| match message {
+                Message::System(_) => "system",
+                Message::User(_) => "user",
+                Message::Assistant { .. } => "assistant",
+                Message::Tool { .. } => "tool",
+            })
+            .collect();
+        // system, the first question, its tool call, the tool result, its answer, the follow-up.
+        assert_eq!(
+            roles,
+            ["system", "user", "assistant", "tool", "assistant", "user"]
+        );
+        let tool_content = follow_up
+            .iter()
+            .find_map(|message| match message {
+                Message::Tool { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .expect("the first turn's tool result");
+        assert!(tool_content.contains("Gemini"), "{tool_content}");
+    }
+
+    #[test]
+    fn the_history_is_trimmed_at_a_turn_boundary() {
+        // Trimming inside a tool exchange would send a tool result whose call was gone, which a
+        // model API rejects — with an error that names nothing a reader could act on.
+        let server = Server::new(Scenario::empty("history test"), Vec::new());
+        let turns = (0..MAX_HISTORY)
+            .map(|index| Turn {
+                text: format!("answer {index}"),
+                calls: Vec::new(),
+            })
+            .collect();
+        let mut agent = Agent::new(
+            Script {
+                turns: RefCell::new(turns),
+            },
+            server,
+        );
+        for index in 0..(MAX_HISTORY + 4) {
+            agent.ask(&format!("question {index}")).expect("an answer");
+        }
+        assert!(
+            agent.history_len() <= MAX_HISTORY + 2,
+            "the conversation grew to {} messages",
+            agent.history_len()
+        );
+        // The system prompt is still first, and every request that follows is a user message.
+        match agent.messages.first() {
+            Some(Message::System(_)) => {}
+            other => panic!("the conversation does not start with the system prompt: {other:?}"),
+        }
+        agent.forget();
+        assert_eq!(agent.history_len(), 1);
     }
 
     #[test]

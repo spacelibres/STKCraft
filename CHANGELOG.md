@@ -9,6 +9,49 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.23] — One conversation, not one question
+
+The agent now remembers. `stkcraft chat` asks questions one after another in a single session, and
+the window's assistant panel keeps the same conversation across questions, so "and the day after?"
+is answerable without restating the scenario the previous answer built. The first version of both
+started from nothing every time: every question had to re-establish what was already known, and a
+follow-up was a new problem rather than the next step of one.
+
+### Added
+
+- **`stkcraft chat`** — read a question, answer it, read the next, until `exit`, `quit` or end of
+  input. One agent for the session, so the conversation and the scenario persist; a failed question
+  does not end it, because the next question is usually the correction.
+- **A conversation in `stkcraft-agent`** — messages are kept between questions, with the system
+  prompt written once. `Agent::history_len` reports the length and `Agent::forget` empties the
+  conversation while keeping the system prompt: the scenario lives in the server, so forgetting a
+  discussion does not forget what the tools built.
+- **`MAX_HISTORY`**, forty messages, trimmed at a *turn* boundary — never in the middle of a tool
+  exchange, because a tool result whose call has been dropped is a request the model API rejects,
+  and the rejection arrives long after the cause.
+- **`Server::set_scenario`**, so a session can be handed the current document. The assistant worker
+  takes the window's scenario with every question, which is what keeps an answer about the file the
+  person has open.
+
+### Changed
+
+- **The assistant panel runs one worker for the session**, not one per question: the conversation
+  lives on that thread, and a thread per question would throw it away between answers. The panel
+  shows how many answers the conversation has produced, and a failed turn rebuilds the responder so
+  the next question starts from a consistent history.
+
+### Fixed
+
+- **A failed question left the conversation in a state the next question could not use.** The
+  responder is now rebuilt after a failure rather than reused with a half-finished turn inside it.
+
+### Not built yet
+
+- **No streaming of the model's prose**: the tool-call trace streams, the answer arrives whole.
+- **The conversation is not saved**: closing the window or ending `chat` ends it.
+- **`resources/updated` notifications, `stkcraft mcp` permission prompts and dynamic third-party
+  plugins** are unchanged.
+
 ## [0.1.22] — A tool returns the answer, not a count
 
 `access.compute` used to answer "20 window(s) over 4 pair(s)" and stop. The times — the thing the

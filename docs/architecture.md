@@ -144,6 +144,15 @@ only when the loop has finished — so an answer describes the scenario it was a
 question in flight cannot half-edit the document while a person keeps working. Nothing in the
 engine knows the panel exists.
 
+The worker lives for the session rather than for one question, because the *conversation* lives on
+it: a follow-up can say "and the day after?" only if the agent still holds the scenario, the tool
+calls and the answers before it. `stkcraft chat` is the same thing on a terminal — one agent, many
+questions — and the history is trimmed at a turn boundary when it outgrows `MAX_HISTORY`, never in
+the middle of a tool exchange, because a tool result whose call has been dropped is a request the
+model API rejects long after the cause. Deleting an answer is not the same as forgetting it: the
+scenario lives in the server, so a session can be emptied (`Agent::forget`) without losing what the
+tools already built.
+
 The model's transport is `curl` on standard input rather than an HTTP crate: no TLS stack in the
 build, no client to audit, and the request and response stay text a person can read when a number
 looks wrong. That is the same reasoning that makes the bulk data a `curl` download.

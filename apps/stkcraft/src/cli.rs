@@ -25,6 +25,8 @@ pub enum Invocation {
     Mcp,
     /// Ask a model a question; it answers by running the engine's commands.
     Ask(String),
+    /// Ask questions one after another, in one conversation, on standard input.
+    Chat,
 }
 
 /// The parameters of the `passes` subcommand.
@@ -70,6 +72,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Planet(request) => planet(&request),
         Invocation::Mcp => mcp(),
         Invocation::Ask(question) => ask(&question),
+        Invocation::Chat => chat(),
     }
 }
 
@@ -92,6 +95,7 @@ COMMANDS
     planet      Compute passes over a station on another body
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
+    chat        Ask questions in one conversation, reading them from standard input
     version     Print the version
     help        Print this text
 
@@ -146,6 +150,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "passes" => parse_passes(arguments),
         "planet" => parse_planet(arguments),
         "mcp" => Ok(Invocation::Mcp),
+        "chat" => Ok(Invocation::Chat),
         "ask" => {
             let question = arguments.next().ok_or_else(|| {
                 "`ask` needs a question, e.g. `stkcraft ask \"when does the ISS pass over London?\"`"
@@ -427,6 +432,60 @@ fn ask(question: &str) -> Result<(), String> {
         }
         Err(message) => Err(message),
     }
+}
+
+/// Ask questions one after another, in one conversation, on standard input.
+///
+/// The conversation is the point: a follow-up can say "and the day after?" because the agent still
+/// holds the scenario, the tool calls and the answers of the questions before it. One agent is built
+/// for the session, and `exit`, `quit` or end of input ends it — a model that forgot everything
+/// between questions would make every question restate the whole job.
+///
+/// # Errors
+///
+/// A message when the model cannot be configured, which is the same one `ask` gives: the difference
+/// between the two commands is the number of questions, not what they need to work.
+fn chat() -> Result<(), String> {
+    let model = stkcraft_agent::DeepSeek::from_environment()?;
+    let server = stkcraft_mcp::Server::new(
+        app_demo_scenario()?,
+        stkcraft_mcp::load_skills(&skills_directory()),
+    );
+    let mut agent = stkcraft_agent::Agent::new(model, server);
+    println!(
+        "STKCraft {} — ask about the scenario; `exit` ends the conversation.",
+        env!("CARGO_PKG_VERSION")
+    );
+    let stdin = std::io::stdin();
+    loop {
+        print!("> ");
+        // Flushing by hand is what makes the prompt appear before the read on a pipe as well as on
+        // a terminal; without it the prompt arrives after the answer.
+        if let Err(error) = std::io::Write::flush(&mut std::io::stdout()) {
+            return Err(format!("could not write the prompt: {error}"));
+        }
+        let mut line = String::new();
+        match stdin.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(error) => return Err(format!("could not read a question: {error}")),
+        }
+        let question = line.trim();
+        if question.is_empty() {
+            continue;
+        }
+        if matches!(question, "exit" | "quit") {
+            break;
+        }
+        let mut print = |line: &str| println!("  · {line}");
+        match agent.ask_observing(question, &mut print) {
+            Ok(answer) => println!("{}", answer.text),
+            // A failed question does not end the session: the next one may be the user correcting
+            // the parameter that failed, which is exactly when the conversation is worth keeping.
+            Err(message) => eprintln!("error: {message}"),
+        }
+    }
+    Ok(())
 }
 
 /// Where the skill documents live, if they are anywhere this build can find them.

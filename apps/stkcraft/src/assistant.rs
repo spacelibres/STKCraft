@@ -5,18 +5,23 @@
 //! the panel can show it while it happens. Anything the model does, a person could have done by
 //! hand through a menu, because both go through the command registry.
 //!
-//! # Why a thread
+//! # Why a thread, and why one thread
 //!
 //! A question takes seconds to a minute and a half: the model is a network round trip and every
 //! tool call inside it is real. Doing that in `update` would freeze the window, and freezing the
 //! clock is worse than failing — the app would look like it had hung on a solution that was
-//! working. So the loop runs on a thread of its own and reports through channels the frame drains
-//! without ever blocking.
+//! working. So the question runs on a thread of its own and reports through channels the frame
+//! drains without ever blocking.
 //!
-//! The thread builds its own server from a cloned scenario, so nothing in the engine is shared
-//! across threads and no lock exists. The copy is the point as well as the mechanism: the question
-//! is answered against the scenario it was asked about, and the result is adopted only when the
-//! loop finishes, so a question in flight cannot half-edit the window while a person keeps working.
+//! That thread lives for the session rather than for one question, because the *conversation* lives
+//! on it: "and the day after?" is only answerable if the agent still remembers the scenario the
+//! previous answer built. A thread per question would rebuild the model client and lose the history
+//! every time, which is the one thing a chat interface cannot do.
+//!
+//! The worker keeps its own copy of the session, so nothing in the engine is shared across threads
+//! and no lock exists. The window hands it the current scenario with every question and adopts what
+//! came back only when the loop finishes, so a question in flight cannot half-edit the document
+//! while a person keeps working.
 
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
@@ -40,18 +45,58 @@ enum State {
     Failed(String),
 }
 
-/// One question in flight.
-struct Run {
-    /// Tool-call lines as they arrive, `name(args) → summary`.
-    trace: Receiver<String>,
-    /// The final result: the answer, and the scenario the model left behind.
-    result: Receiver<Result<(String, Scenario), String>>,
+/// What one question produces: the answer, and the scenario the model left behind.
+type Reply = Result<(String, Scenario), String>;
+
+/// How a responder is built. The real one is [`deepseek`]; a test substitutes its own.
+type Factory = fn(&std::path::Path, &Scenario) -> Result<Box<dyn Responder>, String>;
+
+/// One question for the worker.
+struct Job {
+    question: String,
+    /// The document the question is asked about.
+    scenario: Scenario,
+    /// Where each tool-call line goes as it happens.
+    trace: Sender<String>,
+    /// Where the answer goes, once.
+    result: Sender<Reply>,
 }
 
-/// The function that runs one question. A type alias rather than a trait because a test needs to
-/// substitute it and nothing else ever will; the real one is [`run`].
-type Worker =
-    fn(&Scenario, &std::path::Path, &str, &Sender<String>) -> Result<(String, Scenario), String>;
+/// Answers questions, keeping the conversation between them.
+///
+/// A trait rather than a function so a test can answer from a script: the panel's threading,
+/// adoption and failure handling are then exercised with no model, no key and no socket.
+pub trait Responder: Send {
+    /// Answer one question about `scenario`, reporting each tool call to `trace`.
+    fn ask(&mut self, scenario: &Scenario, question: &str, trace: &Sender<String>) -> Reply;
+}
+
+/// The real responder: `DeepSeek` driving the engine's tools, with the conversation kept.
+struct DeepSeekResponder {
+    agent: stkcraft_agent::Agent<stkcraft_agent::DeepSeek>,
+}
+
+impl Responder for DeepSeekResponder {
+    fn ask(&mut self, scenario: &Scenario, question: &str, trace: &Sender<String>) -> Reply {
+        // The window owns the document; the session takes whatever it is given before answering, so
+        // an answer is always about the scenario on screen.
+        self.agent.server_mut().set_scenario(scenario.clone());
+        let mut report = |line: &str| {
+            let _ = trace.send(line.to_owned());
+        };
+        let answer = self.agent.ask_observing(question, &mut report)?;
+        Ok((answer.text, self.agent.server().scenario().clone()))
+    }
+}
+
+/// Build the real responder, or say why it cannot exist.
+fn deepseek(skills: &std::path::Path, scenario: &Scenario) -> Result<Box<dyn Responder>, String> {
+    let model = stkcraft_agent::DeepSeek::from_environment()?;
+    let server = stkcraft_mcp::Server::new(scenario.clone(), stkcraft_mcp::load_skills(skills));
+    Ok(Box::new(DeepSeekResponder {
+        agent: stkcraft_agent::Agent::new(model, server),
+    }))
+}
 
 /// The assistant panel's state.
 pub struct Assistant {
@@ -61,11 +106,16 @@ pub struct Assistant {
     pub question: String,
     state: State,
     trace: Vec<String>,
-    run: Option<Run>,
+    /// Where questions go, once the worker exists.
+    jobs: Option<Sender<Job>>,
+    /// The answer in flight: its trace lines and its one result.
+    run: Option<(Receiver<String>, Receiver<Reply>)>,
     /// A scenario the model produced, waiting to be adopted by the window exactly once.
     adopt: Option<Scenario>,
-    /// How a question is run. The real path is [`run`]; a test substitutes its own.
-    worker: Worker,
+    /// How a responder is built.
+    factory: Factory,
+    /// How many questions the session has answered, for the panel's own readout.
+    answered: usize,
 }
 
 impl Default for Assistant {
@@ -75,9 +125,11 @@ impl Default for Assistant {
             question: String::new(),
             state: State::default(),
             trace: Vec::new(),
+            jobs: None,
             run: None,
             adopt: None,
-            worker: run,
+            factory: deepseek,
+            answered: 0,
         }
     }
 }
@@ -89,11 +141,63 @@ impl Assistant {
         matches!(self.state, State::Running)
     }
 
-    /// Ask the model, on a worker thread.
+    /// Start the worker, if it is not running.
     ///
-    /// The model is configured when the question is asked rather than when the app started: a
-    /// person who exports a key while the window is open should not have to restart it, and one who
-    /// has not gets the sentence that says so rather than a button that does nothing.
+    /// Started on the first question rather than when the panel opens: a window that is merely
+    /// visible must not have made a network call, and a person who never uses the panel never pays
+    /// for it.
+    fn worker(&mut self, scenario: &Scenario, skills: &std::path::Path) {
+        if self.jobs.is_some() {
+            return;
+        }
+        let (tx, rx) = channel::<Job>();
+        let factory = self.factory;
+        let scenario = scenario.clone();
+        let skills = skills.to_path_buf();
+        std::thread::spawn(move || {
+            // Built once per worker, so the conversation survives between questions. A failure
+            // (no key, say) is reported per question rather than ending the thread: a person may
+            // export a key and ask again without restarting the window.
+            let mut responder: Option<Box<dyn Responder>> = None;
+            let mut last_error: Option<String> = None;
+            while let Ok(job) = rx.recv() {
+                if responder.is_none() {
+                    match factory(&skills, &job.scenario) {
+                        Ok(built) => {
+                            responder = Some(built);
+                            last_error = None;
+                        }
+                        Err(message) => {
+                            let _ = job.result.send(Err(message.clone()));
+                            last_error = Some(message);
+                            continue;
+                        }
+                    }
+                }
+                let Some(active) = responder.as_mut() else {
+                    let message = last_error
+                        .clone()
+                        .unwrap_or_else(|| "the assistant could not start".to_owned());
+                    let _ = job.result.send(Err(message));
+                    continue;
+                };
+                let outcome = active.ask(&job.scenario, &job.question, &job.trace);
+                if outcome.is_err() {
+                    // A failed turn may have left a partial conversation behind; the next question
+                    // should start from a session whose history is still consistent.
+                    responder = None;
+                }
+                let _ = job.result.send(outcome);
+            }
+        });
+        self.jobs = Some(tx);
+        let _ = scenario;
+    }
+
+    /// Ask the model, on the worker thread.
+    ///
+    /// The model is configured when the worker starts rather than when the app started: a person
+    /// who exports a key while the window is open should not have to restart it.
     fn start(&mut self, scenario: &Scenario, skills: &std::path::Path) {
         let question = self.question.trim().to_owned();
         if question.is_empty() {
@@ -103,38 +207,44 @@ impl Assistant {
         if self.is_running() {
             return;
         }
-        let scenario = scenario.clone();
-        let skills = skills.to_path_buf();
+        self.worker(scenario, skills);
+        let Some(jobs) = &self.jobs else {
+            self.state = State::Failed("The assistant could not start.".to_owned());
+            return;
+        };
         let (trace_tx, trace_rx) = channel();
         let (result_tx, result_rx) = channel();
+        let job = Job {
+            question,
+            scenario: scenario.clone(),
+            trace: trace_tx,
+            result: result_tx,
+        };
+        if jobs.send(job).is_err() {
+            self.jobs = None;
+            self.state =
+                State::Failed("The assistant stopped; ask again to restart it.".to_owned());
+            return;
+        }
         self.trace.clear();
         self.state = State::Running;
-        self.run = Some(Run {
-            trace: trace_rx,
-            result: result_rx,
-        });
-        let worker = self.worker;
-        std::thread::spawn(move || {
-            let outcome = worker(&scenario, &skills, &question, &trace_tx);
-            // A closed channel means the window closed mid-question; the loop still finishes and
-            // its result is dropped, which is cheaper than teaching the agent a cancellation path.
-            let _ = result_tx.send(outcome);
-        });
+        self.run = Some((trace_rx, result_rx));
     }
 
     /// Drain whatever the worker has reported. Never blocks.
     fn poll(&mut self) {
-        let Some(run) = &self.run else {
+        let Some((trace, result)) = &self.run else {
             return;
         };
-        while let Ok(line) = run.trace.try_recv() {
+        while let Ok(line) = trace.try_recv() {
             self.trace.push(line);
         }
-        match run.result.try_recv() {
+        match result.try_recv() {
             Ok(Ok((text, scenario))) => {
                 self.state = State::Answered { text };
                 self.adopt = Some(scenario);
                 self.run = None;
+                self.answered += 1;
             }
             Ok(Err(message)) => {
                 self.state = State::Failed(message);
@@ -161,6 +271,12 @@ impl Assistant {
     ) -> Option<Scenario> {
         self.poll();
         ui.heading("Assistant");
+        if self.answered > 0 {
+            ui.label(format!(
+                "{answered} answer(s) in this conversation",
+                answered = self.answered
+            ));
+        }
         match stkcraft_agent::DeepSeek::from_environment() {
             Ok(model) => {
                 let host = model
@@ -233,62 +349,73 @@ impl Assistant {
     }
 }
 
-/// The worker: the same loop the command line runs.
-fn run(
-    scenario: &Scenario,
-    skills: &std::path::Path,
-    question: &str,
-    trace: &Sender<String>,
-) -> Result<(String, Scenario), String> {
-    let model = stkcraft_agent::DeepSeek::from_environment()?;
-    let server = stkcraft_mcp::Server::new(scenario.clone(), stkcraft_mcp::load_skills(skills));
-    let mut agent = stkcraft_agent::Agent::new(model, server);
-    let mut report = |line: &str| {
-        let _ = trace.send(line.to_owned());
-    };
-    let answer = agent.ask_observing(question, &mut report)?;
-    Ok((answer.text, agent.server().scenario().clone()))
-}
-
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
     use super::*;
     use std::time::Duration;
 
-    /// A worker that reports two tool calls and answers, so the panel's threading and adoption are
+    /// A responder that answers from a script, so the panel's threading, adoption and restart are
     /// exercised without a model, a key or a socket.
-    #[allow(clippy::unnecessary_wraps)]
-    fn scripted(
-        scenario: &Scenario,
-        _skills: &std::path::Path,
-        question: &str,
-        trace: &Sender<String>,
-    ) -> Result<(String, Scenario), String> {
-        trace
-            .send("scenario.rename(\"Gemini\") → renamed".to_owned())
-            .ok();
-        trace
-            .send("access.compute({}) → 3 pass(es)".to_owned())
-            .ok();
-        let mut produced = scenario.clone();
-        produced.name = format!("{question} answered");
-        Ok(("Three passes.".to_owned(), produced))
+    struct Scripted {
+        answers: std::cell::RefCell<Vec<Result<(String, Scenario), String>>>,
+        questions: std::cell::RefCell<Vec<String>>,
     }
 
-    /// A worker that fails, the way a missing credential does.
-    fn refuses(
-        _scenario: &Scenario,
+    impl Scripted {
+        fn new(answers: Vec<Result<(String, Scenario), String>>) -> Self {
+            Self {
+                answers: std::cell::RefCell::new(answers),
+                questions: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Responder for Scripted {
+        fn ask(
+            &mut self,
+            scenario: &Scenario,
+            question: &str,
+            trace: &Sender<String>,
+        ) -> Result<(String, Scenario), String> {
+            self.questions.borrow_mut().push(question.to_owned());
+            let _ = trace.send(format!("access.compute({{}}) → asked `{question}`"));
+            let mut answers = self.answers.borrow_mut();
+            if answers.is_empty() {
+                return Err("the script ran out".to_owned());
+            }
+            let answer = answers.remove(0);
+            answer.map(|(text, mut produced)| {
+                produced.name = scenario.name.clone();
+                (text, produced)
+            })
+        }
+    }
+
+    /// A factory that answers the first question, then remembers it was asked twice, which is what
+    /// proves the worker thread survives between questions instead of being rebuilt.
+    #[allow(clippy::unnecessary_wraps)]
+    fn twice(
         _skills: &std::path::Path,
-        _question: &str,
-        _trace: &Sender<String>,
-    ) -> Result<(String, Scenario), String> {
+        _scenario: &Scenario,
+    ) -> Result<Box<dyn Responder>, String> {
+        Ok(Box::new(Scripted::new(vec![
+            Ok(("First answer.".to_owned(), Scenario::empty("worker"))),
+            Ok(("Second answer.".to_owned(), Scenario::empty("worker"))),
+        ])))
+    }
+
+    /// A factory whose model is missing, the way a missing key behaves.
+    fn refuses(
+        _skills: &std::path::Path,
+        _scenario: &Scenario,
+    ) -> Result<Box<dyn Responder>, String> {
         Err("DEEPSEEK_API_KEY is not set".to_owned())
     }
 
-    fn panel(worker: Worker) -> Assistant {
+    fn panel(factory: Factory) -> Assistant {
         Assistant {
-            worker,
+            factory,
             ..Assistant::default()
         }
     }
@@ -296,36 +423,35 @@ mod tests {
     /// Wait for the worker to finish. The loop is bounded so a worker that never reports fails the
     /// test instead of hanging the suite.
     fn settle(assistant: &mut Assistant) {
-        for _ in 0..2_000 {
+        for _ in 0..3_000 {
+            assistant.poll();
             if !assistant.is_running() {
                 return;
             }
-            assistant.poll();
             std::thread::sleep(Duration::from_millis(1));
         }
         panic!("the panel never left the running state");
     }
 
     #[test]
-    fn a_question_reports_its_trace_and_offers_the_scenario_once() {
-        let mut assistant = panel(scripted);
+    fn two_questions_go_to_the_same_worker() {
+        // The property that makes it a conversation: the second question must reach the responder
+        // the first one used, or the history is thrown away between answers.
+        let mut assistant = panel(twice);
         assistant.question = "When is the pass?".to_owned();
         assistant.start(&Scenario::empty("window"), std::path::Path::new("skills"));
         settle(&mut assistant);
+        assistant.question = "And tomorrow?".to_owned();
+        assistant.start(&Scenario::empty("window"), std::path::Path::new("skills"));
+        settle(&mut assistant);
 
-        assert_eq!(assistant.trace.len(), 2);
-        let first = assistant.trace.first().map_or("", String::as_str);
-        assert!(first.starts_with("scenario.rename("), "{first}");
         match &assistant.state {
-            State::Answered { text } => assert_eq!(text, "Three passes."),
+            State::Answered { text } => assert_eq!(text, "Second answer."),
             other => panic!("expected an answer, got {other:?}"),
         }
-        let Some(adopted) = assistant.adopt.take() else {
-            panic!("the panel produced no scenario for the window to adopt");
-        };
-        assert_eq!(adopted.name, "When is the pass? answered");
-        // The window adopts once: a second frame must not re-apply a stale scenario.
-        assert!(assistant.adopt.take().is_none());
+        assert_eq!(assistant.answered, 2);
+        assert_eq!(assistant.trace.len(), 1);
+        assert!(assistant.adopt.take().is_some());
     }
 
     #[test]
@@ -339,14 +465,14 @@ mod tests {
             other => panic!("expected a failure, got {other:?}"),
         }
         assert_eq!(assistant.trace, Vec::<String>::new());
+        assert_eq!(assistant.adopt.take(), None);
     }
 
     #[test]
-    fn an_empty_question_is_refused_without_starting_a_thread() {
-        let mut assistant = panel(scripted);
+    fn an_empty_question_is_refused_without_starting_a_worker() {
+        let mut assistant = panel(twice);
         assistant.question = "   ".to_owned();
         assistant.start(&Scenario::empty("window"), std::path::Path::new("skills"));
-        // Still idle: nothing was spawned, so nothing can arrive later.
         assert!(!assistant.is_running());
         match &assistant.state {
             State::Failed(message) => assert!(message.contains("Type a question")),

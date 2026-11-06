@@ -128,6 +128,7 @@ cargo run --release -p stkcraft                # the desktop app
 cargo run --release -p stkcraft -- --help      # the command line
 cargo run --release -p stkcraft -- mcp         # serve the engine to a model over stdio
 cargo run --release -p stkcraft -- ask "..."   # ask the model, with the engine as its tools
+cargo run --release -p stkcraft -- chat        # ask questions in one conversation
 cargo xtask ci                                 # the full gate
 cargo xtask version                            # print the workspace version
 cargo xtask version bump                       # bump it, smallest component
