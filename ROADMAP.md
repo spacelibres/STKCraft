@@ -39,6 +39,8 @@ Shipped, in the order it landed:
 | Crate names repeat their directory, all groups | done, enforced by the gate | 0.1.42 |
 | The window serves the control channel, with `ui.state` and `ui.screenshot` | done | 0.1.43 |
 | The model layer: any OpenAI-compatible endpoint, the credential stored `0600` | done | 0.1.44 |
+| Every CCSDS publication collected, hashed and searchable | done, 495 documents | 0.1.47 |
+| Compaction writes a model-written summary that survives a resume | done | 0.1.46 |
 
 The engine speaks eight commands today: `scenario.rename`, `scenario.set-duration`, `satellite.add`,
 `satellite.remove`, `station.add`, `station.remove`, `access.compute`, `planet.access`.
@@ -83,6 +85,17 @@ The assistant panel runs one conversation with no session, no model choice and n
 it uses F2's sessions, shows citations as places (`paper.pdf:page 7`), can be stopped mid-turn, and has
 a settings section for model, key, language and the knowledge directory — the parts F1 and F3 made
 settable, reachable without a command line.
+
+#### F4b. Mathematics as a first-class store — the correctness floor
+
+A misread formula makes every number computed from it wrong, and nobody notices — the failure this
+project exists to prevent. `docs/design/mathematics.md` is the decision record: formulas get their own
+table, their own recogniser, their own box-shaped citation, and a rule that a formula is never guessed.
+
+**Done when** (1) display mathematics is segmented from the text layer deterministically, stored with its
+box and Unicode, indexed, and cited as `paper.pdf:page 12, formula at (120,340)-(300,388)`; (2) a
+transcription table over the CCSDS corpus and the SGP4 papers passes; (3) OCR and a formula model run
+behind two environment commands, recording engine and version, with the `unrecognised` path tested.
 
 #### F5. Sensors and targets, and what they can see
 

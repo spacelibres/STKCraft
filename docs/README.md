@@ -8,6 +8,7 @@ An index, so that nobody has to guess where something is written down.
 | [design/architecture.md](design/architecture.md) | The crate map, the layers, and how a scenario flows through them |
 | [design/storage.md](design/storage.md) | Where state lives: the relational record, the key-value cache, the vector layer |
 | [design/knowledge.md](design/knowledge.md) | The user's own documents: layout, ingestion, search, citations |
+| [design/mathematics.md](design/mathematics.md) | Formulas as a separate store: segmentation, recognition, provenance, citation |
 | [../ROADMAP.md](../ROADMAP.md) | What is shipped, what is next, and the test each step has to pass |
 | [guides/localization.md](guides/localization.md) | The catalog format, the translation commands, adding a language |
 | [guides/ephemeris-data.md](guides/ephemeris-data.md) | Every bulk file, its publisher, its checksum, and the command that fetches it |

@@ -9,6 +9,44 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.48] — Mathematics is a store, not a kind of prose
+
+The requirement: formulas must be recognised well, and stored separately, because a misread formula
+makes every number computed from it wrong and nobody notices. That is a design problem before it is a
+model problem, so this release writes the design down as a decision record — `docs/design/mathematics.md`
+— and puts it in the roadmap as the correctness floor ahead of sensors and targets.
+
+The decisions it records:
+
+- **A formula is never guessed.** Every stored formula carries what the recogniser produced (LaTeX where
+  it exists, Unicode where only characters do), the page and **box**, the image of the region, the
+  engine and version that produced it, and a digest of the pixels. A region that cannot be recognised is
+  stored as `unrecognised` with its image — an invented formula is worse than a missing one, because a
+  missing one says "look at page 12" and an invented one says "trust this number".
+- **Why separate and not a paragraph.** Prose and mathematics fail differently (a wrong word is visible
+  on reading; a moved subscript is not), are found by different means, and cite differently: a formula
+  has no line to cite, it has a box.
+- **Four layers, each skippable.** (1) deterministic segmentation from the text layer the interpreter
+  already delivers — glyphs whose font, baseline or Unicode block say "mathematics"; (2) deterministic
+  layout — centred or indented, spaced away from the body, holding an operator that cannot be prose;
+  (3) an optional external formula recogniser (PNG in, LaTeX out) behind `STKCRAFT_FORMULA_RECOGNIZER`;
+  (4) OCR for scanned pages behind `STKCRAFT_OCR`. Layers 3 and 4 are external for the same reason the
+  model transport is `curl`: a model is configuration in this project, not something linked into the
+  binary.
+- **Where it lives.** One `STRICT` table, `formulas`, with the box, both renderings, the surrounding
+  sentence, the source, the confidence and the digest. The knowledge index indexes the LaTeX tokens, the
+  Unicode fallback *and* the surrounding sentence, so a search for `off-nadir` finds the equation whose
+  caption says off-nadir. The citation is `paper.pdf:page 12, formula at (120,340)-(300,388)`.
+- **"Recognised well" is measured, not asserted.** A transcription table of (document, page, box,
+  expected LaTeX) rows taken from the 495-document CCSDS corpus and the SGP4 papers, where a mismatch
+  fails the test. A recogniser that cannot pass it is not shipped as the default.
+
+### Not built yet
+
+- **The implementation**, in the order the document sets: segmentation and storage first (ours,
+  deterministic), the transcription table next, then OCR and the formula model behind their two
+  environment commands.
+
 ## [0.1.47] — Every CCSDS publication, hashed and searchable
 
 The engine claims to implement CCSDS formats; the knowledge base could search four of the books. Now it
