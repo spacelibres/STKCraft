@@ -16,12 +16,22 @@ This release adds the leg that does it — and it is a **workflow job, not a lin
 design's own answer to "why not use a mature OCR library": use one, through configuration, so that Tesseract
 cannot decide this project's build matrix or break its wasm gate.
 
-- **`crates/agent/knowledge/tests/ocr_real.rs`** — draws a sentence with ImageMagick, wraps the picture in a
-  one-page PDF with img2pdf, and asks the library to read the document. The page has **no text layer**, so
-  the only way text can appear is the configured command:
-  `pdftoppm -r 300 -png … | tesseract - - -l eng`. It asserts the words it drew are the words it read.
+- **`crates/agent/knowledge/tests/ocr_real.rs`** — draws a sentence with Pillow, saves it as a one-page PDF,
+  and asks the library to read the document. The page has **no text layer**, so the only way text can appear
+  is the configured command: `pdftoppm -r 300 -png …` and then `tesseract …-1.png - -l eng`. It asserts the
+  words it drew are the words it read.
 - **`.github/workflows/ci.yml` gains a job `ocr`** that installs `tesseract-ocr`, `tesseract-ocr-eng`,
-  `poppler-utils`, `imagemagick` and `img2pdf`, and runs that test with `--ignored`.
+  `poppler-utils`, `python3-pil` and `fonts-dejavu-core`, and runs that test with `--ignored`.
+
+### Three failures it took to get there, all of them the job's, none of them the engine's
+
+1. `convert` refused to draw: a bare runner has no default face (`unable to read font (null)`).
+2. Naming the face did not help across versions; the page is now drawn with Pillow, which takes a font path.
+3. The pipeline hid its own reason: the test redirected `tesseract`'s stderr to `/dev/null`, and `set -o
+   pipefail` is an **illegal option in dash**, which is what `/bin/sh` is on Linux — so the command failed
+   before doing any work. It is now two stages joined by `&&`, so each failure surfaces.
+
+Green on `main`: `ocr` and `gate` both pass, and the words Tesseract read are the words the test drew.
 
 The test is `#[ignore]`d because the engine is not on a developer's machine by default — this one has
 `pdftoppm` and neither `convert`, `img2pdf` nor Tesseract — so locally it reports `1 ignored` and CI is where
