@@ -541,11 +541,13 @@ fn instant_at(
 /// runs from the repository root. Absent skills are not an error: the tools still work.
 fn mcp() -> Result<(), String> {
     let skills = skills_directory();
+    let loaded = installed_extensions();
     let mut server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_agent_mcp::load_skills(&skills),
     )
-    .with_knowledge(knowledge_library()?);
+    .with_knowledge(knowledge_library()?)
+    .with_extensions(&loaded);
     server.serve()
 }
 
@@ -857,11 +859,27 @@ fn control(request: &ControlRequest) -> Result<(), String> {
 ///
 /// A message when the demo scenario or the knowledge base cannot be opened.
 pub(crate) fn control_session() -> Result<stkcraft_agent_mcp::Server, String> {
+    let loaded = installed_extensions();
     Ok(stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
-    .with_knowledge(knowledge_library()?))
+    .with_knowledge(knowledge_library()?)
+    .with_extensions(&loaded))
+}
+
+/// The packages installed for this person, contributed commands included.
+///
+/// The tier is `Internal` because everything in that directory was put there by the person using the app;
+/// nothing in this program reads a tier from a package.
+pub(crate) fn installed_extensions() -> stkcraft_framework_extensions::Loaded {
+    match crate::prefs::extensions_dir() {
+        Some(directory) => stkcraft_framework_extensions::load(
+            &directory,
+            stkcraft_framework_extensions::TrustTier::Internal,
+        ),
+        None => stkcraft_framework_extensions::Loaded::default(),
+    }
 }
 
 /// Print what this installation has computed, newest first.

@@ -129,6 +129,12 @@ pub struct Server {
     skills: Vec<Skill>,
     /// The user's own documents, searched before the model answers.
     knowledge: stkcraft_agent_knowledge::Library,
+    /// The commands installed packages contribute: an alias over an engine command, with presets.
+    ///
+    /// They are **not** a second dispatch path: an alias resolves to a command in this registry and runs
+    /// through it, which is what keeps "a capability a user has is a capability an agent has" true for
+    /// extensions as well.
+    aliases: Vec<stkcraft_framework_extensions::Alias>,
 }
 
 impl Server {
@@ -137,6 +143,7 @@ impl Server {
     pub fn new(scenario: Scenario, skills: Vec<Skill>) -> Self {
         Self {
             registry: Registry::builtin(),
+            aliases: Vec::new(),
             scenario,
             skills,
             knowledge: stkcraft_agent_knowledge::Library::default(),
@@ -152,6 +159,23 @@ impl Server {
     pub fn with_knowledge(mut self, knowledge: stkcraft_agent_knowledge::Library) -> Self {
         self.knowledge = knowledge;
         self
+    }
+
+    /// Offer the commands installed extensions contribute.
+    ///
+    /// The aliases travel with the packages that brought them (`Loaded`), so a server cannot be given a
+    /// command that no installed package offers.
+    #[must_use]
+    pub fn with_extensions(mut self, loaded: &stkcraft_framework_extensions::Loaded) -> Self {
+        self.aliases = loaded.aliases().into_iter().cloned().collect();
+        self.aliases.sort_by(|a, b| a.id.cmp(&b.id));
+        self
+    }
+
+    /// The alias offered under `name`, when one is.
+    #[must_use]
+    pub fn alias(&self, name: &str) -> Option<&stkcraft_framework_extensions::Alias> {
+        self.aliases.iter().find(|alias| alias.id == name)
     }
 
     /// The knowledge base this session searches.
@@ -332,57 +356,95 @@ impl Server {
     /// in step, and the one that falls behind is always the one an agent uses.
     #[must_use]
     pub fn tools_json(&self) -> Vec<Value> {
-        self.registry
-            .iter()
-            .map(|command| {
-                let parameters = command.descriptor.parameters;
-                let mut properties = serde_json::Map::new();
-                let mut required = Vec::new();
-                for parameter in parameters {
-                    let Parameter {
-                        name,
-                        description,
-                        required: needed,
-                        kind,
-                    } = parameter;
-                    // The type comes from the parameter's own declaration, so the schema a model
-                    // reads and the conversion its argument goes through cannot disagree.
-                    let schema = match kind {
-                        ParameterKind::Text => {
-                            json!({"type": "string", "description": description})
-                        }
-                        ParameterKind::Number => {
-                            json!({"type": "number", "description": description})
-                        }
-                        ParameterKind::Degrees => json!({
-                            "type": "number",
-                            "description": description,
-                        }),
-                    };
-                    properties.insert((*name).to_owned(), schema);
-                    if *needed {
-                        required.push(Value::String((*name).to_owned()));
-                    }
-                }
-                json!({
-                    "name": command.descriptor.id,
-                    "description": format!(
-                        "{}. Parameters: {}",
+        let mut tools = self.registry_tools();
+        // One tool per alias, with the schema of the command it runs: an agent that has the alias must see
+        // the same parameters a person would get from the menu.
+        for alias in &self.aliases {
+            let Some(command) = self.registry.get(&alias.command) else {
+                continue;
+            };
+            let preset = alias
+                .preset
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut tool = Self::tool_for(command);
+            if let Some(object) = tool.as_object_mut() {
+                object.insert("name".to_owned(), json!(alias.id));
+                object.insert(
+                    "description".to_owned(),
+                    json!(format!(
+                        "{} (from an installed extension: runs `{}`{}).",
                         command.descriptor.label,
-                        parameters
-                            .iter()
-                            .map(|parameter| parameter.name)
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    ),
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": required,
-                    },
-                })
-            })
-            .collect()
+                        alias.command,
+                        if preset.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" with {preset}")
+                        }
+                    )),
+                );
+            }
+            tools.push(tool);
+        }
+        tools
+    }
+
+    /// The tools the engine's own registry offers.
+    fn registry_tools(&self) -> Vec<Value> {
+        self.registry.iter().map(Self::tool_for).collect()
+    }
+
+    /// One tool descriptor for one command: the schema a model reads comes from the parameters the
+    /// command declares, so the two cannot disagree.
+    fn tool_for(command: &stkcraft_astro_engine::commands::Command) -> Value {
+        let parameters = command.descriptor.parameters;
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+        for parameter in parameters {
+            let Parameter {
+                name,
+                description,
+                required: needed,
+                kind,
+            } = parameter;
+            // The type comes from the parameter's own declaration, so the schema a model
+            // reads and the conversion its argument goes through cannot disagree.
+            let schema = match kind {
+                ParameterKind::Text => {
+                    json!({"type": "string", "description": description})
+                }
+                ParameterKind::Number => {
+                    json!({"type": "number", "description": description})
+                }
+                ParameterKind::Degrees => json!({
+                    "type": "number",
+                    "description": description,
+                }),
+            };
+            properties.insert((*name).to_owned(), schema);
+            if *needed {
+                required.push(Value::String((*name).to_owned()));
+            }
+        }
+        json!({
+            "name": command.descriptor.id,
+            "description": format!(
+                "{}. Parameters: {}",
+                command.descriptor.label,
+                parameters
+                    .iter()
+                    .map(|parameter| parameter.name)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        })
     }
 
     /// Run one command by id.
@@ -522,15 +584,31 @@ impl Server {
         name: &str,
         arguments: &Value,
     ) -> Result<(String, Option<Value>), String> {
-        let Some(command) = self.registry.get(name) else {
+        // An alias runs the command it names, through this registry, with its presets *under* the
+        // caller's arguments: an extension cannot invent a capability, only pre-fill one.
+        let (target, merged) = match self.alias(name) {
+            Some(alias) => {
+                let mut merged = arguments.clone();
+                if let Some(object) = merged.as_object_mut() {
+                    for (key, value) in &alias.preset {
+                        object
+                            .entry(key.clone())
+                            .or_insert_with(|| Value::String(value.clone()));
+                    }
+                }
+                (alias.command.clone(), merged)
+            }
+            None => (name.to_owned(), arguments.clone()),
+        };
+        let Some(command) = self.registry.get(&target) else {
             return Err(format!("no such tool `{name}`; call tools/list"));
         };
         // The conversion lives in the engine so every transport makes it identically: the kind a
         // parameter declares is what decides the typed value a command receives.
-        let args = stkcraft_astro_engine::args_from(&command.descriptor, arguments);
+        let args = stkcraft_astro_engine::args_from(&command.descriptor, &merged);
         let outcome = self
             .registry
-            .run(name, &mut self.scenario, &args)
+            .run(&target, &mut self.scenario, &args)
             .map_err(|error| format!("{name}: {error}"))?;
         let mut text = outcome.summary;
         let mut structured = None;
@@ -1151,5 +1229,66 @@ mod tests {
             load_skills(std::path::Path::new("/nonexistent/stkcraft/skills")).len(),
             0
         );
+    }
+
+    #[test]
+    fn an_extension_alias_is_a_tool_and_runs_through_the_registry() {
+        // An extension cannot invent a capability: its alias is listed with the parameters of the command
+        // it names, and running it goes through the same registry with its presets under the caller's
+        // arguments — which is what keeps "a capability a user has is a capability an agent has" true for
+        // packages as well.
+        let mut loaded = stkcraft_framework_extensions::Loaded::default();
+        let package = stkcraft_framework_extensions::Package {
+            manifest: stkcraft_framework_extensions::Manifest::parse(
+                "id = \"acme.sgp4\"\nname = \"Probe\"\nversion = \"0.1.0\"\nkind = \"skills\"\napp = \"stkcraft\"\n",
+            )
+            .expect("a manifest"),
+            directory: std::path::PathBuf::from("/tmp/acme.sgp4"),
+            skills: None,
+            locales: None,
+            knowledge: None,
+            commands: vec![stkcraft_framework_extensions::Alias {
+                id: "acme.sgp4.rename".to_owned(),
+                command: "scenario.rename".to_owned(),
+                preset: vec![("name".to_owned(), "Gemini".to_owned())],
+            }],
+        };
+        loaded.packages.push(package);
+        let mut server = server().with_extensions(&loaded);
+
+        let tools = ask(&mut server, "tools/list", &json!({}));
+        let names: Vec<&str> = tools["result"]["tools"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(names.contains(&"acme.sgp4.rename"), "{names:?}");
+        // The alias carries the schema of the command it runs, so a model is told the parameters.
+        let alias = tools["result"]["tools"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .find(|tool| tool["name"] == json!("acme.sgp4.rename"))
+            .expect("the alias");
+        assert!(
+            alias["inputSchema"]["properties"]["name"].is_object(),
+            "{alias}"
+        );
+
+        // The preset fills the parameter the caller did not send.
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "acme.sgp4.rename", "arguments": {}}),
+        );
+        assert!(answer.get("error").is_none(), "{answer}");
+        // And a caller's own value wins over the preset, because a preset is a default and not a lock.
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "acme.sgp4.rename", "arguments": {"name": "Apollo"}}),
+        );
+        assert!(answer.get("error").is_none(), "{answer}");
     }
 }

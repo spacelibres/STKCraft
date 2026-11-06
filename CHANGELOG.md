@@ -9,6 +9,45 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.72] — An extension's command is a tool, and it runs through the registry
+
+F3's second half. 0.1.71 made a package load and reported what it contributes; the aliases it brings were
+read and then ignored. Now they are **tools**: `tools/list` offers them with the schema of the command they
+name, and calling one runs that command through the same registry the menus use.
+
+Verified against the installed package on this machine:
+
+```
+$ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | stkcraft mcp
+11 tools; acme: ['acme.sgp4.madrid']
+```
+
+Ten engine tools before, eleven now: the extension added one.
+
+### The rules that keep it from becoming a second way to do things
+
+- **An alias cannot invent a capability.** It resolves to a command in the registry, so an extension can
+  only name something the engine already does.
+- **A preset is a default, not a lock.** Presets are merged *under* the caller's arguments, so a model or a
+  person can override any of them.
+- **The schema comes from the command**, not from the package: an agent reading the alias is told exactly the
+  parameters the command declares, and the conversion its argument goes through is the same one.
+
+### Added
+
+- **`Server::with_extensions` / `Server::alias`**, and `tool_for`, which builds one descriptor from a
+  command — used for both the engine's tools and an alias's.
+- **`installed_extensions()`** in the CLI, shared by `mcp`, `control` and the listing, so the three cannot
+  disagree about what is installed.
+- **`an_extension_alias_is_a_tool_and_runs_through_the_registry`** — the alias in `tools/list` with its
+  schema, the preset filling an unsent parameter, and the caller's value winning over it.
+
+### Not built yet
+
+- **Menus do not offer aliases**: the window's panels dispatch engine commands directly, and an extension's
+  command appears there only after the same registry indirection is applied to them.
+- F5 (sensors/targets) is untouched; the mathematics pipeline is complete apart from the lexicon's size.
+
 ## [0.1.71] — An extension that loads, and says what it contributes
 
 F3 of the roadmap, first half. Until now `stkcraft-framework-extensions` could **validate** a manifest and
