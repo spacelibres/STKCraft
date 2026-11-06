@@ -491,3 +491,304 @@ entry = "skills/"
         }
     }
 }
+
+/// A package that has been found on disk, validated, and admitted.
+///
+/// This is the difference between "a manifest parses" and "an extension loads": a package is discovered in
+/// a directory, its manifest is checked, its trust tier decides whether it may run at all, and what it
+/// *contributes* is read from the directory beside it — skills, catalogs, a knowledge root and command
+/// aliases. Nothing here executes code: an extension contributes **data**, which is what makes it safe to
+/// load from a directory a person can edit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    /// Its manifest.
+    pub manifest: Manifest,
+    /// Where it lives, so a caller can open its files.
+    pub directory: std::path::PathBuf,
+    /// A `SKILL.md` directory it brings, if any.
+    pub skills: Option<std::path::PathBuf>,
+    /// A directory of `<locale>.tsv` catalogs it brings, if any.
+    pub locales: Option<std::path::PathBuf>,
+    /// A directory of documents it adds to the knowledge base, if any.
+    pub knowledge: Option<std::path::PathBuf>,
+    /// Commands it adds: an id of its own, the engine command it runs, and the parameters it presets.
+    pub commands: Vec<Alias>,
+}
+
+/// A command an extension contributes: a name of its own over an engine command, with presets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alias {
+    /// The id the extension exposes, e.g. `acme.passes-over-madrid`.
+    pub id: String,
+    /// The engine command it runs, e.g. `access.compute`.
+    pub command: String,
+    /// Parameters to merge under the caller's, so a preset can be overridden.
+    pub preset: Vec<(String, String)>,
+}
+
+/// What loading a directory produced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Loaded {
+    /// The packages that were admitted, in id order.
+    pub packages: Vec<Package>,
+    /// The ones that were not, with the reason: `("acme.bad", "…")`.
+    pub refused: Vec<(String, String)>,
+}
+
+impl Loaded {
+    /// Every command alias the loaded packages contribute.
+    #[must_use]
+    pub fn aliases(&self) -> Vec<&Alias> {
+        self.packages
+            .iter()
+            .flat_map(|package| package.commands.iter())
+            .collect()
+    }
+
+    /// The directories the knowledge base should add, for the packages that bring documents.
+    #[must_use]
+    pub fn knowledge_roots(&self) -> Vec<&std::path::Path> {
+        self.packages
+            .iter()
+            .filter_map(|package| package.knowledge.as_deref())
+            .collect()
+    }
+
+    /// The skill directories to add, so a contributed skill is listed like a shipped one.
+    #[must_use]
+    pub fn skill_directories(&self) -> Vec<&std::path::Path> {
+        self.packages
+            .iter()
+            .filter_map(|package| package.skills.as_deref())
+            .collect()
+    }
+}
+
+/// Load every extension package in `directory`, admitted at `tier`.
+///
+/// A directory that does not exist is an empty result rather than an error: a person who has installed
+/// nothing is the normal case. A package that cannot be read, parsed or admitted is **refused with its
+/// reason**, never skipped silently — a person who installed something and cannot use it needs to know why.
+#[must_use]
+pub fn load(directory: &std::path::Path, tier: TrustTier) -> Loaded {
+    let mut loaded = Loaded::default();
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return loaded;
+    };
+    let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    paths.sort();
+    for path in paths {
+        if !path.is_dir() {
+            continue;
+        }
+        // The app's directory uses `extension.toml`; `manifest.toml` is accepted as well so a package
+        // written before that name settled still loads.
+        let manifest_path = if path.join("extension.toml").exists() {
+            path.join("extension.toml")
+        } else {
+            path.join("manifest.toml")
+        };
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+            loaded.refused.push((name, "no extension.toml".to_owned()));
+            continue;
+        };
+        let manifest = match Manifest::parse(&text) {
+            Ok(manifest) => manifest,
+            Err(refusal) => {
+                loaded.refused.push((name, refusal.to_string()));
+                continue;
+            }
+        };
+        if let Err(refusal) = manifest.admit(tier) {
+            loaded
+                .refused
+                .push((manifest.id.clone(), refusal.to_string()));
+            continue;
+        }
+        let directory_of = |child: &str| {
+            let candidate = path.join(child);
+            candidate.is_dir().then_some(candidate)
+        };
+        let commands = read_aliases(&path, &manifest.id, &mut loaded.refused);
+        loaded.packages.push(Package {
+            skills: directory_of("skills"),
+            locales: directory_of("locales"),
+            knowledge: directory_of("knowledge"),
+            commands,
+            manifest,
+            directory: path,
+        });
+    }
+    loaded
+        .packages
+        .sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
+    loaded
+}
+
+/// A package's `commands.toml`.
+#[derive(serde::Deserialize)]
+struct CommandsFile {
+    #[serde(default)]
+    command: Vec<CommandEntry>,
+}
+
+/// One alias in that file.
+#[derive(serde::Deserialize)]
+struct CommandEntry {
+    id: String,
+    command: String,
+    #[serde(default)]
+    preset: std::collections::BTreeMap<String, String>,
+}
+
+/// Read `commands.toml` beside a manifest: `[[command]] id = …, command = …, preset = { … }`.
+///
+/// A malformed file refuses the *commands*, not the package: a package's skills and catalogs are still
+/// useful when its aliases are wrong, and losing them all over a typo would be the wrong trade.
+fn read_aliases(
+    directory: &std::path::Path,
+    id: &str,
+    refused: &mut Vec<(String, String)>,
+) -> Vec<Alias> {
+    let path = directory.join("commands.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    match toml::from_str::<CommandsFile>(&text) {
+        Ok(file) => file
+            .command
+            .into_iter()
+            .filter(|entry| {
+                // An alias is namespaced by its package, so two extensions cannot shadow each other or an
+                // engine command.
+                let namespaced = entry.id.starts_with(&format!("{id}."));
+                if !namespaced {
+                    refused.push((
+                        entry.id.clone(),
+                        format!("an alias must start with `{id}.`"),
+                    ));
+                }
+                namespaced && valid_id(&entry.id)
+            })
+            .map(|entry| Alias {
+                id: entry.id,
+                command: entry.command,
+                preset: entry.preset.into_iter().collect(),
+            })
+            .collect(),
+        Err(error) => {
+            refused.push((format!("{id}.commands"), error.to_string()));
+            Vec::new()
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing)]
+mod load_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("a directory");
+        directory
+    }
+
+    fn package(root: &std::path::Path, id: &str) -> std::path::PathBuf {
+        let directory = root.join(id);
+        std::fs::create_dir_all(&directory).expect("a directory");
+        std::fs::write(
+            directory.join("manifest.toml"),
+            format!(
+                "id = \"{id}\"\nname = \"Probe\"\nversion = \"0.1.0\"\nkind = \"skills\"\napp = \"stkcraft\"\n"
+            ),
+        )
+        .expect("a manifest");
+        directory
+    }
+
+    #[test]
+    fn a_package_loads_with_what_it_contributes() {
+        // The difference between a manifest that parses and an extension that loads: the skills, catalogs and
+        // knowledge root beside it are found, and its commands are namespaced by the package.
+        let root = scratch("stkcraft-extensions-load");
+        let directory = package(&root, "acme.sgp4");
+        std::fs::create_dir_all(directory.join("skills/sgp4")).expect("a skill");
+        std::fs::create_dir_all(directory.join("knowledge")).expect("knowledge");
+        std::fs::write(
+            directory.join("commands.toml"),
+            "[[command]]\nid = \"acme.sgp4.passes\"\ncommand = \"access.compute\"\n\
+             [command.preset]\nlat = \"40.4\"\nlon = \"-3.7\"\n",
+        )
+        .expect("commands");
+
+        let loaded = load(&root, TrustTier::Internal);
+        assert_eq!(loaded.refused, Vec::new(), "{:?}", loaded.refused);
+        assert_eq!(loaded.packages.len(), 1);
+        let package = &loaded.packages[0];
+        assert_eq!(package.manifest.id, "acme.sgp4");
+        assert!(
+            package.skills.is_some(),
+            "the skills directory was not found"
+        );
+        assert!(package.knowledge.is_some());
+        assert_eq!(package.commands.len(), 1);
+        assert_eq!(package.commands[0].command, "access.compute");
+        assert_eq!(
+            package.commands[0].preset,
+            vec![
+                ("lat".to_owned(), "40.4".to_owned()),
+                ("lon".to_owned(), "-3.7".to_owned())
+            ]
+        );
+        assert_eq!(loaded.aliases().len(), 1);
+        assert_eq!(loaded.knowledge_roots().len(), 1);
+        assert_eq!(loaded.skill_directories().len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bad_package_is_refused_with_its_reason() {
+        // A person who installed something and cannot use it needs to know why, so nothing is skipped
+        // silently: a missing manifest, a malformed one, and an alias that is not namespaced all refuse.
+        let root = scratch("stkcraft-extensions-refused");
+        let no_manifest = root.join("acme.empty");
+        std::fs::create_dir_all(&no_manifest).expect("a directory");
+        let malformed = root.join("acme.bad");
+        std::fs::create_dir_all(&malformed).expect("a directory");
+        std::fs::write(malformed.join("manifest.toml"), "id = \"acme.bad\"\n").expect("a manifest");
+        let directory = package(&root, "acme.other");
+        std::fs::write(
+            directory.join("commands.toml"),
+            "[[command]]\nid = \"passes\"\ncommand = \"access.compute\"\n",
+        )
+        .expect("commands");
+
+        let loaded = load(&root, TrustTier::Internal);
+        assert_eq!(loaded.packages.len(), 1, "only acme.other is usable");
+        let reasons: Vec<&str> = loaded.refused.iter().map(|(_, why)| why.as_str()).collect();
+        assert!(
+            reasons.iter().any(|why| why.contains("extension.toml")),
+            "{reasons:?}"
+        );
+        assert!(
+            reasons.iter().any(|why| why.contains("acme.other.")),
+            "the un-namespaced alias was accepted: {reasons:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_missing_directory_is_empty_and_not_an_error() {
+        // The normal case of a fresh installation: nothing installed is not a failure.
+        let loaded = load(
+            std::path::Path::new("/nonexistent/stkcraft/extensions"),
+            TrustTier::Internal,
+        );
+        assert_eq!(loaded, Loaded::default());
+    }
+}

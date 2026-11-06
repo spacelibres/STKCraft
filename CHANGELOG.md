@@ -9,6 +9,53 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.71] — An extension that loads, and says what it contributes
+
+F3 of the roadmap, first half. Until now `stkcraft-framework-extensions` could **validate** a manifest and
+nothing could **load** one: `stkcraft extensions` listed packages and stopped there. This release makes a
+package a thing the app reads and uses — as **data**, never as code.
+
+A package is a directory whose `extension.toml` is validated, whose trust tier (assigned by the host, never
+stated by the package) decides whether it may run at all, and whose contents are then found beside it:
+
+| Beside the manifest | What it contributes |
+|---|---|
+| `skills/` | a `SKILL.md` tree, listed like a shipped skill |
+| `locales/` | `<locale>.tsv` catalogs |
+| `knowledge/` | documents the knowledge base should add |
+| `commands.toml` | command aliases: an id of its own over an engine command, with preset parameters |
+
+An alias is **namespaced by its package** (`acme.sgp4.madrid`), so two extensions cannot shadow each other or
+an engine command, and a preset is merged *under* the caller's parameters so it can be overridden.
+
+**A package that cannot be used is refused with its reason**, never skipped: a person who installed
+something and cannot find it needs to know why.
+
+### Verified with a real directory
+
+```
+$ stkcraft extensions
+  acme.bad — refused: the manifest is malformed: … missing field `name`
+  acme.sgp4 0.1.0 (skills) — SGP4 presets
+      acme.sgp4 contributes: skills, documents, acme.sgp4.madrid -> access.compute
+```
+
+### Added
+
+- **`stkcraft_framework_extensions::{load, Package, Alias, Loaded}`** — discovery, admission, contributions,
+  `aliases()`, `knowledge_roots()`, `skill_directories()`.
+- **`extension.toml` is the manifest name**, with `manifest.toml` accepted for a package written before the
+  name settled — found by the app and the crate disagreeing about the filename.
+- **Three tests**: a package loads with what it contributes, a bad one is refused with its reason, and a
+  missing directory is empty rather than an error.
+
+### Not built yet
+
+- **The aliases are not registered yet**: they are read and reported, but the MCP tool list and the menus do
+  not offer them. That is the second half of F3, and it has to go through the same registry or it is a second
+  way to do things.
+- Third-party packages stay behind the non-default feature; F5 (sensors/targets) is untouched.
+
 ## [0.1.70] — OCR verified by a real engine, in CI, without a C dependency in the crate graph
 
 The OCR path had plumbing tests and a stand-in command; what it lacked was a run against a real engine.

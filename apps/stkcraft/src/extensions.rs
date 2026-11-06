@@ -111,6 +111,36 @@ pub fn list() -> Result<(), String> {
             (None, None) => println!("  {} — refused", package.directory),
         }
     }
+    // What each admitted package *contributes*, which is the difference between a manifest that parses
+    // and an extension that loads: its skills, its catalogs, its documents and its command aliases.
+    let loaded = stkcraft_framework_extensions::load(&directory, TrustTier::Internal);
+    for package in &loaded.packages {
+        let mut parts: Vec<String> = Vec::new();
+        if package.skills.is_some() {
+            parts.push("skills".to_owned());
+        }
+        if package.locales.is_some() {
+            parts.push("catalogs".to_owned());
+        }
+        if package.knowledge.is_some() {
+            parts.push("documents".to_owned());
+        }
+        for alias in &package.commands {
+            parts.push(format!("{} -> {}", alias.id, alias.command));
+        }
+        if parts.is_empty() {
+            println!("      {} contributes nothing yet", package.manifest.id);
+        } else {
+            println!(
+                "      {} contributes: {}",
+                package.manifest.id,
+                parts.join(", ")
+            );
+        }
+    }
+    for (id, reason) in &loaded.refused {
+        println!("  {id} — not loaded: {reason}");
+    }
     if !third_party_enabled() {
         println!(
             "  third-party packages: off in this build. A package outside the Craft organisation is\n\
