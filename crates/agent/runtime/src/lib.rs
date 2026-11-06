@@ -46,6 +46,8 @@ use stkcraft_agent_mcp::Server;
 
 pub mod session;
 pub mod translate;
+pub mod usage;
+pub use usage::{AnswerUsage, CompletionTokensDetails, Usage, UsageAggregate};
 
 /// How many model turns one question may take before the loop stops.
 ///
@@ -144,6 +146,10 @@ pub enum Message {
         calls: Vec<ToolCall>,
         /// Opaque provider state, never displayed or summarized.
         reasoning_content: Option<String>,
+        /// Provider-reported usage, retained locally and never replayed on the wire.
+        usage: Option<Usage>,
+        /// Provider completion status.
+        finish_reason: Option<String>,
     },
     /// What a tool answered.
     Tool {
@@ -185,6 +191,7 @@ pub fn message_characters(message: &Message) -> usize {
             text,
             calls,
             reasoning_content,
+            ..
         } => calls.iter().fold(
             text.chars().count().saturating_add(
                 reasoning_content
@@ -224,6 +231,10 @@ pub struct Turn {
     pub calls: Vec<ToolCall>,
     /// Opaque provider state, never displayed or summarized.
     pub reasoning_content: Option<String>,
+    /// Provider-reported token counters; absent means unknown.
+    pub usage: Option<Usage>,
+    /// Completion status; unknown future values are preserved.
+    pub finish_reason: Option<String>,
 }
 
 impl std::fmt::Debug for Turn {
@@ -262,6 +273,8 @@ pub struct ProviderOptions {
     pub protocol: ProviderProtocol,
     /// Thinking selection, meaningful only for `DeepSeek`.
     pub thinking: ThinkingMode,
+    /// Optional total output cap, including reasoning tokens.
+    pub max_output_tokens: Option<u32>,
 }
 
 impl ProviderOptions {
@@ -289,7 +302,27 @@ impl ProviderOptions {
         if protocol == ProviderProtocol::OpenAiCompatible && thinking == ThinkingMode::Enabled {
             return Err("thinking enabled requires the deepseek protocol; select --protocol deepseek or --thinking disabled".to_owned());
         }
-        Ok(Self { protocol, thinking })
+        // Application policy, not a provider/model maximum: total output includes reasoning.
+        Ok(Self {
+            protocol,
+            thinking,
+            max_output_tokens: (protocol == ProviderProtocol::DeepSeek).then_some(8192),
+        })
+    }
+    /// Override the output cap; absent configuration preserves protocol defaults.
+    ///
+    /// # Errors
+    /// A non-integer, zero or value outside u32.
+    pub fn with_max_output_tokens(mut self, value: Option<&str>) -> Result<Self, String> {
+        if let Some(value) = value {
+            let value = value
+                .parse::<u32>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| "max_output_tokens must be a nonzero u32 integer".to_owned())?;
+            self.max_output_tokens = Some(value);
+        }
+        Ok(self)
     }
 }
 
@@ -375,6 +408,9 @@ impl Provider {
 
     /// Check compatibility before opening a network connection.
     fn validate_history(&self, messages: &[Message]) -> Result<(), String> {
+        if self.options.max_output_tokens == Some(0) {
+            return Err("max_output_tokens must be nonzero".to_owned());
+        }
         if self.options.protocol == ProviderProtocol::OpenAiCompatible
             && self.options.thinking == ThinkingMode::Enabled
         {
@@ -427,7 +463,10 @@ impl Provider {
         let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
         let thinking = std::env::var("DEEPSEEK_THINKING").ok();
         let options =
-            ProviderOptions::resolve(&base_url, protocol.as_deref(), thinking.as_deref())?;
+            ProviderOptions::resolve(&base_url, protocol.as_deref(), thinking.as_deref())?
+                .with_max_output_tokens(
+                    std::env::var("DEEPSEEK_MAX_OUTPUT_TOKENS").ok().as_deref(),
+                )?;
         Ok(Self::new(
             base_url,
             std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| DEEPSEEK_MODEL.to_owned()),
@@ -453,6 +492,7 @@ impl Provider {
                     text,
                     calls,
                     reasoning_content,
+                    ..
                 } => {
                     let mut converted = if calls.is_empty() {
                         json!({"role": "assistant", "content": text})
@@ -508,6 +548,11 @@ impl Provider {
             if self.options.thinking == ThinkingMode::Enabled {
                 object.remove("temperature");
             }
+        }
+        if let Some(max_tokens) = self.options.max_output_tokens
+            && let Some(object) = body.as_object_mut()
+        {
+            object.insert("max_tokens".to_owned(), json!(max_tokens));
         }
         body
     }
@@ -576,12 +621,30 @@ pub fn parse_response(text: &str) -> Result<Turn, String> {
         .and_then(|choice| choice.get("message"))
         .and_then(Value::as_object)
         .ok_or_else(|| "the answer has no message".to_owned())?;
+    let finish_reason = match response
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("finish_reason"))
+    {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(_) => return Err("finish_reason must be a string or null".to_owned()),
+    };
+    let usage = match response.get("usage") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(serde_json::from_value::<Usage>(value.clone()).map_err(|_| {
+            "usage must contain unsigned integer token counters and valid breakdowns".to_owned()
+        })?),
+    };
+    reject_truncated(finish_reason.as_deref())?;
     let reasoning_content = match message.get("reasoning_content") {
         None | Some(Value::Null) => None,
         Some(Value::String(value)) => Some(value.clone()),
         Some(_) => return Err("the answer's reasoning_content must be a string or null".to_owned()),
     };
     let mut turn = Turn {
+        usage,
+        finish_reason,
         reasoning_content,
         text: message
             .get("content")
@@ -633,6 +696,17 @@ pub fn parse_response(text: &str) -> Result<Turn, String> {
     Ok(turn)
 }
 
+/// Refuse incomplete output before tools or final answers are accepted.
+///
+/// # Errors
+/// An explicit error for the provider's output-length termination status.
+pub fn reject_truncated(finish_reason: Option<&str>) -> Result<(), String> {
+    if finish_reason == Some("length") {
+        return Err("model output was truncated (finish_reason=length); no tool calls from this response were executed; increase max_output_tokens and retry".to_owned());
+    }
+    Ok(())
+}
+
 /// What one run of the agent did.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Answer {
@@ -640,11 +714,14 @@ pub struct Answer {
     pub text: String,
     /// Every tool call it made, in order, as `name(args) → summary` for a person reading the log.
     pub trace: Vec<String>,
+    /// Reported usage and gaps for this answer and its compaction requests.
+    pub usage: AnswerUsage,
 }
 
 /// The agent: a model, the engine's tools and the skills.
 pub struct Agent<M: ChatModel> {
     model: M,
+    usage: AnswerUsage,
     server: Server,
     /// How many turns one question may take.
     pub max_turns: usize,
@@ -664,6 +741,7 @@ impl<M: ChatModel> Agent<M> {
     pub fn new(model: M, server: Server) -> Self {
         Self {
             model,
+            usage: AnswerUsage::default(),
             server,
             max_turns: MAX_TURNS,
             messages: Vec::new(),
@@ -681,6 +759,12 @@ impl<M: ChatModel> Agent<M> {
         self.messages.clone_from(&session.messages);
         self.session = Some(session);
         self
+    }
+
+    /// Usage of the latest attempted answer, available even when it failed.
+    #[must_use]
+    pub fn usage(&self) -> &AnswerUsage {
+        &self.usage
     }
 
     /// The session, when this agent keeps one.
@@ -808,6 +892,7 @@ impl<M: ChatModel> Agent<M> {
         question: &str,
         observer: &mut F,
     ) -> Result<Answer, String> {
+        self.usage = AnswerUsage::default();
         if self.messages.is_empty() {
             let system = self.system_prompt();
             self.push(Message::System(system));
@@ -819,17 +904,33 @@ impl<M: ChatModel> Agent<M> {
         let mut answer = Answer::default();
         let tools = self.tools_with_skill_reader();
         for _ in 0..self.max_turns {
-            let turn = self.model.complete(&self.messages, &tools)?;
+            let turn = match self.model.complete(&self.messages, &tools) {
+                Ok(turn) => turn,
+                Err(error) => {
+                    self.usage.model.record(None, true);
+                    return Err(error);
+                }
+            };
+            let truncated = reject_truncated(turn.finish_reason.as_deref());
+            self.usage
+                .model
+                .record(turn.usage.as_ref(), truncated.is_err());
+            truncated?;
             if turn.calls.is_empty() {
                 answer.text.clone_from(&turn.text);
                 self.push(Message::Assistant {
+                    usage: turn.usage,
+                    finish_reason: turn.finish_reason,
                     reasoning_content: turn.reasoning_content,
                     text: turn.text,
                     calls: Vec::new(),
                 });
+                answer.usage = self.usage.clone();
                 return Ok(answer);
             }
             self.push(Message::Assistant {
+                usage: turn.usage.clone(),
+                finish_reason: turn.finish_reason.clone(),
                 reasoning_content: turn.reasoning_content.clone(),
                 text: turn.text.clone(),
                 calls: turn.calls.clone(),
@@ -911,7 +1012,7 @@ impl<M: ChatModel> Agent<M> {
     /// question could depend on — numbers, names, decisions, what was computed — because it is the
     /// only record of them. A model that cannot answer leaves `None`, and the compaction falls back to
     /// a note that says so rather than inventing a summary.
-    fn summarize(&self, span: &[Message]) -> Option<String> {
+    fn summarize(&mut self, span: &[Message]) -> Option<String> {
         let mut transcript = String::new();
         for message in span {
             let line = match message {
@@ -940,14 +1041,19 @@ impl<M: ChatModel> Agent<M> {
             Message::System(COMPACTION_PROMPT.to_owned()),
             Message::User(transcript),
         ];
-        match self.model.complete(&messages, &[]) {
-            Ok(turn) => {
-                let text = turn.text.trim().to_owned();
-                (!text.is_empty()).then_some(text)
+        if let Ok(turn) = self.model.complete(&messages, &[]) {
+            let failed = reject_truncated(turn.finish_reason.as_deref()).is_err()
+                || !turn.calls.is_empty()
+                || turn.text.trim().is_empty();
+            self.usage.compaction.record(turn.usage.as_ref(), failed);
+            if failed {
+                return None;
             }
-            // A model that cannot summarise must not lose the conversation: the drop still happens,
-            // with a note that says the summary is missing.
-            Err(_) => None,
+            Some(turn.text.trim().to_owned())
+        } else {
+            // Unknown failed-summary usage is explicitly counted, never priced at zero.
+            self.usage.compaction.record(None, true);
+            None
         }
     }
 
@@ -1161,9 +1267,422 @@ mod tests {
         )
     }
 
+    fn reported_usage(tokens: u64) -> Usage {
+        Usage {
+            prompt_tokens: tokens,
+            completion_tokens: tokens,
+            total_tokens: tokens,
+            ..Usage::default()
+        }
+    }
+
+    #[test]
+    fn persisted_usage_survives_tool_final_and_resume_without_wire_metadata() {
+        let directory = std::env::temp_dir().join("stkcraft-usage-resume");
+        let mut session = session::Session::create(&directory).expect("session");
+        session.id = "usage-resume".into();
+        session.path = directory.join("usage-resume.jsonl");
+        let _ = std::fs::remove_file(&session.path);
+        let mut agent = agent(vec![
+            Turn {
+                calls: vec![ToolCall {
+                    id: "c".into(),
+                    name: "scenario.read".into(),
+                    arguments: json!({}),
+                }],
+                usage: Some(reported_usage(11)),
+                finish_reason: Some("tool_calls".into()),
+                ..Turn::default()
+            },
+            Turn {
+                text: "done".into(),
+                usage: Some(reported_usage(22)),
+                finish_reason: Some("stop".into()),
+                ..Turn::default()
+            },
+        ])
+        .with_session(session);
+        let answer = agent.ask("read").expect("answer");
+        assert_eq!(answer.usage.model.known.total_tokens, 33);
+        let resumed = session::Session::open(&directory, "usage-resume").expect("resume");
+        assert_eq!(resumed.messages, agent.messages);
+        let metadata: Vec<_> = resumed
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Assistant {
+                    usage,
+                    finish_reason,
+                    ..
+                } => Some((
+                    usage.as_ref().map(|usage| usage.total_tokens),
+                    finish_reason.as_deref(),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            metadata,
+            [(Some(11), Some("tool_calls")), (Some(22), Some("stop"))]
+        );
+        for protocol in [
+            ProviderProtocol::OpenAiCompatible,
+            ProviderProtocol::DeepSeek,
+        ] {
+            let provider = Provider::new("unused", "m", "test").with_options(ProviderOptions {
+                protocol,
+                ..ProviderOptions::default()
+            });
+            let body = provider.body(&resumed.messages, &[]);
+            assert_eq!(body, provider.body(&agent.messages, &[]));
+            for message in body["messages"].as_array().expect("messages") {
+                assert!(message.get("usage").is_none());
+                assert!(message.get("finish_reason").is_none());
+            }
+        }
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn answer_includes_summary_cost_and_unknown_failed_summary_attempt() {
+        struct CompactionModel {
+            fail_summary: bool,
+        }
+        impl ChatModel for CompactionModel {
+            fn complete(&self, messages: &[Message], _: &[Value]) -> Result<Turn, String> {
+                if matches!(messages.first(),Some(Message::System(prompt)) if prompt == COMPACTION_PROMPT)
+                {
+                    if self.fail_summary {
+                        return Err("offline".into());
+                    }
+                    return Ok(Turn {
+                        text: "summary".into(),
+                        usage: Some(reported_usage(13)),
+                        ..Turn::default()
+                    });
+                }
+                Ok(Turn {
+                    text: "answer".into(),
+                    usage: Some(reported_usage(7)),
+                    ..Turn::default()
+                })
+            }
+        }
+        for fail_summary in [false, true] {
+            let directory =
+                std::env::temp_dir().join(format!("stkcraft-summary-usage-{fail_summary}"));
+            let mut session = session::Session::create(&directory).expect("session");
+            session
+                .record(Message::System("rules".into()))
+                .expect("record");
+            for index in 0..9 {
+                session
+                    .record(Message::User(format!(
+                        "question{index} {}",
+                        "x".repeat(16_000)
+                    )))
+                    .expect("record");
+                session
+                    .record(Message::Assistant {
+                        text: "done".into(),
+                        calls: vec![],
+                        reasoning_content: None,
+                        usage: None,
+                        finish_reason: None,
+                    })
+                    .expect("record");
+            }
+            let mut agent = Agent::new(
+                CompactionModel { fail_summary },
+                Server::new(Scenario::empty("t"), vec![]),
+            )
+            .with_session(session);
+            let answer = agent.ask("next").expect("answer");
+            assert_eq!(answer.usage.model.requests, 1);
+            assert_eq!(answer.usage.model.known.total_tokens, 7);
+            assert_eq!(answer.usage.compaction.requests, 1);
+            assert_eq!(
+                answer.usage.compaction.known.total_tokens,
+                if fail_summary { 0 } else { 13 }
+            );
+            assert_eq!(
+                answer.usage.compaction.failed_requests,
+                u64::from(fail_summary)
+            );
+            assert_eq!(
+                answer.usage.compaction.unknown_usage_requests,
+                u64::from(fail_summary)
+            );
+            assert_eq!(answer.usage.compaction.is_complete(), !fail_summary);
+            let _ = std::fs::remove_dir_all(directory);
+        }
+    }
+
+    #[test]
+    fn usage_parser_preserves_unknown_zero_huge_cache_and_future_status() {
+        for value in [None, Some(Value::Null)] {
+            let mut response = json!({"choices":[{"message":{"content":"ok"}}]});
+            if let Some(value) = value {
+                response["usage"] = value;
+            }
+            let turn = parse_response(&response.to_string()).expect("unknown usage");
+            assert!(turn.usage.is_none());
+            assert!(turn.finish_reason.is_none());
+        }
+        for tokens in [0, u64::MAX] {
+            let usage = json!({"prompt_tokens":tokens,"completion_tokens":tokens,"total_tokens":tokens,"prompt_cache_hit_tokens":tokens,"prompt_cache_miss_tokens":0,"completion_tokens_details":{"reasoning_tokens":tokens,"future":true},"future":123});
+            let response = json!({"usage":usage,"choices":[{"finish_reason":"future_status","message":{"content":"ok"}}]});
+            let turn = parse_response(&response.to_string()).expect("valid usage");
+            let usage = turn.usage.expect("reported");
+            assert_eq!(usage.prompt_tokens, tokens);
+            assert_eq!(usage.total_tokens, tokens);
+            assert_eq!(usage.prompt_cache_hit_tokens, Some(tokens));
+            assert_eq!(usage.prompt_cache_miss_tokens, Some(0));
+            assert_eq!(
+                usage
+                    .completion_tokens_details
+                    .expect("details")
+                    .reasoning_tokens,
+                Some(tokens)
+            );
+            assert_eq!(turn.finish_reason.as_deref(), Some("future_status"));
+        }
+    }
+
+    #[test]
+    fn usage_boundary_checks_every_counter_and_finish_type() {
+        for field in [
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "prompt_cache_hit_tokens",
+            "prompt_cache_miss_tokens",
+        ] {
+            for invalid in [
+                json!(-1),
+                json!(1.5),
+                json!("3"),
+                json!(true),
+                json!([]),
+                json!({}),
+            ] {
+                let mut usage = json!({"prompt_tokens":1,"completion_tokens":1,"total_tokens":2});
+                usage[field] = invalid;
+                assert!(
+                    parse_response(&json!({"usage":usage,"choices":[{"message":{}}]}).to_string())
+                        .is_err(),
+                    "{field}"
+                );
+            }
+        }
+        for invalid in [json!(-1), json!(1.5), json!("3"), json!(true)] {
+            let response = json!({"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,"completion_tokens_details":{"reasoning_tokens":invalid}},"choices":[{"message":{}}]});
+            assert!(parse_response(&response.to_string()).is_err());
+            if !invalid.is_string() {
+                let response = json!({"choices":[{"finish_reason":invalid,"message":{}}]});
+                assert!(parse_response(&response.to_string()).is_err());
+            }
+        }
+        let response = r#"{"usage":{"prompt_tokens":18446744073709551616,"completion_tokens":0,"total_tokens":0},"choices":[{"message":{}}]}"#;
+        assert!(parse_response(response).is_err());
+    }
+
+    #[test]
+    fn cap_is_opt_in_for_generic_and_validated_before_transport() {
+        let generic = Provider::new("invalid-no-network", "m", "test");
+        assert!(generic.body(&[], &[]).get("max_tokens").is_none());
+        let options = ProviderOptions::resolve("custom", None, None)
+            .expect("resolve")
+            .with_max_output_tokens(Some("37"))
+            .expect("cap");
+        assert_eq!(
+            generic.clone().with_options(options).body(&[], &[])["max_tokens"],
+            37
+        );
+        for invalid in ["0", "-1", "1.5", "4294967296", "garbage", ""] {
+            assert!(
+                ProviderOptions::default()
+                    .with_max_output_tokens(Some(invalid))
+                    .is_err()
+            );
+        }
+        let provider = generic.with_options(ProviderOptions {
+            max_output_tokens: Some(0),
+            ..ProviderOptions::default()
+        });
+        assert!(
+            provider
+                .complete(&[], &[])
+                .expect_err("no network")
+                .contains("nonzero")
+        );
+    }
+
+    #[test]
+    fn scripted_truncated_turns_never_dispatch_or_succeed() {
+        for calls in [
+            vec![],
+            vec![ToolCall {
+                id: "c".into(),
+                name: "scenario.rename".into(),
+                arguments: json!({"name":"changed"}),
+            }],
+        ] {
+            let mut agent = agent(vec![Turn {
+                text: "partial".into(),
+                calls,
+                finish_reason: Some("length".into()),
+                usage: Some(reported_usage(3)),
+                ..Turn::default()
+            }]);
+            let original = agent.server().scenario().name.clone();
+            assert!(
+                agent
+                    .ask("run")
+                    .expect_err("truncated")
+                    .contains("truncated")
+            );
+            assert_eq!(agent.server().scenario().name, original);
+            assert!(
+                !agent
+                    .messages
+                    .iter()
+                    .any(|message| matches!(message, Message::Assistant { .. }))
+            );
+            assert_eq!(agent.usage().model.failed_requests, 1);
+            assert_eq!(agent.usage().model.known.total_tokens, 3);
+            assert!(agent.usage().model.is_complete());
+        }
+    }
+
+    #[test]
+    fn answer_usage_counts_all_tool_rounds_and_reports_unknown_failures() {
+        struct Failure;
+        impl ChatModel for Failure {
+            fn complete(&self, _: &[Message], _: &[Value]) -> Result<Turn, String> {
+                Err("offline".into())
+            }
+        }
+        let call = || ToolCall {
+            id: "c".into(),
+            name: "scenario.read".into(),
+            arguments: json!({}),
+        };
+        let mut agent = agent(vec![
+            Turn {
+                calls: vec![call()],
+                usage: Some(reported_usage(10)),
+                ..Turn::default()
+            },
+            Turn {
+                calls: vec![call()],
+                ..Turn::default()
+            },
+            Turn {
+                text: "done".into(),
+                usage: Some(reported_usage(20)),
+                finish_reason: Some("stop".into()),
+                ..Turn::default()
+            },
+        ]);
+        let answer = agent.ask("read").expect("answer");
+        assert_eq!(answer.usage.model.requests, 3);
+        assert_eq!(answer.usage.model.known.total_tokens, 30);
+        assert_eq!(answer.usage.model.unknown_usage_requests, 1);
+        assert!(!answer.usage.model.is_complete());
+        assert_eq!(answer.usage.compaction.requests, 0);
+        assert_eq!(agent.usage(), &answer.usage);
+        let mut failed = Agent::new(Failure, Server::new(Scenario::empty("t"), vec![]));
+        assert!(failed.ask("x").is_err());
+        assert_eq!(failed.usage().model.failed_requests, 1);
+        assert_eq!(failed.usage().model.unknown_usage_requests, 1);
+        assert!(!failed.usage().model.is_complete());
+    }
+
+    #[test]
+    fn usage_aggregation_saturates_and_marks_overflow_and_optional_gaps() {
+        let mut aggregate = UsageAggregate::default();
+        let mut usage = reported_usage(u64::MAX);
+        usage.prompt_cache_hit_tokens = Some(u64::MAX);
+        aggregate.record(Some(&usage), false);
+        assert!(aggregate.is_complete());
+        aggregate.record(Some(&usage), false);
+        assert!(aggregate.overflowed);
+        assert!(!aggregate.is_complete());
+        assert_eq!(aggregate.known.total_tokens, u64::MAX);
+        aggregate.record(Some(&reported_usage(1)), false);
+        assert_eq!(aggregate.known.prompt_cache_hit_tokens, None);
+    }
+
+    #[test]
+    fn compaction_request_usage_is_separate_including_unknown_failure() {
+        for (usage, finish, expected_summary) in [
+            (Some(reported_usage(17)), None, true),
+            (None, None, true),
+            (Some(reported_usage(9)), Some("length".into()), false),
+        ] {
+            let mut agent = agent(vec![Turn {
+                text: "summary".into(),
+                usage: usage.clone(),
+                finish_reason: finish,
+                ..Turn::default()
+            }]);
+            assert_eq!(
+                agent.summarize(&[Message::User("old".into())]).is_some(),
+                expected_summary
+            );
+            assert_eq!(agent.usage().compaction.requests, 1);
+            assert_eq!(agent.usage().model.requests, 0);
+            assert_eq!(
+                agent.usage().compaction.unknown_usage_requests,
+                u64::from(usage.is_none())
+            );
+            assert_eq!(
+                agent.usage().compaction.failed_requests,
+                u64::from(!expected_summary)
+            );
+            assert_eq!(
+                agent.usage().compaction.known.total_tokens,
+                usage.map_or(0, |usage| usage.total_tokens)
+            );
+        }
+    }
+
+    #[test]
+    fn output_contract_rejects_invalid_usage() {
+        for usage in [
+            json!({"prompt_tokens":-1,"completion_tokens":0,"total_tokens":0}),
+            json!({"prompt_tokens":"1","completion_tokens":0,"total_tokens":1}),
+            json!({}),
+            json!(false),
+            json!([1, 2, 3, null, null, null]),
+        ] {
+            let response = json!({"usage":usage,"choices":[{"message":{"content":"ok"}}]});
+            assert!(parse_response(&response.to_string()).is_err(), "{usage}");
+        }
+    }
+
+    #[test]
+    fn configured_deepseek_has_bounded_output() {
+        let options = ProviderOptions::resolve(DEEPSEEK_BASE_URL, None, None).expect("options");
+        let provider = Provider::new("unused", "m", "test").with_options(options);
+        assert_eq!(provider.body(&[], &[])["max_tokens"], 8192);
+    }
+
+    #[test]
+    fn output_contract_rejects_truncated_text_and_tools() {
+        for message in [json!({"content":"partial"}), json!({"tool_calls":[]})] {
+            let response = json!({"choices":[{"finish_reason":"length","message":message}]});
+            let error =
+                parse_response(&response.to_string()).expect_err("truncated output must fail");
+            assert!(error.contains("truncated"));
+        }
+    }
+
     #[test]
     fn provider_response_boundary_requires_new_enabled_tool_reasoning_before_dispatch() {
         let mut provider = Provider::new("unused", "m", "test").with_options(ProviderOptions {
+            max_output_tokens: None,
             protocol: ProviderProtocol::DeepSeek,
             thinking: ThinkingMode::Enabled,
         });
@@ -1188,6 +1707,7 @@ mod tests {
             provider.options = ProviderOptions::default();
             assert!(provider.parse_turn(&response).is_ok());
             provider.options = ProviderOptions {
+                max_output_tokens: None,
                 protocol: ProviderProtocol::DeepSeek,
                 thinking: ThinkingMode::Enabled,
             };
@@ -1199,6 +1719,7 @@ mod tests {
         );
         let contradictory =
             Provider::new("invalid-no-network", "m", "test").with_options(ProviderOptions {
+                max_output_tokens: None,
                 protocol: ProviderProtocol::OpenAiCompatible,
                 thinking: ThinkingMode::Enabled,
             });
@@ -1265,12 +1786,14 @@ mod tests {
         let message = Message::Assistant {
             text: "public-answer".into(),
             calls: vec![],
+            usage: None,
+            finish_reason: None,
             reasoning_content: Some("secret-reasoning 雪".into()),
         };
         session.record(message.clone()).expect("record");
         let path = session.path.clone();
         let cost = session.characters();
-        let agent = Agent::new(SummaryModel, Server::new(Scenario::empty("test"), vec![]))
+        let mut agent = Agent::new(SummaryModel, Server::new(Scenario::empty("test"), vec![]))
             .with_session(session);
         let schemas = agent
             .tools_with_skill_reader()
@@ -1291,6 +1814,7 @@ mod tests {
             fn complete(&self, messages: &[Message], _: &[Value]) -> Result<Turn, String> {
                 let index = self.index.get();
                 let provider = Provider::new("unused", "m", "test").with_options(ProviderOptions {
+                    max_output_tokens: None,
                     protocol: ProviderProtocol::DeepSeek,
                     thinking: ThinkingMode::Enabled,
                 });
@@ -1322,6 +1846,8 @@ mod tests {
                             arguments: json!({}),
                         }]
                     },
+                    usage: None,
+                    finish_reason: None,
                     reasoning_content: Some([" private 雪\n", "", "final private"][index].into()),
                 })
             }
@@ -1339,6 +1865,8 @@ mod tests {
             .record(Message::Assistant {
                 text: "earlier answer".into(),
                 calls: vec![],
+                usage: None,
+                finish_reason: None,
                 reasoning_content: Some("earlier private".into()),
             })
             .expect("record");
@@ -1359,6 +1887,7 @@ mod tests {
         let resumed = session::Session::open(&directory, &saved.id).expect("resume");
         assert_eq!(resumed.messages, agent.messages);
         let provider = Provider::new("unused", "m", "test").with_options(ProviderOptions {
+            max_output_tokens: None,
             protocol: ProviderProtocol::DeepSeek,
             thinking: ThinkingMode::Enabled,
         });
@@ -1379,10 +1908,13 @@ mod tests {
                 name: "scenario__read".into(),
                 arguments: json!({}),
             }],
+            usage: None,
+            finish_reason: None,
             reasoning_content: None,
         }];
         let mut provider =
             Provider::new("invalid-no-network", "m", "test").with_options(ProviderOptions {
+                max_output_tokens: None,
                 protocol: ProviderProtocol::DeepSeek,
                 thinking: ThinkingMode::Enabled,
             });
@@ -1434,6 +1966,8 @@ mod tests {
         let messages = vec![Message::Assistant {
             text: "answer".into(),
             calls: vec![],
+            usage: None,
+            finish_reason: None,
             reasoning_content: Some(" 秘密\n".into()),
         }];
         let original = generic.body(&messages, &[]);
@@ -1445,6 +1979,7 @@ mod tests {
             (ThinkingMode::Disabled, "disabled"),
         ] {
             let provider = generic.clone().with_options(ProviderOptions {
+                max_output_tokens: None,
                 protocol: ProviderProtocol::DeepSeek,
                 thinking: mode,
             });
@@ -1491,6 +2026,8 @@ mod tests {
         // same sequence arrives in `answer.trace`, in the same order.
         let mut agent = agent(vec![
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: String::new(),
                 calls: vec![
@@ -1507,6 +2044,8 @@ mod tests {
                 ],
             },
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "Done.".to_owned(),
                 calls: Vec::new(),
@@ -1532,11 +2071,15 @@ mod tests {
         let session = crate::session::Session::create(&directory).expect("a session");
         let mut agent = agent(vec![
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "Renamed.".to_owned(),
                 calls: Vec::new(),
             },
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "It is still Gemini.".to_owned(),
                 calls: Vec::new(),
@@ -1557,6 +2100,8 @@ mod tests {
         let mut agent = Agent::new(
             Script {
                 turns: std::cell::RefCell::new(vec![Turn {
+                    usage: None,
+                    finish_reason: None,
                     reasoning_content: None,
                     text: "Still Gemini.".to_owned(),
                     calls: Vec::new(),
@@ -1605,6 +2150,8 @@ mod tests {
             Recorder {
                 turns: RefCell::new(vec![
                     Turn {
+                        usage: None,
+                        finish_reason: None,
                         reasoning_content: None,
                         text: String::new(),
                         calls: vec![ToolCall {
@@ -1614,11 +2161,15 @@ mod tests {
                         }],
                     },
                     Turn {
+                        usage: None,
+                        finish_reason: None,
                         reasoning_content: None,
                         text: "Renamed.".to_owned(),
                         calls: Vec::new(),
                     },
                     Turn {
+                        usage: None,
+                        finish_reason: None,
                         reasoning_content: None,
                         text: "It is still called Gemini.".to_owned(),
                         calls: Vec::new(),
@@ -1667,6 +2218,8 @@ mod tests {
         let server = Server::new(Scenario::empty("history test"), Vec::new());
         let turns = (0..MAX_HISTORY)
             .map(|index| Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: format!("answer {index}"),
                 calls: Vec::new(),
@@ -1726,6 +2279,8 @@ mod tests {
     fn a_call_named_the_way_the_model_sees_it_reaches_the_command() {
         let mut agent = agent(vec![
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
@@ -1735,6 +2290,8 @@ mod tests {
                 }],
             },
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "Renamed.".to_owned(),
                 calls: Vec::new(),
@@ -1789,6 +2346,8 @@ mod tests {
         // cannot know. The document is an MCP resource; this tool is how the model reaches it.
         let mut agent = agent(vec![
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
@@ -1798,6 +2357,8 @@ mod tests {
                 }],
             },
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "It has none.".to_owned(),
                 calls: Vec::new(),
@@ -1834,6 +2395,8 @@ mod tests {
     #[test]
     fn a_plain_answer_needs_no_tools() {
         let mut agent = agent(vec![Turn {
+            usage: None,
+            finish_reason: None,
             reasoning_content: None,
             text: "I can compute passes.".to_owned(),
             calls: Vec::new(),
@@ -1849,6 +2412,8 @@ mod tests {
         // remote client uses, so an agent cannot drift from what MCP clients see.
         let mut agent = agent(vec![
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
@@ -1858,6 +2423,8 @@ mod tests {
                 }],
             },
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "Renamed.".to_owned(),
                 calls: Vec::new(),
@@ -1882,6 +2449,8 @@ mod tests {
         // loop must survive it.
         let mut agent = agent(vec![
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
@@ -1891,6 +2460,8 @@ mod tests {
                 }],
             },
             Turn {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "I could not add it.".to_owned(),
                 calls: Vec::new(),
@@ -1916,6 +2487,8 @@ mod tests {
         impl ChatModel for Endless {
             fn complete(&self, _messages: &[Message], _tools: &[Value]) -> Result<Turn, String> {
                 Ok(Turn {
+                    usage: None,
+                    finish_reason: None,
                     reasoning_content: None,
                     text: String::new(),
                     calls: vec![ToolCall {
@@ -1970,6 +2543,8 @@ mod tests {
             Message::System("rules".to_owned()),
             Message::User("when".to_owned()),
             Message::Assistant {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {

@@ -72,7 +72,9 @@ MCP and knowledge library; it does not move models or network clients into the n
   result cannot replace edits made while the request was running.
 - **DeepSeek protocol shipped in 0.1.83:** explicit thinking selection and opaque protocol-state
   preservation, with generic endpoint compatibility. See [model configuration](docs/guides/model-provider.md).
-- **Then:** bounded model transport and usage,
+- **Output/usage shipped in 0.1.85:** configurable generated-token caps, persisted optional usage,
+  separate summary costs and refusal of truncated responses before tool dispatch.
+- **Then:** bounded model transport and cancellation,
   role contracts, a controlled executor, and separately evaluated product/development pilots.
 
 The existing single-model loop is still the shipped runtime. A task graph, a role registry and

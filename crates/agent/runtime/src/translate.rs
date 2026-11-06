@@ -114,6 +114,7 @@ fn translate_batch<M: ChatModel>(
         &[Message::System(SYSTEM.to_owned()), Message::User(prompt)],
         &[],
     )?;
+    crate::reject_truncated(turn.finish_reason.as_deref())?;
     let json = json_object(&turn.text)
         .ok_or_else(|| format!("the model's answer is not a JSON object: {}", turn.text))?;
     let mut rows = Vec::new();
@@ -250,6 +251,8 @@ mod tests {
             }
             match answers.remove(0) {
                 Ok(text) => Ok(crate::Turn {
+                    usage: None,
+                    finish_reason: None,
                     reasoning_content: None,
                     text,
                     calls: Vec::new(),

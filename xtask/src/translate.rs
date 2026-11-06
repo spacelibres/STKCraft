@@ -26,6 +26,7 @@ pub fn chat_completion(key: &str, prompt: &str) -> Result<String, String> {
         .unwrap_or_else(|_| stkcraft_agent_runtime::DEEPSEEK_MODEL.to_owned());
     let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
     let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+    let max_output_tokens = std::env::var("DEEPSEEK_MAX_OUTPUT_TOKENS").ok();
     let provider = translation_provider(
         key,
         &base_url,
@@ -33,6 +34,10 @@ pub fn chat_completion(key: &str, prompt: &str) -> Result<String, String> {
         protocol.as_deref(),
         thinking.as_deref(),
     )?;
+    let options = provider
+        .options
+        .with_max_output_tokens(max_output_tokens.as_deref())?;
+    let provider = provider.with_options(options);
     completion_with(&provider, prompt)
 }
 

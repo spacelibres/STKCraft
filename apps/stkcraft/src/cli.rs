@@ -119,6 +119,7 @@ COMMANDS
     model       Show or change the model this installation uses:
                 `model --key <KEY>`, `--endpoint <URL>`, `--name <MODEL>`, `--clear`
                 `--protocol deepseek|compatible`, `--thinking enabled|disabled`
+                `--max-output-tokens <POSITIVE INTEGER>` (includes thinking tokens)
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
     version     Print the version
@@ -725,6 +726,8 @@ pub struct ModelRequest {
     protocol: Option<String>,
     /// An explicitly selected thinking mode.
     thinking: Option<String>,
+    /// An explicit total output-token cap.
+    max_output_tokens: Option<String>,
     /// Remove the stored credential.
     clear: bool,
 }
@@ -737,6 +740,7 @@ fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocatio
         name: None,
         protocol: None,
         thinking: None,
+        max_output_tokens: None,
         clear: false,
     };
     while let Some(flag) = arguments.next() {
@@ -764,6 +768,9 @@ fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocatio
                 request.thinking = Some(selected);
             }
             "--clear" => request.clear = true,
+            "--max-output-tokens" => {
+                request.max_output_tokens = Some(value("--max-output-tokens")?);
+            }
             other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
         }
     }
@@ -795,6 +802,10 @@ fn model(request: &ModelRequest) -> Result<(), String> {
         changed.push(format!("thinking {thinking}"));
     }
     // Validate before any preference or credential mutation, including key-only/clear-only calls.
+    if let Some(cap) = &request.max_output_tokens {
+        prefs.model_max_output_tokens = Some(cap.clone());
+        changed.push(format!("max output tokens {cap}"));
+    }
     crate::prefs::validate_model_options(&prefs)?;
     if !changed.is_empty() {
         prefs.save()?;
@@ -821,8 +832,10 @@ fn model(request: &ModelRequest) -> Result<(), String> {
                 provider.base_url
             );
             println!(
-                "  protocol: {:?}; thinking: {:?}",
-                provider.options.protocol, provider.options.thinking
+                "  protocol: {:?}; thinking: {:?}; max output tokens: {:?}",
+                provider.options.protocol,
+                provider.options.thinking,
+                provider.options.max_output_tokens
             );
             println!(
                 "  credential: {} ({}-byte stored or environment key, timeout {} s)",

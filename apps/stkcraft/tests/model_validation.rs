@@ -8,6 +8,61 @@
 use std::process::Command;
 
 #[test]
+fn output_cap_is_configurable_and_invalid_values_preserve_settings() {
+    let base = std::env::temp_dir()
+        .canonicalize()
+        .expect("temporary directory");
+    let root = base.join(format!("stkcraft-output-cap-{}", std::process::id()));
+    std::fs::create_dir(&root).expect("unique configuration root");
+    let run = |arguments: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_stkcraft"))
+            .args(arguments)
+            .env("APPDATA", &root)
+            .env("XDG_CONFIG_HOME", &root)
+            .env_remove("DEEPSEEK_API_KEY")
+            .env_remove("DEEPSEEK_BASE_URL")
+            .env_remove("DEEPSEEK_MODEL")
+            .env("DEEPSEEK_PROTOCOL", "deepseek")
+            .env("DEEPSEEK_THINKING", "disabled")
+            .env("DEEPSEEK_MAX_OUTPUT_TOKENS", "0")
+            .output()
+            .expect("configuration command")
+    };
+    let valid = run(&["model", "--max-output-tokens", "4096"]);
+    assert!(
+        valid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&valid.stderr)
+    );
+    let path = root.join("stkcraft/ui.json");
+    let saved = std::fs::read_to_string(&path).expect("saved settings");
+    let json: serde_json::Value = serde_json::from_str(&saved).expect("settings JSON");
+    assert_eq!(
+        json.get("model_max_output_tokens")
+            .and_then(serde_json::Value::as_str),
+        Some("4096")
+    );
+    for invalid in ["0", "-1", "4294967296", "many"] {
+        let result = run(&[
+            "model",
+            "--max-output-tokens",
+            invalid,
+            "--key",
+            "test-only",
+        ]);
+        assert!(!result.status.success(), "invalid output cap accepted");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("preserved settings"),
+            saved
+        );
+        assert!(!root.join("stkcraft/model.key").exists());
+    }
+    let resolved = root.canonicalize().expect("configuration root");
+    assert!(resolved.starts_with(&base));
+    std::fs::remove_dir_all(resolved).expect("remove isolated fixture");
+}
+
+#[test]
 fn malformed_saved_model_options_preserve_the_connection_and_credential() {
     let base = std::env::temp_dir()
         .canonicalize()
@@ -21,6 +76,9 @@ fn malformed_saved_model_options_preserve_the_connection_and_credential() {
         ("model_thinking", serde_json::json!({})),
         ("model_thinking", serde_json::json!([])),
         ("model_thinking", serde_json::json!(true)),
+        ("model_max_output_tokens", serde_json::json!(0)),
+        ("model_max_output_tokens", serde_json::json!("0")),
+        ("model_max_output_tokens", serde_json::json!({})),
         (
             "oversized_future_field",
             serde_json::json!("x".repeat(65_537)),

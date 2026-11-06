@@ -22,8 +22,16 @@ Each setting resolves saved preferences first, then environment, then the shippe
 | Model | `--name MODEL` | `DEEPSEEK_MODEL` | `model` |
 | Protocol | `--protocol deepseek\|compatible` | `DEEPSEEK_PROTOCOL` | `model_protocol` |
 | Thinking | `--thinking enabled\|disabled` | `DEEPSEEK_THINKING` | `model_thinking` |
+| Output tokens | `--max-output-tokens N` | `DEEPSEEK_MAX_OUTPUT_TOKENS` | `model_max_output_tokens` |
 
 Unknown protocol or thinking values are errors. Thinking enabled requires the DeepSeek protocol.
+Output caps must be positive integers. The configured DeepSeek default is 8192 generated tokens,
+including thinking tokens; it is an application policy, not a claim about a model's maximum.
+Generic connections omit the cap unless explicitly configured. For example:
+
+```sh
+stkcraft model --max-output-tokens 16384
+```
 Changing these options validates the proposed settings before saving them, without needing a key.
 Malformed saved JSON or wrong-type fields also fail model operations; repair the saved settings
 before continuing. The window can open with default chrome while preserving that invalid file.
@@ -62,10 +70,21 @@ ordinary mode for their single JSON completion, retaining their 300-second timeo
 ## Verification and limits
 
 Protocol, session and configuration tests use scripted models and serialized requests. They require
-no credential and do not establish live account availability or real-task model quality. Output
-token limits, usage accounting and supervised bounded/cancellable transport are subsequent stages
-in [the agent programme](../design/agents.md).
+no credential and do not establish live account availability or real-task model quality.
+
+Assistant turns retain optional provider-reported usage and completion status in the session. Usage
+is telemetry: missing usage remains unknown, and reported zero remains zero. Cache/reasoning
+breakdowns are optional; reasoning tokens are already included in completion tokens. Metadata is
+not replayed as request messages. `finish_reason=length` fails before any tool dispatch or successful
+answer, so a truncated response cannot silently change a scenario.
+
+`Answer::usage` and `Agent::usage()` expose reported sums, unknown requests, failed attempts and
+overflow. Compaction requests have a separate aggregate, including failed summary attempts; sums
+cover only reported requests and must not be presented as a complete cost when usage is missing.
+Supervised bounded/cancellable transport is the next stage in
+[the agent programme](../design/agents.md).
 
 Provider behaviour was checked against the official [thinking-mode guide](https://api-docs.deepseek.com/guides/thinking_mode/)
-and [model catalogue](https://api-docs.deepseek.com/quick_start/pricing/) on 2026-11-07. Names and API
+and [chat-completions contract](https://api-docs.deepseek.com/api/create-chat-completion/)
+on 2026-11-07. Names and API
 requirements can change; these references govern provider extensions, not the numerical kernel.

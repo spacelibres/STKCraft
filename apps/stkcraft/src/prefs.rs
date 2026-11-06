@@ -33,6 +33,8 @@ pub struct Prefs {
     pub model_protocol: Option<String>,
     /// Explicit `DeepSeek` thinking selection: `enabled` or `disabled`.
     pub model_thinking: Option<String>,
+    /// Total generated-token cap, validated before a model operation (including thinking tokens).
+    pub model_max_output_tokens: Option<String>,
 }
 
 // Preferences contain a handful of short settings, not documents. Bound reads even if a file grows.
@@ -122,6 +124,7 @@ pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
     let model = std::env::var("DEEPSEEK_MODEL").ok();
     let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
     let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+    let max_output_tokens = std::env::var("DEEPSEEK_MAX_OUTPUT_TOKENS").ok();
     model_provider_from(
         &prefs,
         stored.as_deref(),
@@ -131,6 +134,7 @@ pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
             model: model.as_deref(),
             protocol: protocol.as_deref(),
             thinking: thinking.as_deref(),
+            max_output_tokens: max_output_tokens.as_deref(),
         },
     )
 }
@@ -152,6 +156,8 @@ pub struct ModelEnvironment<'a> {
     pub protocol: Option<&'a str>,
     /// `DEEPSEEK_THINKING`.
     pub thinking: Option<&'a str>,
+    /// `DEEPSEEK_MAX_OUTPUT_TOKENS`.
+    pub max_output_tokens: Option<&'a str>,
 }
 
 /// Resolve credential-free protocol settings with the same precedence as the model connection.
@@ -167,6 +173,12 @@ pub fn model_options_from(
             .unwrap_or(stkcraft_agent_runtime::DEEPSEEK_BASE_URL),
         prefs.model_protocol.as_deref().or(environment.protocol),
         prefs.model_thinking.as_deref().or(environment.thinking),
+    )?
+    .with_max_output_tokens(
+        prefs
+            .model_max_output_tokens
+            .as_deref()
+            .or(environment.max_output_tokens),
     )
 }
 
@@ -175,12 +187,14 @@ pub fn validate_model_options(prefs: &Prefs) -> Result<(), String> {
     let base_url = std::env::var("DEEPSEEK_BASE_URL").ok();
     let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
     let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+    let max_output_tokens = std::env::var("DEEPSEEK_MAX_OUTPUT_TOKENS").ok();
     model_options_from(
         prefs,
         &ModelEnvironment {
             base_url: base_url.as_deref(),
             protocol: protocol.as_deref(),
             thinking: thinking.as_deref(),
+            max_output_tokens: max_output_tokens.as_deref(),
             ..ModelEnvironment::default()
         },
     )
@@ -529,6 +543,9 @@ mod tests {
         for raw in [
             r#"{"model_protocol":"unknown"}"#,
             r#"{"model_thinking":"turbo"}"#,
+            r#"{"model_max_output_tokens":"0"}"#,
+            r#"{"model_max_output_tokens":"-1"}"#,
+            r#"{"model_max_output_tokens":"4294967296"}"#,
         ] {
             let prefs: Prefs = serde_json::from_str(raw).expect("settings object");
             let result =
@@ -558,6 +575,7 @@ mod tests {
         let provider = model_provider_from(&prefs, None, &environment).expect("saved settings win");
         assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
         assert_eq!(provider.options.thinking, ThinkingMode::Disabled);
+        assert_eq!(provider.options.max_output_tokens, Some(8192));
         assert_eq!(
             provider.model, "deepseek-chat",
             "explicit model selections survive"
@@ -572,6 +590,27 @@ mod tests {
         assert_eq!(
             provider.options.protocol,
             ProviderProtocol::OpenAiCompatible
+        );
+        assert_eq!(provider.options.max_output_tokens, None);
+        let capped = ModelEnvironment {
+            max_output_tokens: Some("123"),
+            ..proxy
+        };
+        assert_eq!(
+            model_options_from(&Prefs::default(), &capped)
+                .expect("env output cap")
+                .max_output_tokens,
+            Some(123)
+        );
+        let chosen = Prefs {
+            model_max_output_tokens: Some("456".to_owned()),
+            ..Prefs::default()
+        };
+        assert_eq!(
+            model_options_from(&chosen, &capped)
+                .expect("saved cap wins")
+                .max_output_tokens,
+            Some(456)
         );
         let enabled_proxy = ModelEnvironment {
             protocol: Some("deepseek"),
@@ -637,6 +676,7 @@ mod tests {
             model: Some("mine".to_owned()),
             model_protocol: Some("compatible".to_owned()),
             model_thinking: Some("disabled".to_owned()),
+            model_max_output_tokens: Some("8192".to_owned()),
         };
         let text = serde_json::to_string(&prefs).expect("serialised");
         let read: Prefs = serde_json::from_str(&text).expect("deserialised");

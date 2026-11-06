@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Message, ToolCall};
+use crate::{Message, ToolCall, Usage};
 
 /// How many characters of conversation to keep before dropping the oldest turns.
 ///
@@ -57,6 +57,10 @@ enum Stored {
         /// Opaque provider replay state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning_content: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<Usage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        finish_reason: Option<String>,
     },
     /// A tool's answer.
     Tool {
@@ -116,8 +120,12 @@ impl From<&Message> for Stored {
                 text,
                 calls,
                 reasoning_content,
+                usage,
+                finish_reason,
             } => Self::Assistant {
                 reasoning_content: reasoning_content.clone(),
+                usage: usage.clone(),
+                finish_reason: finish_reason.clone(),
                 text: text.clone(),
                 calls: calls
                     .iter()
@@ -147,7 +155,11 @@ impl Stored {
                 text,
                 calls,
                 reasoning_content,
+                usage,
+                finish_reason,
             } => Some(Message::Assistant {
+                usage,
+                finish_reason,
                 reasoning_content,
                 text,
                 calls: calls
@@ -237,6 +249,21 @@ impl Session {
                     && !reasoning.is_string()
                 {
                     return Err("stored assistant reasoning_content must be a string or null; use an intact session".to_owned());
+                }
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+                    && let Some(assistant) = value.get("assistant")
+                {
+                    if assistant.get("usage").is_some_and(|usage| {
+                        !usage.is_null() && serde_json::from_value::<Usage>(usage.clone()).is_err()
+                    }) {
+                        return Err("stored assistant usage must contain unsigned integer counters; use an intact session".to_owned());
+                    }
+                    if assistant
+                        .get("finish_reason")
+                        .is_some_and(|reason| !reason.is_null() && !reason.is_string())
+                    {
+                        return Err("stored assistant finish_reason must be a string or null; use an intact session".to_owned());
+                    }
                 }
                 continue;
             };
@@ -508,6 +535,8 @@ mod tests {
             .expect("recorded");
         session
             .record(Message::Assistant {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
@@ -525,11 +554,23 @@ mod tests {
             .expect("recorded");
         session
             .record(Message::Assistant {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 text: "45 degrees".to_owned(),
                 calls: Vec::new(),
             })
             .expect("recorded");
+    }
+
+    #[test]
+    fn malformed_stored_usage_is_rejected_instead_of_dropping_history() {
+        let directory = scratch("stkcraft-invalid-usage");
+        std::fs::create_dir_all(&directory).expect("directory");
+        std::fs::write(directory.join("invalid.jsonl"), r#"{"assistant":{"text":"answer","calls":[],"usage":{"prompt_tokens":-1,"completion_tokens":0,"total_tokens":0}}}"#).expect("write");
+        let error = Session::open(&directory, "invalid").expect_err("metadata error");
+        assert!(error.contains("usage"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[test]
@@ -549,6 +590,8 @@ mod tests {
         assert!(matches!(
             message,
             Message::Assistant {
+                usage: None,
+                finish_reason: None,
                 reasoning_content: None,
                 ..
             }
@@ -561,6 +604,8 @@ mod tests {
             let message = Message::Assistant {
                 text: "answer".into(),
                 calls: vec![],
+                usage: None,
+                finish_reason: None,
                 reasoning_content: reasoning,
             };
             let encoded = serde_json::to_string(&Stored::from(&message)).expect("encode");
@@ -575,6 +620,8 @@ mod tests {
         let mut session = Session::create(&directory).expect("session");
         let payload = Message::Assistant {
             text: "字".into(),
+            usage: None,
+            finish_reason: None,
             reasoning_content: Some("秘".repeat(CONTEXT_BUDGET_CHARS)),
             calls: vec![ToolCall {
                 id: "号".into(),
@@ -597,6 +644,8 @@ mod tests {
                 .record(Message::Assistant {
                     text: "a".into(),
                     calls: vec![],
+                    usage: None,
+                    finish_reason: None,
                     reasoning_content: Some(format!("retained {index}")),
                 })
                 .expect("record");
@@ -610,6 +659,8 @@ mod tests {
                 .filter(|message| matches!(
                     message,
                     Message::Assistant {
+                        usage: None,
+                        finish_reason: None,
                         reasoning_content: Some(_),
                         ..
                     }
@@ -693,6 +744,8 @@ mod tests {
                 .expect("recorded");
             session
                 .record(Message::Assistant {
+                    usage: None,
+                    finish_reason: None,
                     reasoning_content: None,
                     text: format!("answer {index}"),
                     calls: Vec::new(),
@@ -763,6 +816,8 @@ mod tests {
                 .expect("recorded");
             session
                 .record(Message::Assistant {
+                    usage: None,
+                    finish_reason: None,
                     reasoning_content: None,
                     text: format!("answer {index}"),
                     calls: Vec::new(),

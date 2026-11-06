@@ -9,6 +9,31 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.85] — Bounded model output and honest token accounting
+
+### Added
+
+- Configure total generated tokens with `stkcraft model --max-output-tokens N`, saved preferences
+  or `DEEPSEEK_MAX_OUTPUT_TOKENS`. DeepSeek connections default to 8192; generic connections keep
+  their previous request shape unless a cap is explicitly selected. Invalid caps fail before any
+  settings or credential changes.
+- Assistant session records retain optional provider usage and completion status. Answer telemetry
+  distinguishes known token totals, missing usage, failures and overflow, with summary requests
+  accounted separately. Cache and reasoning breakdowns remain optional; telemetry is not a billing
+  guarantee or an estimate of missing values.
+
+### Fixed
+
+- Responses stopped at the output limit cannot execute tool calls or appear as successful answers.
+  Malformed usage also fails validation before dispatch. Older sessions without metadata remain
+  readable, and local telemetry is never replayed as model message content.
+
+### Not built yet
+
+- Supervised transport cancellation, task scheduling and the two specialist execution domains are
+  the next programme stages. Scripted regressions establish protocol behaviour, not live model
+  quality or account availability.
+
 ## [0.1.84] — Invalid saved model settings cannot select a different endpoint
 
 ### Fixed
