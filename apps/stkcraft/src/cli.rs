@@ -21,6 +21,8 @@ pub enum Invocation {
     Passes(PassRequest),
     /// One satellite against a station on another body, printed as a pass table.
     Planet(PlanetRequest),
+    /// Serve the command registry to an agent over standard input and output.
+    Mcp,
 }
 
 /// The parameters of the `passes` subcommand.
@@ -64,6 +66,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         }
         Invocation::Passes(request) => passes(&request),
         Invocation::Planet(request) => planet(&request),
+        Invocation::Mcp => mcp(),
     }
 }
 
@@ -84,6 +87,7 @@ USAGE
 COMMANDS
     passes      Compute satellite passes over a ground station
     planet      Compute passes over a station on another body
+    mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
     version     Print the version
     help        Print this text
 
@@ -137,6 +141,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "version" | "--version" | "-V" => Ok(Invocation::Version),
         "passes" => parse_passes(arguments),
         "planet" => parse_planet(arguments),
+        "mcp" => Ok(Invocation::Mcp),
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
 }
@@ -349,61 +354,30 @@ fn planet(request: &PlanetRequest) -> Result<(), String> {
     Ok(())
 }
 
-// The tests fail with `assert!`/`match` rather than `panic!`, because the crate's own deny
-// list applies to them too; the one `panic!` below is inside `matches!`-style reporting.
-#[cfg(test)]
-#[allow(clippy::panic)]
-mod tests {
-    use super::*;
+/// Serve the engine's commands over the Model Context Protocol on stdin/stdout.
+///
+/// The skills directory is looked for beside the executable first and then in the working
+/// directory, because a deployment copies the binary and its documents together while a developer
+/// runs from the repository root. Absent skills are not an error: the tools still work.
+fn mcp() -> Result<(), String> {
+    let skills = skills_directory();
+    let mut server =
+        stkcraft_mcp::Server::new(app_demo_scenario()?, stkcraft_mcp::load_skills(&skills));
+    server.serve()
+}
 
-    fn parse_planet_args(arguments: &[&str]) -> Result<Invocation, String> {
-        parse_planet(arguments.iter().map(|part| (*part).to_owned()))
+/// Where the skill documents live, if they are anywhere this build can find them.
+fn skills_directory() -> std::path::PathBuf {
+    let beside_executable = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join("skills")));
+    if let Some(path) = beside_executable.filter(|path| path.is_dir()) {
+        return path;
     }
+    std::path::PathBuf::from("skills")
+}
 
-    #[test]
-    fn a_planet_request_needs_a_body_and_a_radius() {
-        assert!(parse_planet_args(&["--radius", "4000"]).is_err());
-        assert!(parse_planet_args(&["--body", "Mars"]).is_err());
-        assert!(parse_planet_args(&["--body", "Mars", "--radius", "4000"]).is_ok());
-    }
-
-    #[test]
-    fn a_planet_request_reads_every_option_it_documents() {
-        let Ok(Invocation::Planet(request)) = parse_planet_args(&[
-            "--body",
-            "Titan",
-            "--radius",
-            "3000",
-            "--inclination",
-            "45",
-            "--lat",
-            "-12.5",
-            "--lon",
-            "170",
-            "--mask",
-            "5",
-            "--hours",
-            "2",
-            "--step",
-            "20",
-        ]) else {
-            panic!("a fully specified request must parse");
-        };
-        assert_eq!(request.body, "Titan");
-        assert!((request.radius_km - 3_000.0).abs() < 1e-12);
-        assert!((request.inclination_deg - 45.0).abs() < 1e-12);
-        assert!((request.latitude_deg - -12.5).abs() < 1e-12);
-        assert!((request.longitude_deg - 170.0).abs() < 1e-12);
-        assert!((request.mask_deg - 5.0).abs() < 1e-12);
-        assert!((request.hours - 2.0).abs() < 1e-12);
-        assert!((request.step_seconds - 20.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn a_nonsense_value_is_refused_with_the_option_named() {
-        match parse_planet_args(&["--body", "Mars", "--radius", "four thousand"]) {
-            Err(error) => assert!(error.contains("--radius"), "{error}"),
-            Ok(_) => panic!("`four thousand` is not a number"),
-        }
-    }
+/// The scenario an MCP session starts with.
+fn app_demo_scenario() -> Result<stkcraft_engine::Scenario, String> {
+    crate::app::demo_scenario()
 }

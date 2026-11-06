@@ -9,6 +9,37 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.19] — The core is agent-first: MCP tools and skills
+
+`stkcraft mcp` serves the engine to a large language model over the Model Context Protocol.
+Every command is a tool with a schema built from its own parameter documentation, the scenario and
+the command catalogue are resources, and the procedures a model needs are markdown skills served as
+resources and prompts. The model stays outside the kernel: the kernel makes itself completely
+usable from there, and swapping the model changes nothing in the analysis.
+
+### Added
+
+- **`stkcraft-mcp`** — a JSON-RPC 2.0 server over standard input and output, implementing
+  `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list` and
+  `prompts/get`. `Server::handle` is a pure function of a request and the session, so the whole
+  protocol is tested without a pipe; nine tests cover the handshake, the tool catalogue, a real
+  command call through the registry, an unknown tool, the resources and the prompts.
+- **`skills/`** — three procedures written for a reader that will act on them: computing passes over
+  a station, access from a station on another body, and the shape of the scenario document. Each
+  states the order of commands, what the answer means and the traps, because a schema can describe a
+  parameter and cannot describe a job.
+- **`stkcraft mcp`** in the CLI, loading the skills from beside the executable or the working
+  directory; absent skills are not an error, because the tools still work without them.
+
+### Changed
+
+- **`docs/architecture.md` gains "The agent-first core"**, which records why the model is outside
+  the kernel, what "plugin" means today (a command is one registry entry; a skill is a document) and
+  what a dynamic-plugin registry would need before it is worth building — a capability story about
+  what third-party code may do.
+- **The layer table grows to six**, with the MCP server one below the app: it consumes the engine and
+  nothing consumes it, which is the same relationship the viewport has.
+
 ## [0.1.18] — A fetch that says whether it fetched anything
 
 `cargo xtask fetch-data` now ends with a line you can read at a glance — `12 file(s), 3 fetched,

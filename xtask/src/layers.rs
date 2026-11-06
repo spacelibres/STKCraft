@@ -36,7 +36,7 @@ pub struct CrateSpec {
 pub const FIRST_LAYER: u32 = 0;
 
 /// How many layers the analysis crates occupy. The apps sit just above the top one.
-pub const LAYER_COUNT: u32 = 5;
+pub const LAYER_COUNT: u32 = 6;
 
 /// The highest layer that must stay free of any GUI dependency.
 ///
@@ -115,6 +115,14 @@ pub const LAYOUT: &[CrateSpec] = &[
         name: "stkcraft-engine",
         path: "crates/engine",
         layer: 4,
+    },
+    // The agent interface is a transport onto the engine: a menu, a CLI and an MCP session all
+    // reach the same command registry, and nothing below knows any of them exists. It sits at the
+    // viewport's height — one below the app — because it consumes the engine and nothing consumes it.
+    CrateSpec {
+        name: "stkcraft-mcp",
+        path: "crates/mcp",
+        layer: APP_LAYER - 1,
     },
     // The 3D viewport sits above the analysis layers because it is a UI crate: it may use
     // `wgpu` and `egui`, which `LAST_NON_UI_LAYER` forbids below. It still depends only on

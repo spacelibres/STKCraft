@@ -13,8 +13,9 @@ L2  frames    reference frames and rotations
 L2  sgp4      SGP4/SDP4 propagation from a two-line element set
 L3  access    line of sight, elevation masks, occultation, access windows
 L4  engine    scenario, propagation, analysis, the command registry
+L4  mcp       the MCP server: every command as an agent tool, every skill as a prompt
 L4  viewport  the 3D viewport: GPU rendering and generated geometry
-    apps      stkcraft (window and CLI)
+    apps      stkcraft (window, CLI and MCP server)
 ```
 
 Planned, in the order they will land:
