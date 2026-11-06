@@ -1,0 +1,115 @@
+# STKCraft standards
+
+The rule book. `AGENTS.md` says how to work in this repository; this document says what the product
+must be, in the areas where a decision made once is expensive to unmake. Every rule here is either
+enforced by a task in `cargo xtask ci` or marked as unbuilt, and a rule that is neither is a wish.
+
+STKCraft is one of the ArtCraft Craft apps. Where the family has a standard, this project follows it
+rather than inventing a local variant, and the section says which family repository owns the
+standard. The family's own documents are the authority; this one records what conformance means
+here.
+
+| Area | Standard | Enforced by | State |
+|---|---|---|---|
+| Interface translations | `storytold/craft-i18n` catalog format | `cargo xtask i18n` | built |
+| Agent + skills + MCP | `storytold/craft-ai-integrations`, `craft-skills` | `cargo xtask ci`, `cargo xtask layers` | built, see §2 |
+| Extensions and plug-ins | `storytold/craft-extensions` package contract | `cargo xtask ci` (feature check) | partial, see §3 |
+| API documentation | this document, §4 | `cargo xtask api-docs` | partial, see §4 |
+| Layering | `AGENTS.md`, `xtask/src/layers.rs` | `cargo xtask layers` | built |
+| Version and release | `AGENTS.md` | `cargo xtask version`, `cargo xtask release` | built |
+
+## 1. Language and translation
+
+**One English source; every other language is a catalog.**
+
+- The interface is written in English in the source, and every user-visible string goes through
+  `tr!`, `trc!` or `trn!`. A string built at run time cannot be extracted and cannot be checked, so
+  the macros take literals only. `cargo xtask i18n` extracts them; `cargo xtask ci` runs it.
+- Catalogs are the family format: `locales/<locale>/stkcraft.tsv`, three TAB-separated columns
+  `context <TAB> English <TAB> translation`, English as the key, `@plural` / `@id` / `@msg` contexts,
+  `{name}` placeholders and a trailing `…` preserved in both columns, `@id	language.name` naming the
+  language. `docs/localization.md` is the long form.
+- **English is always complete by construction** — it is the source. A translation is always partial
+  by default and may be so forever: a missing row shows English, never a blank or a key.
+- **Machine translation is how a catalog gets made, and review is how it ships.** `cargo xtask i18n
+  translate` fills a locale from the user's own `DEEPSEEK_API_KEY`; the rows it produces are
+  proposals, and a wrong translation is worse than a missing one because the missing one shows
+  English and the wrong one is believed. A release ships only catalogs someone has read.
+- **The translation path stays outside the window's startup path.** A build with no `locales/`
+  directory is a valid English-only build; a window that is merely open never makes a network call.
+- **Not translated:** command ids, scenario and satellite names, machine-formatted times, and
+  computed values. The family's rule is interface chrome, not document text.
+- **Not built:** number and date localization per region, right-to-left layout, and translation at
+  run time inside the window.
+
+## 2. Agent, skills and the Model Context Protocol
+
+**The model is outside the kernel, and the kernel is completely reachable from outside it.**
+
+- `stkcraft-engine` and everything below it makes no network call, links no HTTP client and does not
+  know a language model exists. `stkcraft-mcp` (L5) is a transport onto the command registry;
+  `stkcraft-agent` (L6) is a client of that transport. The agent therefore cannot reach a capability
+  the protocol does not expose, which keeps "an agent can do anything a user can" a property of the
+  design rather than a promise.
+- **Every command is a tool**, generated from the registry: one descriptor with a label, a menu path,
+  documented parameters and a declared `ParameterKind`. A capability is added by adding a command,
+  never by teaching a model a number.
+- **A tool returns the answer, not a count.** Computed times come back as text a model reads and as
+  `structuredContent` a program can trust.
+- **Skills are documents, not code**: `skills/<name>/SKILL.md`, one `#` heading whose text is the
+  description, then the procedure, what the answer means and the traps. They are listed in the system
+  prompt by name and read only when a job needs one — the same progressive disclosure an MCP client
+  gets from `prompts/get`. The family's shared skill corpus is `storytold/craft-skills`.
+- **The provider is a connection, not a hard-coding.** `DeepSeek` is the default because it is what
+  this project can test, and `ChatModel` is a trait so a different model is a different
+  implementation. A key comes from the environment and is never written to a document. Where the
+  family layer (`craft-ai-integrations`: connections, model binding, consent, jobs) provides the same
+  thing, adopting it replaces this code rather than living beside it.
+- **Consent is the user's action.** A question typed into the assistant panel or `stkcraft chat` is a
+  request to use a model; nothing else in the app calls one.
+
+## 3. Extensions and plug-ins
+
+**Third-party code is designed in and switched off.** The family's `craft-extensions` contract is
+the model: a package manifest, trust tiers assigned by the host rather than claimed by the package,
+a shared on-disk store, themes carrying no code, and plug-ins whose v1 permission list must be empty.
+
+- **What a plug-in is today is a registration**, not a loaded shared object: a command (one registry
+  entry), a skill (one markdown document), or a bulk file (one verified row in `cargo xtask
+  fetch-data`). Anything expressible that way is a plug-in now.
+- **Dynamic code needs a capability story first** — what a plug-in may read, compute and spend — and
+  a story invented after the fact is a hole. Until that story exists and passes review, this project
+  runs no third-party code.
+- **When the contract lands**, these are the rules it must satisfy here: a manifest that never states
+  its own trust level; unpacking that is bounded in count, size and ratio, with no path leaving its
+  folder; ids and paths checked by character class; themes that carry no code; plug-ins with no file,
+  network or clock access in v1; and the third-party path behind a cargo feature that no release
+  build enables, with a test that fails if it ever becomes a default.
+- **Not built:** the manifest, the store, the trust tiers and that feature gate. §3's rules are the
+  requirements the implementation must meet; they are not a description of shipped code.
+
+## 4. Documentation and API documentation
+
+**Documentation is written in English and generated where it can be.**
+
+- Prose documents live in `docs/`, one subject each, and are English. A document that describes the
+  code is a claim about the code and is updated in the same commit that changes it.
+- **The API reference is generated from the code**, not written by hand: `cargo xtask api-docs`
+  reads the workspace's doc comments and the command registry and writes a Markdown reference. A
+  hand-written list of commands is a list that drifts; the generated one cannot.
+- **The generated reference is translated, not re-authored.** Only the English source is maintained;
+  `cargo xtask api-docs --translate --language <code>` (or the same DeepSeek key, the same pipeline)
+  produces `docs/api/<code>/…` from it. A translated page is a build artifact and says which English
+  revision it came from, so a stale translation is visible rather than trusted.
+- **A number in documentation that the code computes is marked as an example**, because prose does
+  not re-run when the code changes.
+
+## 5. What every rule here has in common
+
+- **The gate is the enforcement.** A rule that `cargo xtask ci` does not check is a rule that will be
+  broken by the next contributor in good faith. When adding a rule, add the check.
+- **Unbuilt work is stated as unbuilt.** `CHANGELOG.md` has a "Not built yet" section for every
+  version, and this document marks the rules that describe something not yet shipped. A reader must
+  never have to guess whether a paragraph is a promise or a description.
+- **The family wins ties.** Where this document and a family standard disagree, the family standard is
+  right and this document is the bug.

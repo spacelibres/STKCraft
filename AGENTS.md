@@ -14,8 +14,9 @@ It is one of the ArtCraft Craft apps and follows the same conventions as its sib
 ## Start every session here
 
 1. `ROADMAP.md` (once it exists) — current stage and focus.
-2. `docs/architecture.md` — crate map, layers, and how a scenario flows through them.
-3. `AGENTS.md` (this file) — the rules below.
+2. `docs/standards.md` — **the rule book**: i18n, agent/skills/MCP, extensions, API docs.
+3. `docs/architecture.md` — crate map, layers, and how a scenario flows through them.
+4. `AGENTS.md` (this file) — the rules below.
 
 `plan/` is gitignored and local only.
 
@@ -101,6 +102,12 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   sit above it. The agent reaches nothing the protocol does not expose, so a capability a user
   has is a capability an agent has, and adding one means adding a command — never teaching the
   model a number. Do not put a prompt, a model name or a network call below the app layer.
+- **Every user-visible string is translatable, and English is the source.** Write interface text in
+  English and pass it through `tr!`, `trc!` or `trn!` (`stkcraft_i18n`): `cargo xtask i18n` extracts
+  those literals, `cargo xtask ci` checks the catalogs, and `cargo xtask i18n translate --language
+  <code>` fills a language from the user's own DeepSeek key. A string built at run time cannot be
+  extracted, so the macros take literals. Rules and format: `docs/standards.md` §1,
+  `docs/localization.md`.
 - **Skills are documents, not code.** A `skills/<name>/SKILL.md` starts with one `#` heading
   whose text is its description, then the procedure: the order of commands, what the answer
   means, and the traps. They are loaded at run time, so a new skill needs no rebuild; they are
@@ -116,7 +123,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   degrees/radians mix-up is a compile error. Do not add `From<f64>` conversions.
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
 - **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`,
-  tests, assets, layers, wasm, version). Commit after every arc that builds and passes.
+  tests, assets, i18n, layers, wasm, version). Commit after every arc that builds and passes.
 - **Every commit is a version.** See "Version control and the changelog" below: the smallest
   version component goes up by one and `CHANGELOG.md` gains the section that names it, in the
   same commit. `cargo xtask ci` fails if the two disagree.
@@ -134,6 +141,9 @@ cargo xtask version                            # print the workspace version
 cargo xtask version bump                       # bump it, smallest component
 cargo xtask release                            # tag the version and push the tag
 cargo xtask fetch-data                         # download the kernels, verified
+cargo xtask i18n                               # check the interface catalogs
+cargo xtask i18n report                        # what each language still lacks
+cargo xtask i18n translate --language de       # fill German from the English source
 ```
 
 ### Version control and the changelog

@@ -9,6 +9,59 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.25] — One English interface, every language a catalog
+
+The interface is now translatable, in the ArtCraft family's format: `context <TAB> English <TAB>
+translation` catalogs keyed by the English source text, `storytold/craft-i18n`'s rules, and a
+`cargo xtask i18n` task that checks them, reports what each language lacks, and fills the gaps with
+`DeepSeek` **using the reader's own API key**. There is one English source and no English catalog —
+the text in the code is the English interface — so a language that is 10% translated is 10% useful
+and the rest shows English rather than a placeholder.
+
+This release also lands the rule book: `docs/standards.md` states what the product must be where the
+family has a standard — translations, agent/skills/MCP, extensions and plug-ins, API documentation —
+and marks every rule that describes something not yet built.
+
+### Added
+
+- **`stkcraft-i18n`** — the catalog format and its lookups: parse with per-line errors, the
+  placeholder and ellipsis checks the shared project enforces, `@plural` rows with CLDR cardinal
+  forms (1 form for Chinese and Japanese, 3 for Russian, Czech, Polish and Romanian, 6 for Arabic),
+  `@id language.name` for the picker, region → base language → English fallback, and no failure
+  mode: an unknown locale or an untranslated string is the English.
+- **`cargo xtask i18n`**, `i18n report`, `i18n translate --language <code>` — the check is a step of
+  `cargo xtask ci`; the report is a to-do list of what each language lacks; the translate command
+  sends the missing rows to `DeepSeek` in one batch, refuses any row that breaks the format (a
+  dropped or invented placeholder, a missing ellipsis, an empty translation), and writes a catalog
+  that a person reviews before it ships. `--dry-run` shows the proposals without writing.
+- **A language picker in the window** and `ui.json` in the platform's configuration directory, with
+  the same first-run rule the family uses: an explicit choice, else the system locale, else English.
+  A catalog this person generated is read from `locales/<locale>.tsv` beside `ui.json`, so a
+  language works without rebuilding.
+- **`docs/standards.md`** — the rule book, with a table of which family repository owns each
+  standard and which task enforces it here.
+- **`docs/localization.md`** — the catalog format, the commands, adding a language, and an honest
+  list of what is not translated yet.
+
+### Changed
+
+- **Every interface string in the window goes through `tr!`, `trc!` or `trn!`**, which is what makes
+  it extractable: `cargo xtask i18n` reads those literals out of the source and a string built at run
+  time is invisible to it by construction. The extractor strips line comments so a documentation
+  example is not mistaken for a call — a real trap: the crate's own docs show `tr!(…)` usage.
+
+### Not built yet
+
+- **No catalog ships with this release.** A catalog is a translation someone has to read, and machine
+  output is a proposal: `cargo xtask i18n translate --language de` with your key produces one, and
+  the search path for it is documented.
+- **No number or date localization**, no right-to-left layout, and no translation at run time inside
+  the window — the last one deliberately, because a window that translates itself on start is a
+  window that makes a network call on start.
+- **§3 of the rule book, extensions and plug-ins, is rules without an implementation**: the package
+  manifest, the trust tiers and the third-party feature gate are the next arc, and until they exist
+  this project runs no third-party code.
+
 ## [0.1.24] — A way out of a conversation
 
 A conversation that has gone wrong — a wrong assumption the model keeps building on, a scenario

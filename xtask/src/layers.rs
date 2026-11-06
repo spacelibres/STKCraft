@@ -84,6 +84,13 @@ pub const LAYOUT: &[CrateSpec] = &[
         path: "crates/core",
         layer: 0,
     },
+    // Interface translations have no dependency at all: they are a text format and a lookup. They
+    // sit beside `core` because the engine's own messages are user-visible and reach them too.
+    CrateSpec {
+        name: "stkcraft-i18n",
+        path: "crates/i18n",
+        layer: 0,
+    },
     CrateSpec {
         name: "stkcraft-time",
         path: "crates/time",

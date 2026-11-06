@@ -329,18 +329,30 @@ impl Assistant {
         ui: &mut egui::Ui,
         scenario: &Scenario,
         skills: &std::path::Path,
+        translations: &stkcraft_i18n::Translations,
+        language: &str,
     ) -> Option<Scenario> {
         self.poll();
-        ui.heading("Assistant");
+        // The panel translates its own chrome from the same catalogs the rest of the window uses;
+        // the answer itself is the model's text and stays in whatever language it answered in.
+        macro_rules! tr {
+            ($source:literal) => {
+                stkcraft_i18n::tr!(translations, language, $source)
+            };
+        }
+        ui.heading(tr!("Assistant"));
         if self.answered > 0 {
             ui.horizontal(|ui| {
-                ui.label(format!(
-                    "{answered} answer(s) in this conversation",
-                    answered = self.answered
+                ui.label(stkcraft_i18n::trn!(
+                    translations,
+                    language,
+                    "{n} answer in this conversation",
+                    "{n} answers in this conversation",
+                    self.answered as u64
                 ));
                 if ui
-                    .button("New conversation")
-                    .on_hover_text("Forget the discussion; keep the scenario")
+                    .button(tr!("New conversation"))
+                    .on_hover_text(tr!("Forget the discussion; keep the scenario"))
                     .clicked()
                 {
                     self.forget();
@@ -358,10 +370,10 @@ impl Assistant {
             }
             Err(message) => {
                 ui.colored_label(egui::Color32::from_rgb(230, 170, 120), message);
-                ui.label(
+                ui.label(tr!(
                     "The assistant answers by running the engine's commands, so it needs a model \
-                     to choose them.",
-                );
+                     to choose them."
+                ));
             }
         }
         ui.separator();
@@ -372,12 +384,12 @@ impl Assistant {
             let response = ui.add(
                 egui::TextEdit::multiline(&mut self.question)
                     .desired_rows(3)
-                    .hint_text("When can the station see the satellite?"),
+                    .hint_text(tr!("When can the station see the satellite?")),
             );
             // Enter asks; Shift+Enter starts a new line. A question is usually one line, and a
             // second keystroke to send it is a keystroke too many.
             submit = (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                || ui.button("Ask").clicked();
+                || ui.button(tr!("Ask")).clicked();
         });
         if submit {
             self.start(scenario, skills);
@@ -386,13 +398,13 @@ impl Assistant {
         if self.is_running() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("Running the engine's commands…");
+                ui.label(tr!("Running the engine's commands…"));
             });
         }
 
         if !self.trace.is_empty() {
             ui.separator();
-            ui.label("What it did");
+            ui.label(tr!("What it did"));
             egui::ScrollArea::vertical()
                 .id_salt("assistant-trace")
                 .max_height(200.0)
@@ -407,7 +419,7 @@ impl Assistant {
             State::Idle | State::Running => {}
             State::Answered { text } => {
                 ui.separator();
-                ui.label("Answer");
+                ui.label(tr!("Answer"));
                 ui.label(text);
             }
             State::Failed(message) => {

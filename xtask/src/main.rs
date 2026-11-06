@@ -23,6 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod i18n;
 mod layers;
 
 use layers::{CrateSpec, LAYOUT};
@@ -55,6 +56,7 @@ fn main() -> ExitCode {
         Some("version") => task_version(args.get(1..).unwrap_or_default()),
         Some("release") => tag_release(&workspace_root()),
         Some("fetch-data") => task_fetch_data(args.get(1..).unwrap_or_default()),
+        Some("i18n") => task_i18n(args.get(1..).unwrap_or_default()),
         Some("help" | "-h" | "--help") | None => {
             print_help();
             Ok(())
@@ -86,6 +88,8 @@ Tasks:
   layers    enforce crate layering (a crate may depend only on lower layers)
   assets    every asset in the repo has a row in ATTRIBUTION.md
   wasm      cargo check --target wasm32-unknown-unknown for the portable crates
+  i18n      interface catalogs: check them, report coverage, translate
+            (`i18n`, `i18n report`, `i18n translate --language de`)
   version   print or set the workspace version (`version set 0.2.0`)
 "
     );
@@ -112,7 +116,7 @@ fn run_program(program: &str, args: &[&str]) -> Result<(), String> {
 type CiStep = (&'static str, fn() -> Result<(), String>);
 
 fn task_ci() -> Result<(), String> {
-    let steps: [CiStep; 7] = [
+    let steps: [CiStep; 8] = [
         ("fmt", || run_cargo(&["fmt", "--all", "--", "--check"])),
         ("clippy", || {
             run_cargo(&[
@@ -126,6 +130,7 @@ fn task_ci() -> Result<(), String> {
         }),
         ("test", || run_cargo(&["test", "--workspace"])),
         ("assets", task_assets),
+        ("i18n", task_i18n_check),
         ("layers", task_layers),
         ("wasm", task_wasm),
         ("version", task_version_check),
@@ -137,6 +142,21 @@ fn task_ci() -> Result<(), String> {
     }
     println!("==> ci: all gates passed");
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// interface catalogs
+// ---------------------------------------------------------------------------
+
+/// `cargo xtask i18n [check|report|translate]`.
+fn task_i18n(args: &[String]) -> Result<(), String> {
+    let options = i18n::parse_options(args)?;
+    i18n::run(&workspace_root(), &options)
+}
+
+/// The gate's step: every catalog is well-formed and names its language.
+fn task_i18n_check() -> Result<(), String> {
+    i18n::run(&workspace_root(), &i18n::Options::default())
 }
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ use stkcraft_viewport::{Camera, Frame, SceneCallback};
 
 use crate::assistant::Assistant;
 use crate::frame_builder::{build_frame, clamp_rate, step_duration};
+use crate::prefs::{Prefs, system_locale};
 use crate::render;
 
 /// How many simulated seconds pass per second of wall time at the default rate.
@@ -64,6 +65,12 @@ pub struct App {
     show_graticule: bool,
     /// The assistant panel: a model driving this scenario through the engine's commands.
     assistant: Assistant,
+    /// The interface catalogs this build embedded.
+    translations: stkcraft_i18n::Translations,
+    /// The interface language, as a catalog code. English is `"en"`.
+    language: String,
+    /// What the window writes back when a preference changes.
+    prefs: Prefs,
 }
 
 impl App {
@@ -72,6 +79,23 @@ impl App {
     pub fn new(scenario: Scenario, access_step_seconds: f64) -> Self {
         let now = scenario.epoch;
         let (frame, problems) = build_frame(&scenario, now);
+        let prefs = Prefs::load();
+        // Embedded catalogs first, then the ones this person generated: a catalog on disk is newer
+        // than the one the binary was built with, and a language added without a rebuild works.
+        let mut translations =
+            stkcraft_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+        for (locale, text) in crate::prefs::user_catalogs() {
+            let (catalog, _problems) = stkcraft_i18n::parse(&locale, &text);
+            translations.add(&catalog);
+        }
+        // The first run follows the system; an explicit choice always wins, because a person who
+        // picked English on a German desktop meant it.
+        let requested = prefs.language.clone().or_else(system_locale);
+        let language = requested
+            .as_deref()
+            .map_or(stkcraft_i18n::Language::En, |tag| translations.resolve(tag))
+            .code()
+            .to_owned();
         Self {
             scenario,
             camera: Camera::default_view(),
@@ -85,6 +109,21 @@ impl App {
             access_step_seconds,
             show_graticule: true,
             assistant: Assistant::default(),
+            translations,
+            language,
+            prefs,
+        }
+    }
+
+    /// Switch the interface language and remember the choice.
+    ///
+    /// The choice is written immediately rather than on exit: a window closed by a crash should not
+    /// forget the language someone just picked, and one file write per click is nothing.
+    fn set_language(&mut self, language: &stkcraft_i18n::Language) {
+        language.code().clone_into(&mut self.language);
+        self.prefs.language = Some(self.language.clone());
+        if let Err(error) = self.prefs.save() {
+            eprintln!("stkcraft: {error}");
         }
     }
 
@@ -206,11 +245,15 @@ impl App {
         if self.assistant.open {
             let skills = crate::cli::skills_directory();
             let mut adopted = None;
+            let language = self.language.clone();
+            let translations = self.translations.clone();
             egui::Panel::right("assistant")
                 .resizable(true)
                 .default_size(360.0)
                 .show(ui, |ui| {
-                    adopted = self.assistant.ui(ui, &self.scenario, &skills);
+                    adopted =
+                        self.assistant
+                            .ui(ui, &self.scenario, &skills, &translations, &language);
                 });
             if let Some(scenario) = adopted {
                 self.scenario = scenario;
@@ -226,36 +269,51 @@ impl App {
 
     /// The `egui` side panel: clock, scenario contents, parameters and results.
     fn left_panels(&mut self, ui: &mut egui::Ui) {
+        // The language is copied out so a lookups and the widget borrows below cannot fight over
+        // `self`; every literal goes through `tr!` so `cargo xtask i18n` can find it.
+        let language = self.language.clone();
+        macro_rules! tr {
+            ($source:literal) => {
+                stkcraft_i18n::tr!(&self.translations, &language, $source)
+            };
+        }
         ui.heading("STKCraft");
-        ui.label(format!("version {}", env!("CARGO_PKG_VERSION")));
+        ui.label(format!("{} {}", tr!("version"), env!("CARGO_PKG_VERSION")));
         ui.separator();
 
-        ui.heading("Clock");
+        ui.heading(tr!("Clock"));
         ui.label(monospace(&self.frame.epoch_label));
         ui.horizontal(|ui| {
-            if ui.button("-1 h").clicked() {
+            if ui.button(tr!("−1 h")).clicked() {
                 self.step_clock(-3_600.0);
             }
-            if ui.button("Reset").clicked() {
+            if ui.button(tr!("Reset")).clicked() {
                 self.reset_clock();
             }
-            if ui.button("+1 h").clicked() {
+            if ui.button(tr!("+1 h")).clicked() {
                 self.step_clock(3_600.0);
             }
         });
         // A slider that includes zero and negatives, with a logarithmic feel around 1x.
         ui.add(
             egui::Slider::new(&mut self.rate, -600.0..=600.0)
-                .text("time rate")
+                .text(tr!("time rate"))
                 .suffix("x"),
         );
-        if ui.button("Pause").clicked() {
+        if ui.button(tr!("Pause")).clicked() {
             self.rate = 0.0;
         }
 
         ui.separator();
-        ui.heading("Scenario");
-        ui.label(format!("{} satellite(s)", self.scenario.satellites.len()));
+        ui.heading(tr!("Scenario"));
+        let satellites = self.scenario.satellites.len() as u64;
+        ui.label(stkcraft_i18n::trn!(
+            &self.translations,
+            &language,
+            "{n} satellite",
+            "{n} satellites",
+            satellites
+        ));
         for satellite in &self.scenario.satellites {
             let [r, g, b] = satellite.color;
             ui.horizontal(|ui| {
@@ -263,7 +321,14 @@ impl App {
                 ui.label(&satellite.name);
             });
         }
-        ui.label(format!("{} station(s)", self.scenario.stations.len()));
+        let stations = self.scenario.stations.len() as u64;
+        ui.label(stkcraft_i18n::trn!(
+            &self.translations,
+            &language,
+            "{n} station",
+            "{n} stations",
+            stations
+        ));
         for station in &self.scenario.stations {
             ui.label(format!(
                 "  {}  {:.3}, {:.3}",
@@ -274,13 +339,13 @@ impl App {
         }
 
         ui.separator();
-        ui.heading("Access");
+        ui.heading(tr!("Access"));
         ui.add(
             egui::Slider::new(&mut self.access_step_seconds, 5.0..=120.0)
-                .text("search step")
+                .text(tr!("search step"))
                 .suffix(" s"),
         );
-        if ui.button("Compute passes").clicked() {
+        if ui.button(tr!("Compute passes")).clicked() {
             self.compute_access();
         }
         if let Some((ok, message)) = &self.status {
@@ -320,18 +385,39 @@ impl App {
             });
 
         ui.separator();
-        ui.heading("View");
-        ui.checkbox(&mut self.show_graticule, "Graticule");
-        ui.checkbox(&mut self.assistant.open, "Assistant panel");
-        if ui.button("Reset camera").clicked() {
+        ui.heading(tr!("View"));
+        ui.checkbox(&mut self.show_graticule, tr!("Graticule"));
+        ui.checkbox(&mut self.assistant.open, tr!("Assistant panel"));
+        if ui.button(tr!("Reset camera")).clicked() {
             self.camera = Camera::default_view();
         }
         let address = format!("{:.3}, {:.3}", self.camera.azimuth, self.camera.elevation);
-        ui.label(format!("azimuth, elevation: {address}"));
-        ui.label(format!("distance: {:.0} km", self.camera.distance_km));
+        ui.label(format!("{} {address}", tr!("azimuth, elevation:")));
+        ui.label(format!(
+            "{} {:.0} km",
+            tr!("distance:"),
+            self.camera.distance_km
+        ));
 
         ui.separator();
-        ui.heading("Diagnostics");
+        ui.heading(tr!("Language"));
+        let current =
+            stkcraft_i18n::Language::parse(&language).unwrap_or(stkcraft_i18n::Language::En);
+        let mut chosen = current.clone();
+        egui::ComboBox::from_id_salt("language-picker")
+            .selected_text(self.translations.language_name(current.code()))
+            .show_ui(ui, |ui| {
+                for language in self.translations.picker() {
+                    let name = self.translations.language_name(language.code());
+                    ui.selectable_value(&mut chosen, language.clone(), name);
+                }
+            });
+        if chosen != current {
+            self.set_language(&chosen);
+        }
+
+        ui.separator();
+        ui.heading(tr!("Diagnostics"));
         ui.label(format!(
             "{} satellite marker(s), {} station(s), {} track(s)",
             self.frame.satellites.len(),

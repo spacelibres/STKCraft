@@ -1,0 +1,14 @@
+[package]
+name = "stkcraft-i18n"
+description = "Interface translations: the Craft catalog format, lookup with fallback, and plurals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true
