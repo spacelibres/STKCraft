@@ -9,6 +9,48 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.57] — The face and the baseline become evidence, and the numbers move
+
+Layer 1 asked the text layer two new questions: **which face drew this** and **how many baselines does the
+run use**. The face comes from `OutlineFontData::postscript_name`, which the interpreter had resolved all
+along and this layer never read; the baseline count comes from the glyphs a fragment holds, because a
+sub- or superscript is a distinct baseline inside a run the line-clustering had already merged.
+
+Fonts are interned per page — a glyph stores a `u16` index rather than a `String` — because a
+five-hundred-page corpus cannot afford a name per glyph, and the table is small.
+
+### Measured, before and after, on the same four documents
+
+| Document | Formulas before | after |
+|---|---|---|
+| `101x0b3s.pdf` | 13 | **24** |
+| `101x0b4s.pdf` | 21 | **59** |
+| `922x27o1.pdf` (SANA registry) | 0 | **24** |
+| `502x0b1s.pdf` (Orbit Data Messages) | 0 | **0** |
+
+Three of four moved, one of the two zeroes is fixed. **The ODM book is still zero**, and the reason is a
+fact worth stating rather than hiding: its equations are set in the *body* face — `r = a (1 - e cos E)`
+in Times, no `∑`, no `√`, no Greek, no baseline shift. Neither characters, nor face, nor baseline can tell
+that line from a sentence. What would tell is **layer 2 of the design — layout**: that line is centred or
+indented off the body margin and spaced away from the text, which is a property of the page, not of the
+glyphs. It is not implemented yet, and that is the next step.
+
+### Defect found by the measurement, not by a test
+
+The SANA registry's regions include boxes like `(491,146)-(491,146)` — **zero width**, a single glyph
+whose advance the span did not carry. A citation that points at a line is not a citation. Fixing it means
+extending a one-glyph region by its em, and it is the next thing after layer 2.
+
+### Added
+
+- **`Placed::font`** (an interned index), **`Span::{fonts, baselines}`**, and the device's font table.
+
+### Not built yet
+
+1. **Layer 2 (layout)**: centring and indentation off the body margin, which is what the ODM book needs.
+2. **The zero-width box fix.**
+3. Then formula search, the transcription table, OCR and the model, Mathlib, and `verify-formulas`.
+
 ## [0.1.56] — The library carries its formulas, and the corpus says how few it finds
 
 Formulas now travel with the document: `Document::formulas`, `Library::formulas()`, and a listing that

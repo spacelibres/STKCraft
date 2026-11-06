@@ -275,6 +275,8 @@ struct Placed {
     advance: Option<f64>,
     /// The text the glyph stands for.
     text: String,
+    /// The index of its face in the page's font table, interned so a glyph costs an integer.
+    font: u16,
 }
 
 /// A run of glyphs on one baseline: a fragment of a text line, narrower than a column.
@@ -295,6 +297,10 @@ struct Span {
     em: f64,
     /// The fragment's text, with the word breaks the generator positioned put back.
     text: String,
+    /// The faces its glyphs were drawn with, deduplicated.
+    fonts: Vec<String>,
+    /// How many distinct baselines its glyphs used: a sub- or superscript adds one.
+    baselines: usize,
 }
 
 /// How wide a horizontal gap has to be, in ems, before a baseline is two fragments rather than one.
@@ -328,6 +334,10 @@ struct TextDevice {
     exhausted: bool,
     /// How many glyphs it placed, kept because `placed` is consumed when the text is assembled.
     glyphs: usize,
+    /// The face names this page used, in first-seen order.
+    fonts: Vec<String>,
+    /// Which face each font cache key is, so a glyph stores an index rather than a string.
+    font_index: std::collections::HashMap<u128, u16>,
 }
 
 impl TextDevice {
@@ -339,6 +349,8 @@ impl TextDevice {
             budget,
             exhausted: false,
             glyphs: 0,
+            fonts: Vec::new(),
+            font_index: std::collections::HashMap::new(),
         }
     }
 
@@ -348,7 +360,8 @@ impl TextDevice {
     /// from: a region that disagreed with the text about where a line is would cite a box the reader
     /// cannot find.
     fn into_parts(self) -> (String, Vec<crate::math::Region>, Vec<Option<String>>) {
-        let spans = order(fragments(self.placed), MAX_COLUMN_DEPTH);
+        let names = &self.fonts;
+        let spans = order(fragments(self.placed, names), MAX_COLUMN_DEPTH);
         let regions = regions_of(&spans);
         let mut text = String::new();
         let mut current: Option<(f64, f64, String)> = None;
@@ -400,8 +413,8 @@ fn regions_of(spans: &[Span]) -> Vec<crate::math::Region> {
             x1: span.x1,
             y: span.y,
             em: span.em,
-            fonts: Vec::new(),
-            baselines: 1,
+            fonts: span.fonts.clone(),
+            baselines: span.baselines,
         })
         .collect();
     crate::math::segment(&runs)
@@ -487,6 +500,24 @@ impl<'a> Device<'a> for TextDevice {
             self.exhausted = true;
             return;
         }
+        // The face, interned: `font_data` carries the PostScript name the interpreter resolved, which
+        // is the only way a layer above can tell CMMI10 from Times, and an integer per glyph instead of a
+        // string keeps a five-hundred-page corpus affordable.
+        let (key, name) = match glyph {
+            Glyph::Outline(outline) => (
+                outline.font_cache_key(),
+                outline.font_data().and_then(|data| data.postscript_name),
+            ),
+            Glyph::Type3(_) => (0, None),
+        };
+        let font = if let Some(index) = self.font_index.get(&key) {
+            *index
+        } else {
+            let index = u16::try_from(self.fonts.len()).unwrap_or(u16::MAX);
+            self.fonts.push(name.unwrap_or_default());
+            self.font_index.insert(key, index);
+            index
+        };
         self.budget.characters -= characters;
         self.budget.glyphs -= 1;
         self.glyphs += 1;
@@ -496,12 +527,13 @@ impl<'a> Device<'a> for TextDevice {
             em,
             advance,
             text,
+            font,
         });
     }
 }
 
 /// Turn the glyphs of a page into fragments: runs on one baseline, split at the wide gaps.
-fn fragments(mut placed: Vec<Placed>) -> Vec<Span> {
+fn fragments(mut placed: Vec<Placed>, names: &[String]) -> Vec<Span> {
     placed.sort_by(|a, b| {
         a.y.partial_cmp(&b.y)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -517,19 +549,19 @@ fn fragments(mut placed: Vec<Placed>) -> Vec<Span> {
             let same_baseline = (glyph.y - previous.y).abs() <= 0.4 * glyph.em.max(previous.em);
             let wide_gap = unaccounted(previous, &glyph) > FRAGMENT_GAP_EM * glyph.em;
             if !same_baseline || wide_gap {
-                spans.push(span(&std::mem::take(&mut run)));
+                spans.push(span(&std::mem::take(&mut run), names));
             }
         }
         run.push(glyph);
     }
     if !run.is_empty() {
-        spans.push(span(&run));
+        spans.push(span(&run, names));
     }
     spans
 }
 
 /// One fragment from a run of glyphs already in x order.
-fn span(run: &[Placed]) -> Span {
+fn span(run: &[Placed], names: &[String]) -> Span {
     let em = run.iter().map(|glyph| glyph.em).fold(0.0, f64::max);
     let x0 = run.first().map_or(0.0, |glyph| glyph.x);
     let y = run.first().map_or(0.0, |glyph| glyph.y);
@@ -540,12 +572,31 @@ fn span(run: &[Placed]) -> Span {
                 .map_or(0.0, |advance| advance * glyph.em / 1000.0)
     });
     let text = assemble(run);
+    // The faces, deduplicated and in first-seen order; and how many baselines the run used, which is
+    // the evidence a sub- or superscript gives and a body-face sentence does not.
+    let mut fonts: Vec<String> = Vec::new();
+    for glyph in run {
+        if let Some(name) = names.get(usize::from(glyph.font))
+            && !name.is_empty()
+            && !fonts.iter().any(|seen| seen == name)
+        {
+            fonts.push(name.clone());
+        }
+    }
+    let mut baselines: Vec<i64> = run
+        .iter()
+        .map(|glyph| (glyph.y / (0.25 * glyph.em.max(1.0))).round() as i64)
+        .collect();
+    baselines.sort_unstable();
+    baselines.dedup();
     Span {
         x0,
         x1: x1.max(x0),
         y,
         em,
         text,
+        fonts,
+        baselines: baselines.len(),
     }
 }
 
@@ -934,6 +985,8 @@ mod tests {
                 y,
                 em: 12.0,
                 text: format!("body line {index}"),
+                fonts: Vec::new(),
+                baselines: 1,
             });
         }
         // One lone label far to the right on one baseline only: a page number, not a column.
@@ -943,6 +996,8 @@ mod tests {
             y: 52.0,
             em: 12.0,
             text: "page 3".to_owned(),
+            fonts: Vec::new(),
+            baselines: 1,
         });
         assert_eq!(gutter(&spans), None, "a lone label became a column break");
         let ordered = order(spans, MAX_COLUMN_DEPTH);
@@ -973,6 +1028,8 @@ mod tests {
                 y,
                 em: 12.0,
                 text: "left".to_owned(),
+                fonts: Vec::new(),
+                baselines: 1,
             });
             spans.push(Span {
                 x0: 340.0,
@@ -980,6 +1037,8 @@ mod tests {
                 y,
                 em: 12.0,
                 text: "right".to_owned(),
+                fonts: Vec::new(),
+                baselines: 1,
             });
         }
         let found = gutter(&spans).expect("a gutter between two columns");
