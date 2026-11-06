@@ -9,6 +9,36 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.41] — The gate was green here and red everywhere else, for eleven releases
+
+Since 0.1.30 every push to `main` has failed CI, and every one of them passed `cargo xtask ci`
+locally. The failing test is the one that asserts the font stack can draw every shipped catalog: it
+walks the `zh` catalog, asks the stack which characters it cannot draw, and finds — on a bare Linux
+runner — that it cannot draw any of them. Locally the machine has a CJK font installed, so the same
+test found nothing missing and the gate passed.
+
+The test was right and the environment was thin. `AGENTS.md` says the stack renders CJK "on any
+machine that has a CJK font", and a CI runner is not such a machine: `craft-fonts` is checked out for
+the build, but the shipped faces do not include Han — a Han face is tens of megabytes, and the
+family's answer is to search the fonts that are installed instead. So the fix is to install the font
+the catalog needs, in the workflow that runs the gate.
+
+### Fixed
+
+- **`.github/workflows/ci.yml` adds `fonts-noto-cjk` to the packages the gate installs**, with a
+  comment saying why: it is not a build dependency, it is the face the assertion needs. Weakening the
+  assertion instead would have made the check pass by not checking, which is the failure mode the
+  test exists to prevent.
+- **The eleven red runs from 0.1.30 to 0.1.40 were all this one test** —
+  `fonts::tests::the_font_stack_can_draw_the_shipped_catalogs`, failing under
+  `cargo test --workspace` in `stkcraft --bin stkcraft`. Nothing else was red and nothing those
+  releases contained was wrong, which is why it read as the known upstream packaging lint and was
+  left alone for eleven releases.
+
+### Not built yet
+
+- The roadmap's next step is unchanged: the window serves the control channel, with `ui.screenshot`.
+
 ## [0.1.40] — The order of work is written down
 
 Forty releases in, the plan lived in one place only: the changelog, newest first, which says what
