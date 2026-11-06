@@ -126,6 +126,47 @@ assistant is required to present it that way — "the library's formula for X (p
 `Mathlib.Analysis.SpecialFunctions.Sqrt.sqrt`, which is defined as …" — and never as "this paper proves
 the theorem". A wrong classification costs a bad tag; a fake proof costs the project its reason to exist.
 
+## Provenance: what makes a formula checkable
+
+A classification is only worth something if the thing being classified can be traced back to a place in
+a file that a person can open. So every formula carries a **chain**, and every link in it is immutable:
+
+| Link | What it is | Why it can be trusted |
+|---|---|---|
+| the library | the manifest of every file's path, size and modification time | the key the index cache already uses |
+| the file | **SHA-256 of the PDF** | the same digest `cargo xtask standards` verified when it downloaded it |
+| the page | one-based page number | a page cannot be renumbered by a later version of the file, a line can |
+| the box | `(x0,y0)-(x1,y1)` in PDF points, after rotation | what a person selects on the page |
+| the pixels | **SHA-256 of the region image** | re-extracting the same box must produce the same bytes, or the chain is broken |
+| the reading | `source`, engine and version, and the glyph/font evidence for layer 1 | a recogniser is identified, not anonymous |
+| the wording | the introducing sentence (`problem`) and its line range in the text layer | the paper's own words, cited as written |
+| the classification | Mathlib revision, declaration name, **SHA-256 of the declaration's statement and docstring** | the concept is pinned to a commit, so "what Mathlib said in 2026" is checkable in 2030 |
+
+That chain is stored with the formula and printed with it:
+
+```text
+paper.pdf:page 12, formula at (120,340)-(300,388) — Real.sqrt (Analysis, 0.83)
+  problem: "The slant range follows from the law of cosines:"
+  paper sha256 6afd…, region sha256 391f…, text-layer/0.1.50, mathlib c5a1…/Real.sqrt
+```
+
+**The chain is re-verifiable, and that is the point.** `cargo xtask verify-formulas` re-reads every
+document in the transcription table, re-extracts each recorded box, re-runs the classifier, and fails on
+drift — a moved box, a changed digest, a classification that no longer reproduces. Without that command
+the provenance is a snapshot of an afternoon; with it, the claim "this formula is about `Real.sqrt`" is a
+statement that either still holds or loudly does not.
+
+### What provenance cannot claim
+
+- **A paper is not the original source.** If the paper quotes a formula from Vallado, the chain leads to
+  *the paper we read*, not to Vallado. When the introducing sentence carries a citation, it is recorded
+  as `as cited in` — the honest form — and never presented as the primary source.
+- **A stored digest proves bytes, not meaning.** It proves the same pixels produced the same reading; it
+  does not prove the reading is right. That is what the transcription table is for.
+- **A Mathlib match is a lexical and structural match.** It says the formula is *about* a concept that
+  has a name, not that it equals the declaration. `mathlib_score` is what carries the strength, and the
+  assistant states it.
+
 ## Where a formula lives
 
 The relational store (SQLite, `docs/design/storage.md`) gains one table, because a formula is a *record*
@@ -147,6 +188,12 @@ CREATE TABLE formulas (
     mathlib_score REAL,                   -- and how strongly
     mathlib_domain TEXT,                  -- the taxonomy the match implies
     classifier    TEXT,                   -- the scoring engine and version, like `source`
+    -- provenance: every link that makes the row checkable
+    paper_digest  TEXT NOT NULL,          -- SHA-256 of the PDF the box was read from
+    region_digest TEXT NOT NULL,          -- SHA-256 of the region image
+    mathlib_rev   TEXT,                   -- the Mathlib revision the index was built from
+    problem_lines TEXT                    -- the line range of `problem` in the text layer
+
     digest        TEXT NOT NULL,          -- SHA-256 of the region image
     FOREIGN KEY (document) REFERENCES documents(path)
 ) STRICT;

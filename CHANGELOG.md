@@ -9,6 +9,47 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.50] — A formula you can trace, or it is not worth storing
+
+The point of a formula store is that a person can check it. So the design now builds provenance into the
+row rather than trusting the pipeline: every stored formula carries an immutable chain — the library
+manifest, **SHA-256 of the PDF**, the page, the box in points, **SHA-256 of the region image**, the
+reading engine and version with its glyph evidence, the introducing sentence with its line range, and the
+**Mathlib revision and declaration digest** the classification was made against.
+
+That chain is what the citation prints:
+
+```text
+paper.pdf:page 12, formula at (120,340)-(300,388) — Real.sqrt (Analysis, 0.83)
+  problem: "The slant range follows from the law of cosines:"
+  paper sha256 6afd…, region sha256 391f…, text-layer/0.1.50, mathlib c5a1…/Real.sqrt
+```
+
+**And it is re-verifiable, which is the difference between evidence and a snapshot.**
+`cargo xtask verify-formulas` re-reads every document in the transcription table, re-extracts each
+recorded box, re-runs the classifier, and fails on drift: a moved box, a changed digest, a
+classification that no longer reproduces. A claim that cannot be re-run is a claim nobody can check in a
+year.
+
+### What the document now states it cannot claim
+
+- **A paper is not the original source.** If the paper quotes Vallado, the chain leads to the paper we
+  read; a citation found in the introducing sentence is recorded as `as cited in`, never as primary.
+- **A digest proves bytes, not meaning.** The same pixels produced the same reading — whether the reading
+  is *right* is what the transcription table exists to test.
+- **A Mathlib match is lexical and structural.** The formula is *about* a named concept; it does not
+  equal the declaration, and `mathlib_score` is what says how sure.
+
+### Added to the `formulas` table
+
+`paper_digest`, `region_digest`, `mathlib_rev`, `problem_lines` — the links, so a row is checkable
+without the pipeline that produced it.
+
+### Not built yet
+
+- The implementation, in the document's order: segmentation and storage, the transcription table, OCR
+  and the formula model, the Mathlib index and classifier, then `verify-formulas`.
+
 ## [0.1.49] — A formula records what it solves, and which mathematics it is
 
 Two additions to `docs/design/mathematics.md`, both from the same objection: a LaTeX string on page 12

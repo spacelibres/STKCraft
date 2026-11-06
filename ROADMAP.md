@@ -98,7 +98,9 @@ transcription table over the CCSDS corpus and the SGP4 papers passes; (3) OCR an
 behind two environment commands, recording engine and version, with the `unrecognised` path tested;
 (4) every formula records **what problem it solves** (the introducing sentence) and is **classified
 against Mathlib** — a pinned declaration index, a scored match, a domain taxonomy — with the limits
-stated: classification, never proof.
+stated: classification, never proof; and (5) every formula carries its **provenance chain** — file
+digest, page, box, region digest, reading engine, the introducing sentence, the Mathlib revision — with
+`cargo xtask verify-formulas` re-extracting and re-classifying it and failing on drift.
 
 #### F5. Sensors and targets, and what they can see
 
