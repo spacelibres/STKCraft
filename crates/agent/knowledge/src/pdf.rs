@@ -404,17 +404,50 @@ impl TextDevice {
 /// font evidence needs a face name it exposes only as an identifier: both are stated as missing in
 /// [`Extracted::regions`] rather than quietly assumed.
 fn regions_of(spans: &[Span]) -> Vec<crate::math::Region> {
+    // The body margin, as the page's own habit: the most common left edge. A display equation is set
+    // against it — centred on the text block, or indented past it — which is a property of the page and
+    // the only evidence an equation typed in the body face has.
+    let mut lefts: Vec<i64> = spans.iter().map(|span| span.x0.round() as i64).collect();
+    lefts.sort_unstable();
+    let mut margin = spans.first().map_or(0.0, |span| span.x0);
+    let mut best = 0_usize;
+    let mut start = 0_usize;
+    while start < lefts.len() {
+        let mut end = start + 1;
+        while end < lefts.len() && lefts.get(end) == lefts.get(start) {
+            end += 1;
+        }
+        if end - start > best {
+            best = end - start;
+            margin = lefts.get(start).copied().unwrap_or(0) as f64;
+        }
+        start = end;
+    }
     let runs: Vec<crate::math::Run> = spans
         .iter()
-        .map(|span| crate::math::Run {
-            page: 1,
-            text: span.text.clone(),
-            x0: span.x0,
-            x1: span.x1,
-            y: span.y,
-            em: span.em,
-            fonts: span.fonts.clone(),
-            baselines: span.baselines,
+        .map(|span| {
+            let em = span.em.max(1.0);
+            // Indented: its left edge is clearly past the body margin.
+            let indented = span.x0 - margin >= 2.0 * em;
+            // Centred: it is narrower than the page's text and its middle sits near the middle of the
+            // text block — computed from the page's widest line, so a two-column page is handled by the
+            // column it is in.
+            let widest = spans.iter().fold(0.0_f64, |wide, other| wide.max(other.x1));
+            let centre = f64::midpoint(widest, margin);
+            let own = f64::midpoint(span.x0, span.x1);
+            let centred =
+                (span.x1 - span.x0) < 0.8 * (widest - margin) && (own - centre).abs() < em;
+            crate::math::Run {
+                page: 1,
+                text: span.text.clone(),
+                x0: span.x0,
+                x1: span.x1,
+                y: span.y,
+                em: span.em,
+                fonts: span.fonts.clone(),
+                baselines: span.baselines,
+                display: indented || centred,
+            }
         })
         .collect();
     crate::math::segment(&runs)

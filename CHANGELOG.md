@@ -9,6 +9,44 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.59] — Layer 2: the page says "display", so an equation in the body face is found
+
+The ODM book's equations are set in Times with no operator, no Greek and no baseline shift — glyph
+evidence cannot see them. Layer 2 of `docs/design/mathematics.md` reads the *page* instead: a run is
+display mathematics when it is **centred** on the text block or **indented** past the body margin, and it
+**holds a relation** (`=` `+` `<` `>` `^` `±` `×` `÷` `≠` `≈` `≤` `≥`). The margin is the page's own most
+common left edge, so a two-column page is measured by the column it is in.
+
+### Measured, and one false-positive class found by measuring
+
+| Document | before layout | after |
+|---|---|---|
+| `502x0b1s.pdf` (ODM) | **0** | **7** |
+| `101x0b3s.pdf` | 24 | 47 |
+| `101x0b4s.pdf` | 59 | 152 |
+| `922x27o1.pdf` | 24 | 26 |
+
+The first attempt reported 42 / 52 / 167 / 31 — and three different documents reported the **same**
+centred box `(156,464)-(457,464)` on page 1. That is not three equations; it is three page headers, and
+the cause was `-` and `/` in the relation set: every header carries a date or a number like
+`502.0-B-3`. Removing them dropped the false positives and kept the real finds. A relation that cannot be
+prose is the only useful one.
+
+### Added
+
+- **`math::RELATIONS`** (deliberately without `-`, `/`, `*`), **`Evidence::relations`**, **`Run::display`**.
+- **`pdf::regions_of`** computes the body margin as the page's modal left edge, and marks a run centred
+  (its middle within an em of the text block's middle, narrower than 80% of it) or indented (past the
+  margin by 2 em).
+- **`an_equation_in_the_body_face_is_found_by_its_layout`** — the ODM case, with two controls: the same
+  text not set as display, and a centred heading with no relation.
+
+### Not built yet
+
+- **152 on a 47-page specification is probably too many**: centred table rows with a `+` are the likely
+  remnants, and the transcription table is what will separate them from real equations.
+- Formula search, the transcription table, OCR and the model, Mathlib, `verify-formulas`.
+
 ## [0.1.58] — A box with an area, not a line
 
 The zero-width citation defect 0.1.57's measurement found is fixed: when a glyph's font reports no

@@ -44,6 +44,18 @@ pub const BLOCKS: [(&str, char, char); 7] = [
 /// What is here cannot be read as a sentence: an operator, a relation that is not `=`, or a symbol.
 const OPERATORS: &str = "∑∏∫∮∂∇√∛∜∞≈≠≤≥≪≫∝∈∉⊂⊃⊆⊇∪∩∅⊕⊗⊥∥∠°′″¯^±−×·";
 
+/// The characters that say "this line is an equation" when the line is set as display layout.
+///
+/// These are the ASCII relations a paper sets an equation in when it does not use mathematical Unicode —
+/// `r = a (1 - e cos E)` in Times is the case that made them necessary. They are not evidence *alone*:
+/// prose contains `=`, so they count only when the layout already says display.
+///
+/// `-`, `/` and `*` are deliberately **not** here. They appear in every header, every date and every
+/// range, and including them turned each standard's page header into a "formula" (three different
+/// documents reported the same centred header line). A relation that cannot be prose is the only useful
+/// one.
+const RELATIONS: &str = "=+<>^±×÷≠≈≤≥";
+
 /// Font-name fragments that say "this face is for mathematics".
 ///
 /// Compared case-insensitively against the run's font names. `cm` alone is not included: it would match
@@ -80,6 +92,8 @@ pub struct Evidence {
     pub baselines: usize,
     /// How many characters the run holds at all.
     pub characters: usize,
+    /// How many ASCII relations and operators it holds: evidence only beside a display layout.
+    pub relations: usize,
 }
 
 impl Evidence {
@@ -92,6 +106,11 @@ impl Evidence {
             ..Self::default()
         };
         for character in text.chars() {
+            // A character can be both: `±` is a relation *and* an operator, and counting it only as a
+            // relation would lose the layer-1 evidence it carries.
+            if RELATIONS.contains(character) {
+                evidence.relations += 1;
+            }
             if OPERATORS.contains(character) {
                 evidence.math_characters += 1;
                 if !evidence.blocks.contains(&"Operators") {
@@ -185,6 +204,12 @@ pub struct Run {
     pub fonts: Vec<String>,
     /// How many distinct baselines its glyphs used.
     pub baselines: usize,
+    /// Whether the page lays this run out as display mathematics: centred, or indented off the body
+    /// margin, and spaced away from the text around it.
+    ///
+    /// This is layer 2 of `docs/design/mathematics.md`: a property of the page rather than of the glyphs,
+    /// and the only thing that can see an equation set in the body face.
+    pub display: bool,
 }
 
 impl Run {
@@ -251,7 +276,11 @@ pub fn segment(runs: &[Run]) -> Vec<Region> {
     let mut current: Option<Region> = None;
     let mut current_page = 0_usize;
     for run in runs {
-        let mathematical = run.evidence().is_mathematics();
+        let evidence = run.evidence();
+        // Layer 1 says "these glyphs are mathematics"; layer 2 says "the page sets this line apart and
+        // the line holds relations". Either is enough to open a region, and the second is what finds an
+        // equation typed in the body face.
+        let mathematical = evidence.is_mathematics() || (run.display && evidence.relations > 0);
         let joins = current.as_ref().is_some_and(|open| {
             if open.page != run.page {
                 return false;
@@ -389,7 +418,50 @@ mod tests {
             em,
             fonts: vec![font.to_owned()],
             baselines: 1,
+            display: false,
         }
+    }
+
+    #[test]
+    fn an_equation_in_the_body_face_is_found_by_its_layout() {
+        // The ODM book's case: `r = a (1 - e cos E)` in Times, no operator, no Greek, no baseline shift.
+        // The characters alone cannot see it; the page's layout and its relations can.
+        let mut equation = run(
+            1,
+            "r = a (1 - e cos E)",
+            220.0,
+            380.0,
+            400.0,
+            12.0,
+            "TimesNewRomanPSMT",
+        );
+        equation.display = true;
+        let regions = segment(&[equation]);
+        assert_eq!(regions.len(), 1, "the display layout found nothing");
+
+        // The control: the same text not set as display is prose, and a display line with no relation
+        // (`Range and geometry`, a heading) is prose too.
+        let prose = run(
+            1,
+            "r = a (1 - e cos E)",
+            220.0,
+            380.0,
+            400.0,
+            12.0,
+            "TimesNewRomanPSMT",
+        );
+        assert_eq!(segment(&[prose]), Vec::new());
+        let mut heading = run(
+            1,
+            "Range and geometry",
+            220.0,
+            380.0,
+            400.0,
+            12.0,
+            "Times-Bold",
+        );
+        heading.display = true;
+        assert_eq!(segment(&[heading]), Vec::new());
     }
 
     #[test]
