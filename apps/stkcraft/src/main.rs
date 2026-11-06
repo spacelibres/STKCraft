@@ -37,6 +37,7 @@ mod frame_builder;
 mod prefs;
 mod render;
 mod screenshot;
+mod translate;
 
 use std::process::ExitCode;
 

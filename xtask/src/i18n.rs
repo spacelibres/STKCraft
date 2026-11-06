@@ -35,6 +35,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use stkcraft_i18n::Source as Extracted;
 use stkcraft_i18n::catalog::{self, Catalog, Row};
 
 /// The directory the catalogs live in, relative to the workspace root.
@@ -209,21 +210,9 @@ fn read_catalogs(root: &Path) -> Result<Vec<Loaded>, String> {
     Ok(loaded)
 }
 
-/// A string the interface shows, as the source extraction found it.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Source {
-    /// The context column: empty, a plain word, or `@plural`.
-    pub context: String,
-    /// The English source text (or the `one|other` pair of a plural row).
-    pub text: String,
-}
-
-impl Source {
-    /// The row this source would be translated into, with an empty translation.
-    fn key(&self) -> (String, String) {
-        (self.context.clone(), self.text.clone())
-    }
-}
+/// A string the interface shows, as the source extraction found it: the type the shared extractor
+/// produces, so this task and a running window answer "which strings exist" the same way.
+type Source = Extracted;
 
 /// Every English string the code translates, in a stable order.
 ///
@@ -240,27 +229,7 @@ fn extract_sources(root: &Path) -> Result<BTreeMap<Source, usize>, String> {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
-        for (context, literals) in macro_calls(&text) {
-            let source = match (context.as_deref(), literals.as_slice()) {
-                // `trn!`: the two English forms are one plural row.
-                (Some("plural"), [one, other]) => Source {
-                    context: "@plural".to_owned(),
-                    text: format!("{one}|{other}"),
-                },
-                // `trc!`: the macro moved the context into the call, so one literal remains.
-                (Some(context), [text]) => Source {
-                    context: context.to_owned(),
-                    text: text.clone(),
-                },
-                // `tr!`: no context.
-                (None, [text]) => Source {
-                    context: String::new(),
-                    text: text.clone(),
-                },
-                // Anything else (a call with no literal, or a shape the macros do not produce) is
-                // not a translatable string.
-                _ => continue,
-            };
+        for source in stkcraft_i18n::extract::sources(&text) {
             *sources.entry(source).or_insert(0) += 1;
         }
     }
@@ -284,149 +253,6 @@ fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), 
         }
     }
     Ok(())
-}
-
-/// The translation macro calls in one source file.
-///
-/// Returns `(context, literals)` per call: `tr!` has no context, `trc!` takes a context literal
-/// first, and `trn!` is a plural whose two English forms are joined into one source row.
-fn macro_calls(text: &str) -> Vec<(Option<String>, Vec<String>)> {
-    let stripped = strip_line_comments(text);
-    let text = stripped.as_str();
-    // Calls are returned in source order: an extractor whose report reorders the file is a bad
-    // diff to review, and a test that asserts the order is asserting the contract.
-    let mut calls: Vec<(usize, Option<String>, Vec<String>)> = Vec::new();
-    for (needle, context) in [
-        ("trc!(", Some("context")),
-        ("trn!(", Some("plural")),
-        ("tr!(", None),
-    ] {
-        let mut rest = text;
-        while let Some(start) = rest.find(needle) {
-            let after = &rest[start + needle.len()..];
-            let Some(end) = matching_paren(after) else {
-                break;
-            };
-            let arguments = &after[..end];
-            let literals = string_literals(arguments);
-            // The context macro's first literal is the context; the rest is the source text.
-            match context {
-                Some("context") => {
-                    let mut literals = literals;
-                    let context = if literals.len() >= 2 {
-                        literals.remove(0)
-                    } else {
-                        String::new()
-                    };
-                    calls.push((start, Some(context), literals));
-                }
-                Some(other) => calls.push((start, Some(other.to_owned()), literals)),
-                None => calls.push((start, None, literals)),
-            }
-            rest = &after[end..];
-        }
-    }
-    calls.sort_by_key(|(start, _, _)| *start);
-    calls
-        .into_iter()
-        .map(|(_, context, literals)| (context, literals))
-        .collect()
-}
-
-/// The source with `//` line comments removed.
-///
-/// A documentation example is not a call — `tr!(handle, locale, "Save")` in a doc comment describes
-/// the macro, it does not use it — and extracting one would put a string in every catalog that no
-/// interface shows. Block comments and strings are left alone: neither can hold a live `tr!` call,
-/// and a heuristic that tried to strip them would break on a string containing `//`.
-fn strip_line_comments(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for line in text.lines() {
-        out.push_str(strip_comment_from(line));
-        out.push('\n');
-    }
-    out
-}
-
-/// One line with a trailing `//` comment removed, leaving a `//` inside a string alone.
-fn strip_comment_from(line: &str) -> &str {
-    let bytes = line.as_bytes();
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut index = 0;
-    while let Some(&byte) = bytes.get(index) {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                in_string = false;
-            }
-        } else if byte == b'"' {
-            in_string = true;
-        } else if byte == b'/' && bytes.get(index + 1) == Some(&b'/') {
-            return &line[..index];
-        }
-        index += 1;
-    }
-    line
-}
-
-/// The index of the `)` that closes the argument list, allowing for nesting.
-fn matching_paren(text: &str) -> Option<usize> {
-    let mut depth = 1usize;
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Every plain string literal in a piece of code, in order.
-///
-/// Only `"…"` with `\"` and `\\` escapes: the macros take literals, and a caller that builds a
-/// string at run time is calling a string the extractor cannot see — which is why the convention is
-/// literal-only.
-fn string_literals(text: &str) -> Vec<String> {
-    let mut literals = Vec::new();
-    let mut characters = text.char_indices();
-    while let Some((_, character)) = characters.next() {
-        if character != '"' {
-            continue;
-        }
-        let mut literal = String::new();
-        while let Some((_, inner)) = characters.next() {
-            match inner {
-                '"' => break,
-                '\\' => match characters.next() {
-                    Some((_, 'n')) => literal.push('\n'),
-                    Some((_, 't')) => literal.push('\t'),
-                    // A backslash at the end of a line is Rust's line continuation: it removes the
-                    // newline and the next line's leading whitespace, so a long literal split across
-                    // two lines is one string and not one string with a hole in it.
-                    Some((_, '\n')) => {
-                        while matches!(characters.clone().next(), Some((_, ' ' | '\t'))) {
-                            characters.next();
-                        }
-                    }
-                    Some((_, other)) => literal.push(other),
-                    None => break,
-                },
-                other => literal.push(other),
-            }
-        }
-        literals.push(literal);
-    }
-    literals
 }
 
 /// One line per language: how many source strings it lacks, and the first few of them.
@@ -530,7 +356,9 @@ fn translate(
                 .to_owned(),
         );
     }
-    let key = std::env::var("DEEPSEEK_API_KEY").map_err(|_| {
+    // Fail on a missing key before doing anything else, with the sentence a reader needs. The model
+    // itself is built per language below.
+    std::env::var("DEEPSEEK_API_KEY").map_err(|_| {
         "DEEPSEEK_API_KEY is not set: translation needs a model, and the key is yours to supply"
             .to_owned()
     })?;
@@ -569,7 +397,8 @@ fn translate(
             want.len(),
             if dry_run { " (dry run)" } else { "" }
         );
-        let (proposed, translated_name) = translate_rows(&key, locale, &language_name, &want)?;
+        let (proposed, translated_name) =
+            translate_rows(locale, &language_name, &want, &existing.rows)?;
         let mut rows: BTreeMap<(String, String), String> = existing
             .rows
             .iter()
@@ -618,106 +447,42 @@ fn suggested_name(locale: &str) -> String {
 
 /// Ask the model for the translations of one language's missing rows.
 ///
-/// The whole batch goes in one request: a row is a sentence, so a thousand rows are a document, and
-/// a document is what a model is good at. The answer has to be a JSON object keyed by the English
-/// source, which is checked here — a placeholder the model dropped or invented is refused with the
-/// row named, because a translation that cannot be filled in is worse than the English.
+/// The batch size, the prompt and the acceptance rules are the shared ones in `stkcraft-agent`, so a
+/// catalog generated here and one a window generates for itself cannot disagree about what a valid
+/// row is. What stays here is the part that is this task's job: reading the answer into the catalog
+/// representation a file is written from.
 fn translate_rows(
-    key: &str,
     locale: &str,
     language_name: &str,
     sources: &[&Source],
+    existing: &[Row],
 ) -> Result<(Vec<(Source, String)>, String), String> {
-    let items: Vec<serde_json::Value> = sources
-        .iter()
-        .map(|source| {
-            serde_json::json!({
-                "context": source.context,
-                "english": source.text,
-                "placeholders": catalog::placeholders(&source.text),
-                "plural": source.context == "@plural",
-            })
+    let model = stkcraft_agent::DeepSeek::from_environment()?;
+    let wanted: Vec<Source> = sources.iter().map(|source| (*source).clone()).collect();
+    let catalogue = stkcraft_agent::translate::translate_catalogue(
+        &model,
+        locale,
+        language_name,
+        &wanted,
+        existing,
+    )?;
+    for (text, reason) in &catalogue.refused {
+        eprintln!("i18n: refused `{text}`: {reason}");
+    }
+    let rows = catalogue
+        .rows
+        .into_iter()
+        .map(|row| {
+            (
+                Source {
+                    context: row.context,
+                    text: row.source,
+                },
+                row.translation,
+            )
         })
         .collect();
-    let prompt = format!(
-        "Translate STKCraft's interface strings into the language with the BCP 47 code `{locale}` \
-         (called `{language_name}` in that language).\n\
-         \n\
-         The input is a JSON array. Each item has `context` (usually empty), `english` (the source \
-         text), `placeholders` (the `{{name}}` tokens it contains) and `plural` (whether the source \
-         is English `one|other` and the translation must list this language's CLDR plural forms in \
-         order, `|`-separated — 1 form for Chinese or Japanese, 2 for English-like languages, 3 for \
-         Russian, Czech, Polish or Romanian, 6 for Arabic).\n\
-         \n\
-         Rules: keep every placeholder exactly as it is; keep a trailing `…` if the English has one; \
-         do not translate command ids or acronyms; write short interface labels, not explanations; \
-         use the language's own script.\n\
-         \n\
-         Answer with JSON only, no prose: an object whose keys are the exact `english` strings and \
-         whose values are the translations. Also include the key `language.name` with this \
-         language's name written in that language.\n\
-         \n\
-         Input:\n{}",
-        serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".to_owned())
-    );
-    let content = crate::translate::chat_completion(key, &prompt)?;
-    let json = crate::translate::json_object_in(&content)
-        .ok_or_else(|| format!("the model's answer is not a JSON object: {content}"))?;
-    let mut translated = Vec::new();
-    for source in sources {
-        let Some(translation) = json.get(&source.text).and_then(serde_json::Value::as_str) else {
-            eprintln!("i18n: no translation for `{}`", source.text);
-            continue;
-        };
-        if let Err(problem) = check_translation(source, translation, locale) {
-            eprintln!("i18n: refused `{}`: {problem}", source.text);
-            continue;
-        }
-        translated.push(((*source).clone(), translation.to_owned()));
-    }
-    let name = json
-        .get(stkcraft_i18n::LANGUAGE_NAME_SOURCE)
-        .and_then(serde_json::Value::as_str)
-        .map_or_else(|| suggested_name(locale), str::to_owned);
-    Ok((translated, name))
-}
-
-/// Refuse a translation the format or the placeholders make unusable.
-fn check_translation(source: &Source, translation: &str, locale: &str) -> Result<(), String> {
-    if translation.trim().is_empty() {
-        return Err("the translation is empty".to_owned());
-    }
-    let rows = if source.context == "@plural" {
-        // A plural row is checked as a row: the placeholders of every English form must appear in
-        // the translation, which `catalog::parse` does when it re-reads the row.
-        vec![Row {
-            context: source.context.clone(),
-            source: source.text.clone(),
-            translation: translation.to_owned(),
-        }]
-    } else {
-        vec![Row {
-            context: source.context.clone(),
-            source: source.text.clone(),
-            translation: translation.to_owned(),
-        }]
-    };
-    // Parsed as the language it is for: a plural row's form count is the locale's, and Chinese has
-    // one form where English has two.
-    match catalog::parse(
-        locale,
-        &rows
-            .iter()
-            .map(catalog::row_text)
-            .collect::<Vec<_>>()
-            .join("\n"),
-    ) {
-        (_, problems) if problems.is_empty() => Ok(()),
-        (_, problems) => Err(problems.first().map_or_else(
-            || "the row is not valid".to_owned(),
-            |problem| problem.message.clone(),
-        )),
-    }
+    Ok((rows, catalogue.language_name))
 }
 
 /// Write a catalog, keeping the format's header and sorting the rows.
@@ -811,92 +576,6 @@ mod tests {
         let error = parse_options(&["translate".to_owned(), "--language".to_owned()])
             .expect_err("`--language` needs a value");
         assert!(error.contains("locale code"), "{error}");
-    }
-
-    #[test]
-    fn the_three_macros_are_extracted_with_their_context() {
-        let text = r#"
-            let a = tr!(translations, locale, "Save");
-            let b = trc!(translations, locale, "menu", "Open Table…");
-            let c = trn!(translations, locale, "{n} page", "{n} pages");
-            let d = something_else("not translated");
-        "#;
-        let calls = macro_calls(text);
-        assert_eq!(calls.len(), 3, "{calls:?}");
-        assert_eq!(
-            calls[0],
-            (None, vec!["Save".to_owned()]),
-            "tr! has no context"
-        );
-        assert_eq!(
-            calls[1],
-            (Some("menu".to_owned()), vec!["Open Table…".to_owned()]),
-            "trc! carries its context in the call and one literal remains"
-        );
-        assert_eq!(
-            calls[2],
-            (
-                Some("plural".to_owned()),
-                vec!["{n} page".to_owned(), "{n} pages".to_owned()]
-            )
-        );
-    }
-
-    #[test]
-    fn nested_calls_and_escapes_survive_the_scan() {
-        let text =
-            r#"tr!(handle, locale, format!("nested {}", "x")); tr!(h, l, "Tab\there\nNew");"#;
-        let calls = macro_calls(text);
-        // The nested call's own literals are the outer call's arguments; the extractor keeps them
-        // all, and the convention is that a `tr!` call holds literals only.
-        assert_eq!(calls.len(), 2);
-        assert_eq!(calls[1].1, vec!["Tab\there\nNew".to_owned()]);
-    }
-
-    #[test]
-    fn a_doc_comment_example_is_not_a_call() {
-        let text =
-            "/// `tr!(handle, locale, \"Save\")` is how it is used.\nlet a = tr!(h, l, \"Close\");";
-        let calls = macro_calls(text);
-        assert_eq!(calls, vec![(None, vec!["Close".to_owned()])], "{calls:?}");
-    }
-
-    #[test]
-    fn a_double_slash_inside_a_string_is_not_a_comment() {
-        assert_eq!(
-            strip_comment_from(r#"let url = "https://example"; // trailing"#),
-            r#"let url = "https://example"; "#
-        );
-        assert_eq!(strip_comment_from("let a = 1; // note"), "let a = 1; ");
-    }
-
-    #[test]
-    fn a_line_continuation_is_not_a_newline() {
-        // Rust's `\` at the end of a line joins two source lines into one string, dropping the
-        // newline and the next line's indentation. Treating it as a newline put a hole in a
-        // translated sentence and made the catalog row unrecognisable to the extraction.
-        let text = "tr!(h, l, \"one \\\n             two\");";
-        let calls = macro_calls(text);
-        assert_eq!(calls, vec![(None, vec!["one two".to_owned()])], "{calls:?}");
-    }
-
-    #[test]
-    fn literals_are_read_without_their_quotes() {
-        assert_eq!(
-            string_literals(r#""One" "Two \"quoted\"" "#),
-            vec!["One".to_owned(), "Two \"quoted\"".to_owned()]
-        );
-    }
-
-    #[test]
-    fn a_translation_that_drops_a_placeholder_is_refused() {
-        let source = Source {
-            context: String::new(),
-            text: "Added {name}".to_owned(),
-        };
-        assert!(check_translation(&source, "{name} hinzugefügt", "de").is_ok());
-        assert!(check_translation(&source, "Hinzugefügt", "de").is_err());
-        assert!(check_translation(&source, "  ", "de").is_err());
     }
 
     #[test]

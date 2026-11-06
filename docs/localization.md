@@ -109,6 +109,24 @@ Windows  %APPDATA%\stkcraft\locales\de.tsv
 A catalog in the repository is embedded at build time by `apps/stkcraft/build.rs`, which means a
 build with no `locales/` directory is a valid English-only build.
 
+## Translating inside the window
+
+A released binary has no checkout, so the developer task above is not how a person gets their
+language. Under **Language** in the side panel, the picker lists the languages this build carries
+and then the languages it does not; choosing one that still shows English offers **Translate {n}
+strings with my key**, which:
+
+1. reads `DEEPSEEK_API_KEY` and says so plainly when it is missing;
+2. sends the missing strings in one batch — from the same list the build embedded, which the build
+   script extracted with the same scanner `cargo xtask i18n` uses;
+3. validates every proposal with the same rules the gate applies, refusing a dropped placeholder or a
+   plural row with the wrong number of forms for that language;
+4. writes `locales/<code>.tsv` **in your configuration directory**, never into the checkout, and
+   reloads the interface in place.
+
+Nothing is committed and nothing ships: it is your machine, your key and your language. Run it again
+after an update and it asks only about the strings that are new.
+
 ## Adding a language
 
 1. Pick the code: lowercase BCP 47, as the family requires — `de`, `zh`, `pt-br`, `zh-hans`,
@@ -132,8 +150,7 @@ changed. `docs/standards.md` §4 has the rules; the English page is authoritativ
 - **No number or date localization.** A pass time prints as `2024-01-01 09:12:04` in every language.
   The family's shared crate formats numbers per region; this project has not adopted that yet, and
   doing it properly means formatting through one place rather than through `format!("{:.0} km")`.
-- **No runtime translation.** A language with no catalog shows English; the window does not ask a
-  model for the words itself. The pipeline is a developer task (`cargo xtask i18n translate`), which
-  keeps a network call out of the window's startup path.
+- **A language with no catalog and no key** shows English. The window never translates on its own:
+  it does so when a person asks, which keeps a network call out of the startup path.
 - **No right-to-left layout.** The catalogs can hold Arabic or Hebrew text; `egui` does not mirror
   the layout, so those translations would render left-to-right and look wrong.

@@ -9,6 +9,51 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.29] — Your key, your language, in the window
+
+Until now a translation was a developer's job: `cargo xtask i18n translate`, in a checkout, with
+cargo. A person running the released binary had no such path, and the language they wanted might not
+ship at all. Now the panel offers it: pick a language the build does not carry, press **Translate
+{n} strings with my key**, and `DeepSeek` — on `DEEPSEEK_API_KEY` — fills it in, validates every
+proposal with the same rules the gate applies, and the interface changes language in place.
+
+### Added
+
+- **Self-translation in the window.** The catalog goes to `locales/<code>.tsv` in the *person's*
+  configuration directory, never into the checkout, so an unreviewed machine translation cannot
+  become the project's. It reloads the interface without a restart, and a second run asks only about
+  strings that are new.
+- **The interface's own string list, embedded at build time.** A window that translates itself has to
+  know what to translate; `build.rs` extracts the strings from this crate's sources with the same
+  scanner `cargo xtask i18n` uses, so a self-translation and a translator's catalog describe the same
+  interface.
+- **`stkcraft_agent::translate`** — the batch, the prompt and the acceptance rules, once, for both
+  callers: the developer task and the window. Two implementations would be two prompts and two
+  acceptance rules, and the one that drifts is the one a user meets.
+- **`stkcraft_i18n::extract`** — the macro scanner, moved out of `xtask` so the build script, the
+  developer task and their tests share one answer to "which strings exist".
+
+### Fixed
+
+- **The scanner now reads code the way Rust does.** Three defects came out of using it on real
+  sources: it stepped by byte and panicked in the middle of a non-ASCII character; it treated
+  `("tr!(", None)` — the text it matches on, in its own source — as a call and put a row named
+  `, Some(|)` into a real catalog; and it ended a raw string at the first backslash-quote, so a test
+  that asserts on the extractor appeared in the catalog as `Yes"`. It now walks characters, skips
+  strings, raw strings and both comment forms, and all three are pinned by tests.
+
+### Changed
+
+- **The plural check counts the locale's CLDR forms** wherever a row is validated — the developer task
+  previously validated proposals as if they were English, which refused every correct CJK plural.
+
+### Not built yet
+
+- **One shipped catalog (Chinese)**; everything else is a person's own translation until someone
+  reviews one into the repository.
+- **No number or date localization**, no right-to-left layout.
+- **The extension store and per-item API signatures** are unchanged.
+
 ## [0.1.28] — A real model, a real language, and the three defects that only they found
 
 The assistant now works against the real `DeepSeek` API, and the first translated interface ships.

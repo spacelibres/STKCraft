@@ -51,11 +51,13 @@
 #![forbid(unsafe_code)]
 
 pub mod catalog;
+pub mod extract;
 pub mod locale;
 pub mod plurals;
 pub mod translations;
 
 pub use catalog::{Catalog, Problem, Row, parse};
+pub use extract::Source;
 pub use locale::{
     LANGUAGE_NAME_CONTEXT, LANGUAGE_NAME_SOURCE, Language, language_name_row, locale_chain,
     parse_system_locale,

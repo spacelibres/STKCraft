@@ -18,6 +18,7 @@
 //! explicit branch, and the overlay *shows* what went wrong instead of logging it where nobody
 //! looks.
 
+use std::fmt::Write as _;
 use std::time::Instant;
 
 use eframe::egui;
@@ -71,6 +72,10 @@ pub struct App {
     language: String,
     /// What the window writes back when a preference changes.
     prefs: Prefs,
+    /// A self-translation in flight: the person's own key filling in a language.
+    translation: Option<crate::translate::Run>,
+    /// What the language section says when a translation finished or could not start.
+    translation_status: Option<(bool, String)>,
 }
 
 impl App {
@@ -112,6 +117,65 @@ impl App {
             translations,
             language,
             prefs,
+            translation: None,
+            translation_status: None,
+        }
+    }
+
+    /// Rebuild the catalogs from what the build embeds and what this person has generated.
+    ///
+    /// Called after a self-translation writes one: the interface changes language in place rather
+    /// than asking for a restart.
+    fn reload_catalogs(&mut self) {
+        let mut translations =
+            stkcraft_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+        for (locale, text) in crate::prefs::user_catalogs() {
+            let (catalog, _problems) = stkcraft_i18n::parse(&locale, &text);
+            translations.add(&catalog);
+        }
+        self.translations = translations;
+    }
+
+    /// Drain a self-translation, if one is running.
+    fn poll_translation(&mut self) {
+        let Some(run) = &mut self.translation else {
+            return;
+        };
+        let mut finished = false;
+        for event in run.poll() {
+            match event {
+                crate::translate::Event::Progress { locale, count } => {
+                    self.translation_status = Some((
+                        true,
+                        format!("translating {count} string(s) into `{locale}`…"),
+                    ));
+                }
+                crate::translate::Event::Done {
+                    locale,
+                    rows,
+                    refused,
+                } => {
+                    self.reload_catalogs();
+                    let mut message =
+                        format!("`{locale}` is ready: {rows} string(s) translated with your key");
+                    if refused > 0 {
+                        let _ = write!(
+                            message,
+                            "; {refused} proposal(s) were refused by the format and still show \
+                             English"
+                        );
+                    }
+                    self.translation_status = Some((true, message));
+                    finished = true;
+                }
+                crate::translate::Event::Failed(message) => {
+                    self.translation_status = Some((false, message));
+                    finished = true;
+                }
+            }
+        }
+        if finished {
+            self.translation = None;
         }
     }
 
@@ -237,6 +301,11 @@ impl App {
     /// Kept as one function for the same reason the scene is: an image that laid the panels out
     /// itself would be evidence of a layout the window does not have.
     pub fn panels(&mut self, ui: &mut egui::Ui) {
+        self.poll_translation();
+        if self.translation.is_some() {
+            // A translation is a network round trip; keep drawing so its result is picked up.
+            ui.ctx().request_repaint();
+        }
         egui::Panel::left("controls")
             .resizable(true)
             .default_size(300.0)
@@ -407,13 +476,70 @@ impl App {
         egui::ComboBox::from_id_salt("language-picker")
             .selected_text(self.translations.language_name(current.code()))
             .show_ui(ui, |ui| {
+                // First the languages this build carries: English and every shipped catalog.
                 for language in self.translations.picker() {
                     let name = self.translations.language_name(language.code());
                     ui.selectable_value(&mut chosen, language.clone(), name);
                 }
+                ui.separator();
+                // Then the ones it does not, which the person can generate with their own key.
+                for code in crate::prefs::OFFERED {
+                    if self.translations.has_locale(code) {
+                        continue;
+                    }
+                    let language = stkcraft_i18n::Language::Other(code.to_owned());
+                    ui.selectable_value(
+                        &mut chosen,
+                        language,
+                        crate::prefs::language_name_for(code),
+                    );
+                }
             });
         if chosen != current {
             self.set_language(&chosen);
+        }
+
+        // Self-translation: offered only when there is something to translate and English is not the
+        // answer someone wants.
+        if !stkcraft_i18n::Language::parse(&language).is_some_and(|language| language.is_english())
+        {
+            let missing = crate::translate::missing(&self.translations, &language);
+            if self.translation.is_some() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(tr!("Translating with your key…"));
+                });
+            } else if missing > 0 {
+                let label = stkcraft_i18n::trn!(
+                    &self.translations,
+                    &language,
+                    "Translate {n} string with my key",
+                    "Translate {n} strings with my key",
+                    missing as u64
+                );
+                if ui.button(label).on_hover_text(tr!(
+                    "Uses DEEPSEEK_API_KEY to translate the interface into this language and stores \
+                     it for this computer."
+                ))
+                .clicked()
+                {
+                    match crate::translate::start(&language) {
+                        Ok(run) => {
+                            self.translation = Some(run);
+                            self.translation_status = None;
+                        }
+                        Err(message) => self.translation_status = Some((false, message)),
+                    }
+                }
+            }
+        }
+        if let Some((ok, message)) = &self.translation_status {
+            let colour = if *ok {
+                egui::Color32::from_rgb(140, 200, 140)
+            } else {
+                egui::Color32::from_rgb(230, 120, 120)
+            };
+            ui.colored_label(colour, message);
         }
 
         ui.separator();

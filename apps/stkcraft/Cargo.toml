@@ -36,5 +36,10 @@ pollster = { workspace = true }
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
 
+[build-dependencies]
+# The build script extracts the interface strings with the same scanner `cargo xtask i18n` uses, so
+# a window that translates itself and a translator's catalog describe the same interface.
+stkcraft-i18n.workspace = true
+
 [lints]
 workspace = true

@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 stkcraft-engine.workspace = true
+stkcraft-i18n.workspace = true
 stkcraft-mcp.workspace = true
 serde_json.workspace = true
 

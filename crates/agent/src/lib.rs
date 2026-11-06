@@ -44,6 +44,8 @@ use std::io::Write as _;
 use serde_json::{Value, json};
 use stkcraft_mcp::Server;
 
+pub mod translate;
+
 /// How many model turns one question may take before the loop stops.
 ///
 /// A tool loop that does not converge is a bug in the prompt or a model that is lost, and both are

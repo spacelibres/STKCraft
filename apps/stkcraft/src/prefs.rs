@@ -135,6 +135,49 @@ pub fn user_catalogs() -> Vec<(String, String)> {
     catalogs
 }
 
+/// A language's name for a translation run, before the model answers with its own.
+///
+/// The languages the window offers are named here so a person can pick one that has no catalog: the
+/// name goes into the prompt ("translate into Japanese (`ja`), called 日本語") and into the catalog's
+/// header, and the model's answer replaces it with its own wording.
+#[must_use]
+pub fn language_name_for(locale: &str) -> String {
+    match locale.split('-').next().unwrap_or(locale) {
+        "ar" => "العربية",
+        "cs" => "Čeština",
+        "de" => "Deutsch",
+        "el" => "Ελληνικά",
+        "en" => "English",
+        "es" => "Español",
+        "fr" => "Français",
+        "it" => "Italiano",
+        "ja" => "日本語",
+        "ko" => "한국어",
+        "nl" => "Nederlands",
+        "pl" => "Polski",
+        "pt" => "Português",
+        "ro" => "Română",
+        "ru" => "Русский",
+        "sr" => "Srpski",
+        "tr" => "Türkçe",
+        "uk" => "Українська",
+        "vi" => "Tiếng Việt",
+        "zh" => "中文",
+        other => other,
+    }
+    .to_owned()
+}
+
+/// The languages the window offers when it has no catalog for them.
+///
+/// It is the family's list, by base language, so a person sees the language they think in rather than
+/// a region code. A language that already has a catalog appears through [`Translations::picker`]
+/// instead; this list is what makes "translate it with my key" reachable for the rest.
+pub const OFFERED: [&str; 19] = [
+    "ar", "cs", "de", "el", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ro", "ru", "sr", "tr",
+    "uk", "vi", "zh",
+];
+
 /// The language the operating system asks for, best effort.
 ///
 /// `LC_ALL`, then `LC_MESSAGES`, then `LANG`, in the order the POSIX locale rules give them. An

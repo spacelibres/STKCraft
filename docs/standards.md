@@ -39,10 +39,12 @@ here.
   English and the wrong one is believed. A release ships only catalogs someone has read.
 - **The translation path stays outside the window's startup path.** A build with no `locales/`
   directory is a valid English-only build; a window that is merely open never makes a network call.
+  A person who wants a language the build does not carry asks for it in the panel, and that request —
+  their key, their machine, their language — is the only way the window translates itself. The result
+  is written to their configuration directory, never into the checkout.
 - **Not translated:** command ids, scenario and satellite names, machine-formatted times, and
   computed values. The family's rule is interface chrome, not document text.
-- **Not built:** number and date localization per region, right-to-left layout, and translation at
-  run time inside the window.
+- **Not built:** number and date localization per region, and right-to-left layout.
 
 ## 2. Agent, skills and the Model Context Protocol
 
