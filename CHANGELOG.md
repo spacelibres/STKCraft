@@ -9,6 +9,46 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.56] — The library carries its formulas, and the corpus says how few it finds
+
+Formulas now travel with the document: `Document::formulas`, `Library::formulas()`, and a listing that
+prints the count next to the first place — `13 formula(s); first at 101x0b3s.pdf:page 16, formula at
+(360,150)-(389,150)`.
+
+### Measured on the real corpus, and it is not good enough yet
+
+Cold-opening four CCSDS documents:
+
+| Document | Pages | Passages | Formulas found |
+|---|---|---|---|
+| `101x0b3s.pdf` | 40 | 343 | **13** |
+| `101x0b4s.pdf` | 47 | 418 | **21** |
+| `502x0b1s.pdf` (Orbit Data Messages) | 44 | 376 | **0** |
+| `922x27o1.pdf` (SANA registry) | 71 | 648 | **0** |
+
+The two that find formulas are the ones whose text layer uses real mathematical Unicode. The ODM book
+sets its equations in plain ASCII — `r = a (1 - e cos E)`, no `∑`, no `√`, no Greek in the code points —
+and character-only evidence cannot see them. **That is the honest state of layer 1**, and it is why the
+design says the font and baseline evidence are needed: those equations are set in a mathematical face and
+have real sub/superscript shifts, and both are facts the interpreter has that this layer does not yet
+read.
+
+A warm open reports no formulas at all (the cache stores the index, not the regions) — stated in the code
+where it happens rather than left for a person to wonder.
+
+### Added
+
+- **`stkcraft_agent_knowledge::library::{Formula, Library::formulas}`** — the box, the text-layer
+  reading, the introducing sentence, and `cite`, which prints a place on a page that has no lines.
+- **`Document::formulas`**, filled from `pdf::extract`'s regions and problems.
+
+### Not built yet — in order
+
+1. **Font and baseline evidence** in layer 1, so an ASCII-set equation in a mathematical face is found.
+   Without it the corpus numbers above stay where they are.
+2. **Formula search**: regions are not in the BM25 index yet, so `knowledge.search` cannot return them.
+3. Then the transcription table, OCR and the formula model, the Mathlib index and `verify-formulas`.
+
 ## [0.1.55] — Segmentation reaches the real PDF pipeline, and the sentence comes with it
 
 Step 1 of `docs/design/mathematics.md` is wired in: `pdf::extract` now runs `math::segment` over the

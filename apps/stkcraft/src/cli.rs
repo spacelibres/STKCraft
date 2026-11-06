@@ -1013,6 +1013,15 @@ fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
                         document.chunks.len()
                     ),
                 }
+                if let Some(first) = document.formulas.first() {
+                    // The first place, and the count: a listing that said "34 formulas" without one place
+                    // to look would be a claim nobody can check in a second.
+                    println!(
+                        "      {} formula(s); first at {}",
+                        document.formulas.len(),
+                        first.cite(&document.path)
+                    );
+                }
             }
             knowledge_skipped(&opened);
             Ok(())

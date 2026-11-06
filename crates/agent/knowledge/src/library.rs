@@ -71,7 +71,7 @@ impl Default for Limits {
 }
 
 /// One document the library holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     /// The path, relative to the library root, with `/` separators so a citation reads the same on
     /// every platform.
@@ -85,8 +85,43 @@ pub struct Document {
     pub pages: Option<usize>,
     /// Whether a bound cut the document short, so the pages read are not all of it.
     pub limited: bool,
+    /// The regions of this document that are mathematics, with the sentence each answers.
+    ///
+    /// A formula is not a chunk: it has no line range, it has a box (`docs/design/mathematics.md`). They
+    /// travel with the document so a caller can list them, and the search over them comes next.
+    pub formulas: Vec<Formula>,
     /// The chunked text.
     pub chunks: Vec<Chunk>,
+}
+
+/// One formula a document holds: where it is, what it says, and what it solves.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Formula {
+    /// The one-based page.
+    pub page: usize,
+    /// The box, in page points.
+    pub x0: f64,
+    /// The top of the box.
+    pub y0: f64,
+    /// The right of the box.
+    pub x1: f64,
+    /// The bottom of the box.
+    pub y1: f64,
+    /// What the text layer says the formula is.
+    pub unicode: String,
+    /// The sentence that introduces it: what it solves, in the paper's own words.
+    pub problem: Option<String>,
+}
+
+impl Formula {
+    /// `page 12, formula at (120,340)-(300,388)` — a place a person can find on a page with no lines.
+    #[must_use]
+    pub fn cite(&self, path: &str) -> String {
+        format!(
+            "{path}:page {}, formula at ({:.0},{:.0})-({:.0},{:.0})",
+            self.page, self.x0, self.y0, self.x1, self.y1
+        )
+    }
 }
 
 /// One passage that matched, with what a citation needs.
@@ -323,6 +358,35 @@ impl Library {
         &self.index
     }
 
+    /// Every formula in the library, by document and page.
+    ///
+    /// A list rather than a search, for now: what a season of work needs first is the count and the
+    /// places, so "this paper has 34 formulas on 11 pages" is a fact before it is a query.
+    #[must_use]
+    pub fn formulas(&self) -> Vec<(String, Formula)> {
+        let mut all: Vec<(String, Formula)> = self
+            .documents
+            .iter()
+            .flat_map(|document| {
+                document
+                    .formulas
+                    .iter()
+                    .map(|formula| (document.path.clone(), formula.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        all.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.page.cmp(&b.1.page))
+                .then_with(|| {
+                    a.1.y0
+                        .partial_cmp(&b.1.y0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+        all
+    }
+
     /// The score a passage needs to count as evidence.
     #[must_use]
     pub fn threshold(&self) -> f64 {
@@ -446,6 +510,7 @@ fn read_document(file: &File, limits: Limits) -> Result<Document, String> {
         bytes: text.len(),
         pages: None,
         limited: false,
+        formulas: Vec::new(),
         chunks: chunk(&text),
     })
 }
@@ -461,11 +526,28 @@ fn read_pdf(path: &str, bytes: &[u8], limits: Limits) -> Result<Document, String
             "a PDF with no text layer (a scan needs OCR before it can be searched)".to_owned(),
         );
     }
+    // The formulas travel with the document: the box, the text-layer reading, and the sentence that
+    // introduces each one. Nothing is invented for a region the segmenter did not find.
+    let formulas = extracted
+        .regions
+        .iter()
+        .zip(&extracted.problems)
+        .map(|(region, problem)| Formula {
+            page: region.page,
+            x0: region.x0,
+            y0: region.y0,
+            x1: region.x1,
+            y1: region.y1,
+            unicode: region.unicode.clone(),
+            problem: problem.clone(),
+        })
+        .collect();
     Ok(Document {
         path: path.to_owned(),
         bytes: bytes.len(),
         pages: Some(extracted.pages.len()),
         limited: extracted.skipped > 0,
+        formulas,
         chunks: crate::chunk::chunk_pages(&extracted.passages()),
     })
 }
@@ -595,6 +677,7 @@ mod tests {
 
     fn document(path: &str, text: &str) -> Document {
         Document {
+            formulas: Vec::new(),
             path: path.to_owned(),
             bytes: text.len(),
             pages: None,

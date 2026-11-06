@@ -208,6 +208,11 @@ fn decode_library(
             });
         }
         documents.push(crate::library::Document {
+            // The cache is the *index* of the corpus, and formulas are re-derived from the PDF when a
+            // caller asks for them: storing them would mean a cache format change for a list nothing
+            // reads during a search yet. A warm open therefore lists no formulas, and the listing says
+            // the count it has rather than one it does not.
+            formulas: Vec::new(),
             path,
             bytes: file_bytes,
             pages: (page_count != 0).then_some(page_count),
@@ -232,6 +237,7 @@ mod tests {
 
     fn documents() -> Vec<crate::library::Document> {
         vec![crate::library::Document {
+            formulas: Vec::new(),
             path: "spec.md".to_owned(),
             bytes: 42,
             pages: None,
@@ -248,6 +254,7 @@ mod tests {
         // is a citation that changes shape between runs: the page number and the "read in part" flag
         // have to survive the round trip.
         let documents = vec![crate::library::Document {
+            formulas: Vec::new(),
             path: "paper.pdf".to_owned(),
             bytes: 1_024,
             pages: Some(12),
