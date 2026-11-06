@@ -9,6 +9,21 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.84] — Invalid saved model settings cannot select a different endpoint
+
+### Fixed
+
+- Model operations report malformed saved preferences instead of discarding the chosen endpoint
+  and model while retaining their credential. Wrong-type protocol/thinking fields now fail before
+  credential lookup, model initialization or configuration changes. Read-only inspection, key-only
+  updates and credential removal preserve the original files on failure.
+- The window can still open with default chrome, but saving those defaults cannot overwrite an
+  invalid saved connection. Configuration reads and writes have a 64 KiB bound; device/directory
+  inputs and growing oversized files are refused. Valid older files and unknown fields remain
+  compatible, and a missing file remains a fresh configuration.
+- The development-data guide uses absolute paths and all seven SPKs for the real-kernel reference
+  test, including a PowerShell example, so it actually exercises the complete 54-state comparison.
+
 ## [0.1.83] — Explicit DeepSeek protocol and resumable tool thinking
 
 ### Added

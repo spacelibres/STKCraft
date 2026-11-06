@@ -25,6 +25,10 @@ Each setting resolves saved preferences first, then environment, then the shippe
 
 Unknown protocol or thinking values are errors. Thinking enabled requires the DeepSeek protocol.
 Changing these options validates the proposed settings before saving them, without needing a key.
+Malformed saved JSON or wrong-type fields also fail model operations; repair the saved settings
+before continuing. The window can open with default chrome while preserving that invalid file.
+Preference files are limited to 64 KiB and must be regular files; UI fallback settings cannot
+overwrite a malformed saved connection.
 
 The exact shipped endpoint selects DeepSeek defaults. A custom gateway defaults to the original
 compatible request shape; a model name containing "DeepSeek" does not grant protocol capabilities.

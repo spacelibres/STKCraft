@@ -776,7 +776,7 @@ fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocatio
 /// stored (never the credential itself), and where it is stored. Changing one writes the settings or
 /// the credential file and says which.
 fn model(request: &ModelRequest) -> Result<(), String> {
-    let mut prefs = crate::prefs::Prefs::load();
+    let mut prefs = crate::prefs::Prefs::try_load()?;
     let mut changed = Vec::new();
     if let Some(endpoint) = &request.endpoint {
         prefs.model_endpoint = Some(endpoint.trim().to_owned());

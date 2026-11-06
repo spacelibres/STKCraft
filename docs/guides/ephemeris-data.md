@@ -48,7 +48,22 @@ passing as though they had run. To run them:
 
 ```sh
 cargo xtask fetch-data
-STKCRAFT_EPHEMERIS_KERNEL=data/de440s.bsp cargo test -p stkcraft-astro-ephemeris
+kernel_root="$PWD/data"
+STKCRAFT_EPHEMERIS_KERNEL="$kernel_root/de440s.bsp:$kernel_root/mar099.bsp:$kernel_root/jup365.bsp:$kernel_root/sat441.bsp:$kernel_root/ura111xl-799.bsp:$kernel_root/nep097xl-899.bsp:$kernel_root/nep097xl-801.bsp" cargo test -p stkcraft-astro-ephemeris
+```
+
+Use absolute paths: Cargo runs tests from the package directory, not necessarily the workspace
+root. The full 54-state reference test needs all seven SPKs because `de440s.bsp` alone carries
+planetary barycentres rather than every planet's body centre and moons. Supplying only the
+planetary file is not the complete reference test.
+
+In PowerShell, construct the platform-separated path list from the workspace root:
+
+```powershell
+$kernelPaths = @('de440s.bsp', 'mar099.bsp', 'jup365.bsp', 'sat441.bsp', 'ura111xl-799.bsp', 'nep097xl-899.bsp', 'nep097xl-801.bsp') |
+    ForEach-Object { (Resolve-Path (Join-Path 'data' $_)).Path }
+$env:STKCRAFT_EPHEMERIS_KERNEL = $kernelPaths -join [IO.Path]::PathSeparator
+cargo test -p stkcraft-astro-ephemeris
 ```
 
 Reference states in that test are transcriptions of CSPICE's `spkezr` output and name the kernel's

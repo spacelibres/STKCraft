@@ -8,6 +8,83 @@
 use std::process::Command;
 
 #[test]
+fn malformed_saved_model_options_preserve_the_connection_and_credential() {
+    let base = std::env::temp_dir()
+        .canonicalize()
+        .expect("temporary directory");
+    let invalid = [
+        ("model_protocol", serde_json::json!(1)),
+        ("model_protocol", serde_json::json!({})),
+        ("model_protocol", serde_json::json!([])),
+        ("model_protocol", serde_json::json!(true)),
+        ("model_thinking", serde_json::json!(1)),
+        ("model_thinking", serde_json::json!({})),
+        ("model_thinking", serde_json::json!([])),
+        ("model_thinking", serde_json::json!(true)),
+        (
+            "oversized_future_field",
+            serde_json::json!("x".repeat(65_537)),
+        ),
+    ];
+    for (index, (field, value)) in invalid.into_iter().enumerate() {
+        let root = base.join(format!(
+            "stkcraft-model-saved-validation-{}-{index}",
+            std::process::id()
+        ));
+        assert!(root.starts_with(&base));
+        std::fs::create_dir(&root).expect("unique configuration root");
+        let directory = root.join("stkcraft");
+        std::fs::create_dir(&directory).expect("settings directory");
+        let key = directory.join("model.key");
+        let preferences = directory.join("ui.json");
+        let mut saved = serde_json::json!({
+            "language": "en",
+            "model_endpoint": "https://private.invalid/v1/chat/completions",
+            "model": "private-model"
+        });
+        saved
+            .as_object_mut()
+            .expect("fixture object")
+            .insert(field.to_owned(), value);
+        let original = saved.to_string();
+        std::fs::write(&key, "private-test-only").expect("fixture credential");
+        std::fs::write(&preferences, &original).expect("fixture preferences");
+        for arguments in [
+            vec!["model"],
+            vec!["model", "--key", "replacement-test-only"],
+            vec!["model", "--clear"],
+        ] {
+            let result = Command::new(env!("CARGO_BIN_EXE_stkcraft"))
+                .args(arguments)
+                .env("APPDATA", &root)
+                .env("XDG_CONFIG_HOME", &root)
+                .env_remove("DEEPSEEK_API_KEY")
+                .env_remove("DEEPSEEK_BASE_URL")
+                .env_remove("DEEPSEEK_MODEL")
+                .env("DEEPSEEK_PROTOCOL", "deepseek")
+                .env("DEEPSEEK_THINKING", "disabled")
+                .output()
+                .expect("configuration command");
+            assert!(
+                !result.status.success(),
+                "malformed saved {field} must not resolve defaults"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&preferences).expect("preserved preferences"),
+                original
+            );
+            assert_eq!(
+                std::fs::read_to_string(&key).expect("preserved credential"),
+                "private-test-only"
+            );
+        }
+        let resolved = root.canonicalize().expect("configuration root");
+        assert!(resolved.starts_with(&base));
+        std::fs::remove_dir_all(resolved).expect("remove isolated fixtures");
+    }
+}
+
+#[test]
 fn invalid_protocol_options_cannot_partially_write_credentials() {
     let base = std::env::temp_dir()
         .canonicalize()

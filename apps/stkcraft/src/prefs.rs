@@ -35,6 +35,9 @@ pub struct Prefs {
     pub model_thinking: Option<String>,
 }
 
+// Preferences contain a handful of short settings, not documents. Bound reads even if a file grows.
+const MAX_PREFERENCES_BYTES: u64 = 64 * 1024;
+
 /// The file the model's credential lives in, beside the preferences.
 ///
 /// **Not in `ui.json`.** A key is a secret, and a file a person is likely to paste into a bug report
@@ -112,7 +115,7 @@ fn restrict(path: &std::path::Path) -> Result<(), String> {
 /// A message saying what is missing and where to put it, because "no model" is a state the interface
 /// has to be able to explain.
 pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
-    let prefs = Prefs::load();
+    let prefs = Prefs::try_load()?;
     let stored = stored_credential();
     let environment = std::env::var("DEEPSEEK_API_KEY").ok();
     let base_url = std::env::var("DEEPSEEK_BASE_URL").ok();
@@ -261,13 +264,66 @@ impl Prefs {
     /// Read the preferences, or the defaults when there are none to read.
     #[must_use]
     pub fn load() -> Self {
-        let Some(path) = Self::path() else {
-            return Self::default();
+        Self::try_load().unwrap_or_default()
+    }
+
+    /// Read model settings without silently replacing malformed saved connection options.
+    ///
+    /// # Errors
+    /// Unreadable, non-regular, oversized or malformed existing preference files.
+    pub fn try_load() -> Result<Self, String> {
+        Self::path().map_or_else(|| Ok(Self::default()), |path| Self::read_at(&path))
+    }
+
+    fn read_at(path: &std::path::Path) -> Result<Self, String> {
+        use std::io::Read as _;
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => {
+                return Err(format!(
+                    "could not inspect preferences {}: {error}",
+                    path.display()
+                ));
+            }
         };
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return Self::default();
-        };
-        serde_json::from_str(&text).unwrap_or_default()
+        if !metadata.is_file() {
+            return Err(format!(
+                "preferences {} are not a regular file",
+                path.display()
+            ));
+        }
+        if metadata.len() > MAX_PREFERENCES_BYTES {
+            return Err(format!(
+                "preferences {} exceed {MAX_PREFERENCES_BYTES} bytes",
+                path.display()
+            ));
+        }
+        let file = std::fs::File::open(path)
+            .map_err(|error| format!("could not open preferences {}: {error}", path.display()))?;
+        if !file
+            .metadata()
+            .map_err(|error| format!("could not inspect preferences {}: {error}", path.display()))?
+            .is_file()
+        {
+            return Err(format!(
+                "preferences {} are not a regular file",
+                path.display()
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_PREFERENCES_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("could not read preferences {}: {error}", path.display()))?;
+        if bytes.len() as u64 > MAX_PREFERENCES_BYTES {
+            return Err(format!(
+                "preferences {} exceed {MAX_PREFERENCES_BYTES} bytes",
+                path.display()
+            ));
+        }
+        serde_json::from_slice(&bytes).map_err(|_| format!("invalid preferences JSON in {}; repair the saved settings before configuring or using the model", path.display()))
     }
 
     /// Write the preferences, creating the directory if it is missing.
@@ -280,13 +336,25 @@ impl Prefs {
         let Some(path) = Self::path() else {
             return Err("this platform has no configuration directory".to_owned());
         };
+        self.write_at(&path)
+    }
+
+    fn write_at(&self, path: &std::path::Path) -> Result<(), String> {
+        // A lenient UI read may have used defaults. Never overwrite a malformed saved connection.
+        Self::read_at(path)?;
         if let Some(directory) = path.parent() {
             std::fs::create_dir_all(directory)
                 .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
         }
         let text = serde_json::to_string_pretty(self)
             .map_err(|error| format!("could not write the preferences: {error}"))?;
-        std::fs::write(&path, text)
+        if text.len() as u64 > MAX_PREFERENCES_BYTES {
+            return Err(format!(
+                "preferences {} exceed {MAX_PREFERENCES_BYTES} bytes",
+                path.display()
+            ));
+        }
+        std::fs::write(path, text)
             .map_err(|error| format!("could not write {}: {error}", path.display()))
     }
 }
@@ -401,6 +469,60 @@ pub fn system_locale() -> Option<String> {
 #[expect(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preference_reads_are_bounded_and_default_ui_writes_preserve_invalid_connections() {
+        let base = std::env::temp_dir()
+            .canonicalize()
+            .expect("temporary directory");
+        let root = base.join(format!("stkcraft-preference-bounds-{}", std::process::id()));
+        assert!(root.starts_with(&base));
+        std::fs::create_dir(&root).expect("unique preference fixture");
+        let path = root.join("ui.json");
+        assert_eq!(
+            Prefs::read_at(&path).expect("missing file"),
+            Prefs::default()
+        );
+        assert!(
+            Prefs::read_at(&root).is_err(),
+            "directories are not preference files"
+        );
+        for bytes in [b"{broken-json".to_vec(), vec![b' '; 65_537]] {
+            std::fs::write(&path, &bytes).expect("invalid fixture");
+            assert!(Prefs::read_at(&path).is_err());
+            assert!(
+                Prefs::default().write_at(&path).is_err(),
+                "UI defaults must not overwrite saved invalid settings"
+            );
+            assert_eq!(std::fs::read(&path).expect("preserved file"), bytes);
+        }
+        std::fs::write(&path, r#"{"language":"zh","model_endpoint":"https://private.invalid/chat/completions","future":true}"#).expect("valid old preferences");
+        let prefs = Prefs::read_at(&path).expect("unknown fields remain compatible");
+        assert_eq!(prefs.language.as_deref(), Some("zh"));
+        assert_eq!(
+            prefs.model_endpoint.as_deref(),
+            Some("https://private.invalid/chat/completions")
+        );
+        let before = std::fs::read(&path).expect("valid fixture");
+        let oversized = Prefs {
+            model: Some("x".repeat(65_537)),
+            ..Prefs::default()
+        };
+        assert!(oversized.write_at(&path).is_err());
+        assert_eq!(
+            std::fs::read(&path).expect("oversized writes preserve file"),
+            before
+        );
+        let resolved = root.canonicalize().expect("fixture root");
+        assert!(resolved.starts_with(&base));
+        std::fs::remove_dir_all(resolved).expect("remove isolated fixtures");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preference_reads_refuse_device_files() {
+        assert!(Prefs::read_at(std::path::Path::new("/dev/zero")).is_err());
+    }
 
     #[test]
     fn model_protocol_invalid_explicit_settings_are_errors() {
