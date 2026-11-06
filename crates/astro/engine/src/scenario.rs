@@ -44,6 +44,26 @@ pub struct Satellite {
     pub color: [u8; 3],
 }
 
+/// A target's identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct TargetId(pub u32);
+
+/// A region the analysis asks about: a point, or the corners of a polygon.
+///
+/// The vertices are the model, because the geometry is: a region is visible while any vertex is, so access to
+/// a target is the union of its vertices' windows (`analysis::compute_target_access`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Target {
+    /// The assigned identifier.
+    pub id: TargetId,
+    /// A display name.
+    pub name: String,
+    /// Its corners, at least one.
+    pub vertices: Vec<GroundSite>,
+    /// What the sensor looking at it can see: a horizon mask and a cone, like a station's.
+    pub sensor: Sensor,
+}
+
 /// One ground station in the scenario.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Station {
@@ -72,6 +92,11 @@ pub struct Scenario {
     pub satellites: Vec<Satellite>,
     /// The ground stations.
     pub stations: Vec<Station>,
+    /// The targets: regions the analysis asks about.
+    ///
+    /// Defaulted so a document written before targets existed still loads and still means what it meant.
+    #[serde(default)]
+    pub targets: Vec<Target>,
     /// The instant the timeline starts.
     pub epoch: Epoch,
     /// How long the timeline runs, in seconds.
@@ -79,6 +104,9 @@ pub struct Scenario {
     /// Seconds rather than a `Duration` in the document so a hand-written JSON file reads
     /// naturally; the API converts once at the boundary.
     pub duration_seconds: f64,
+    /// The next target id to hand out.
+    #[serde(default)]
+    pub next_target: u32,
     /// The next satellite id to hand out.
     ///
     /// Monotonic, and never derived from the current contents: taking `max(existing) + 1`
@@ -103,12 +131,14 @@ impl Scenario {
             central_body: Body::Earth,
             satellites: Vec::new(),
             stations: Vec::new(),
+            targets: Vec::new(),
             // `Epoch::now` cannot fail for a well-formed system clock; when it does, the J2000
             // reference epoch is a valid, honest fallback rather than an uninitialised value.
             epoch: Epoch::now().unwrap_or(Epoch::j2000()),
             duration_seconds: 86_400.0,
             next_satellite: 1,
             next_station: 1,
+            next_target: 1,
         }
     }
 
@@ -216,6 +246,48 @@ impl Scenario {
     ///
     /// Returns [`Error::Invalid`] if the sensor does not validate, so an unusable station can
     /// never enter the document.
+    /// Add a target, assigning the next id.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Invalid`] when the target has no vertices or its sensor is not a sensor.
+    pub fn add_target(
+        &mut self,
+        name: impl Into<String>,
+        vertices: Vec<GroundSite>,
+        sensor: Sensor,
+    ) -> Result<TargetId> {
+        if vertices.is_empty() {
+            return Err(Error::invalid(
+                "vertices",
+                "a target needs at least one vertex",
+            ));
+        }
+        sensor.validate()?;
+        let id = TargetId(self.next_target);
+        let next = self.next_target.checked_add(1).ok_or_else(|| {
+            Error::out_of_range("target count", self.targets.len(), "fewer than 2^32 - 1")
+        })?;
+        self.next_target = next;
+        self.targets.push(Target {
+            id,
+            name: name.into(),
+            vertices,
+            sensor,
+        });
+        Ok(id)
+    }
+
+    /// One target by id, when the scenario has it.
+    pub fn target(&self, id: TargetId) -> Option<&Target> {
+        self.targets.iter().find(|target| target.id == id)
+    }
+
+    /// Add a ground station, assigning the next id.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Invalid`] when the sensor is not a sensor, and [`Error::OutOfRange`] when no id remains.
     pub fn add_station(
         &mut self,
         name: impl Into<String>,

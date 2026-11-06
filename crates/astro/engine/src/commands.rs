@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use stkcraft_astro_access::Sensor;
+use stkcraft_astro_access::{GroundSite, Sensor};
 use stkcraft_astro_sgp4::TwoLineElement;
 use stkcraft_framework_core::{Angle, Distance, Duration, Error, Result};
 
@@ -167,6 +167,11 @@ pub struct CommandOutcome {
     /// this is one orbit about one body over one site. A summary that said only "4 passes" left
     /// the caller to recompute the times, which is exactly the work a tool call exists to do.
     pub passes: Option<Vec<PlanetPass>>,
+    /// Access to the scenario's targets, when the command computed any.
+    ///
+    /// A target is a region, so its windows are the union of its vertices' — separate from [`Self::access`]
+    /// because a pair of an orbit and a region is a different question from a pair of an orbit and a station.
+    pub targets: Option<Vec<crate::analysis::TargetAccess>>,
 }
 
 impl CommandOutcome {
@@ -177,7 +182,15 @@ impl CommandOutcome {
             summary: summary.into(),
             access: None,
             passes: None,
+            targets: None,
         }
+    }
+
+    /// The same outcome with target access attached.
+    #[must_use]
+    pub fn with_targets(mut self, targets: Vec<crate::analysis::TargetAccess>) -> Self {
+        self.targets = Some(targets);
+        self
     }
 
     /// The same outcome with passes attached.
@@ -277,6 +290,53 @@ impl Registry {
     }
 }
 
+/// Parse `lat,lon;lat,lon;…` into vertices.
+///
+/// A text parameter rather than one parameter per corner, because a polygon has as many corners as the person
+/// drew: repeating parameters would fix the count, and a second command just to append one would make a
+/// triangle four calls.
+///
+/// # Errors
+///
+/// [`Error::Invalid`] naming the pair that failed: a coordinate that is not a number, or a place no latitude
+/// or longitude reaches.
+fn parse_vertices(points: &str) -> Result<Vec<GroundSite>> {
+    let mut vertices = Vec::new();
+    for (index, pair) in points
+        .split(';')
+        .filter(|pair| !pair.trim().is_empty())
+        .enumerate()
+    {
+        let mut coordinates = pair.split(',');
+        let latitude = coordinates
+            .next()
+            .map(str::trim)
+            .ok_or_else(|| Error::invalid("points", format!("pair {index} has no latitude")))?;
+        let longitude = coordinates
+            .next()
+            .map(str::trim)
+            .ok_or_else(|| Error::invalid("points", format!("pair {index} has no longitude")))?;
+        let latitude: f64 = latitude
+            .parse()
+            .map_err(|_| Error::invalid("points", format!("`{latitude}` is not a number")))?;
+        let longitude: f64 = longitude
+            .parse()
+            .map_err(|_| Error::invalid("points", format!("`{longitude}` is not a number")))?;
+        vertices.push(GroundSite::new(
+            Angle::from_deg(latitude),
+            Angle::from_deg(longitude),
+            0.0,
+        )?);
+    }
+    if vertices.is_empty() {
+        return Err(Error::invalid(
+            "points",
+            "a target needs at least one corner",
+        ));
+    }
+    Ok(vertices)
+}
+
 /// Build a command's arguments from a JSON object, through the parameter kinds it declares.
 ///
 /// Every transport calls this — the MCP server, the control channel, and the window's own socket —
@@ -331,7 +391,7 @@ type Builtin = (
 
 const ALWAYS: fn(&Scenario) -> bool = |_| true;
 
-const BUILTIN: [Builtin; 9] = [
+const BUILTIN: [Builtin; 11] = [
     (
         CommandDescriptor {
             id: "scenario.rename",
@@ -615,6 +675,112 @@ const BUILTIN: [Builtin; 9] = [
     ),
     (
         CommandDescriptor {
+            id: "target.add",
+            label: "Add Target",
+            menu_path: "Target",
+            shortcut: None,
+            parameters: &[
+                Parameter {
+                    name: "name",
+                    kind: ParameterKind::Text,
+                    description: "A display name; need not be unique.",
+                    required: true,
+                },
+                Parameter {
+                    name: "points",
+                    kind: ParameterKind::Text,
+                    description: "The target's corners as `lat,lon` pairs separated by semicolons, \
+                                  e.g. `40.4,-3.7` for a point or `0,0;0,1;1,1` for a triangle.",
+                    required: true,
+                },
+                Parameter {
+                    name: "half-angle",
+                    kind: ParameterKind::Degrees,
+                    description: "Half-angle of the sensor's field-of-view cone. Default 180.",
+                    required: false,
+                },
+                Parameter {
+                    name: "minimum-elevation",
+                    kind: ParameterKind::Degrees,
+                    description: "The observer's horizon mask. Default 0.",
+                    required: false,
+                },
+            ],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let name = args.required("name")?.as_text("name")?.to_owned();
+            let points = args.required("points")?.as_text("points")?;
+            let vertices = parse_vertices(points)?;
+            let half_angle = args
+                .get("half-angle")
+                .map(|argument| argument.as_angle("half-angle"))
+                .transpose()?
+                .unwrap_or(Angle::from_deg(180.0));
+            let mask = args
+                .get("minimum-elevation")
+                .map(|argument| argument.as_angle("minimum-elevation"))
+                .transpose()?
+                .unwrap_or(Angle::ZERO);
+            let mut sensor = Sensor::above_horizon(mask);
+            sensor.half_angle = half_angle;
+            let id = scenario.add_target(name.clone(), vertices.clone(), sensor)?;
+            Ok(CommandOutcome::new(format!(
+                "Added target `{name}` as {id:?} with {} vertex/vertices",
+                vertices.len()
+            )))
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "access.targets",
+            label: "Compute Target Access",
+            menu_path: "Access",
+            shortcut: None,
+            parameters: &[Parameter {
+                name: "step-seconds",
+                kind: ParameterKind::Number,
+                description: "Search step. Shorter is more thorough and slower.",
+                required: false,
+            }],
+        },
+        |scenario| !scenario.satellites.is_empty() && !scenario.targets.is_empty(),
+        |scenario, args| {
+            let step = match args.get("step-seconds") {
+                Some(argument) => argument.as_number("step-seconds")?,
+                None => stkcraft_astro_access::DEFAULT_STEP.as_seconds(),
+            };
+            if step <= 0.0 {
+                return Err(Error::out_of_range(
+                    "step-seconds",
+                    step,
+                    "strictly positive seconds",
+                ));
+            }
+            let step = Duration::from_seconds(step);
+            let mut results = Vec::new();
+            for satellite in &scenario.satellites {
+                for target in &scenario.targets {
+                    results.push(crate::analysis::compute_target_access(
+                        scenario,
+                        satellite.id,
+                        &target.name,
+                        &target.vertices,
+                        &target.sensor,
+                        step,
+                    )?);
+                }
+            }
+            let windows: usize = results.iter().map(|result| result.windows.len()).sum();
+            let summary = format!(
+                "Computed target access: {} pair(s), {windows} window(s)",
+                results.len()
+            );
+            Ok(CommandOutcome::new(summary).with_targets(results))
+        },
+    ),
+    (
+        CommandDescriptor {
             id: "access.compute",
             label: "Compute Access",
             menu_path: "Access",
@@ -649,6 +815,7 @@ const BUILTIN: [Builtin; 9] = [
                 ),
                 access: Some(results),
                 passes: None,
+                targets: None,
             })
         },
     ),
@@ -1169,6 +1336,90 @@ mod tests {
                     .with("half-angle", Arg::Angle(Angle::from_deg(bad))),
             );
             assert!(answer.is_err(), "{bad} degrees was accepted");
+        }
+    }
+
+    #[test]
+    fn a_target_is_added_from_points_and_its_windows_are_the_union_of_its_vertices() {
+        // The command-level version of the geometry test: a two-vertex target must see exactly what the two
+        // point targets see together, merged — so "the region is visible while any corner is" holds through
+        // the registry and not only inside `analysis`.
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("targets");
+        scenario.epoch = TwoLineElement::parse(LEO_L1, LEO_L2)
+            .expect("valid TLE")
+            .epoch;
+        scenario.duration_seconds = 86_400.0;
+        registry
+            .run("satellite.add", &mut scenario, &add_satellite_args())
+            .expect("adds satellite");
+
+        for (name, points) in [
+            ("west", "0,-0.5"),
+            ("east", "0,0.5"),
+            ("both", "0,-0.5;0,0.5"),
+        ] {
+            registry
+                .run(
+                    "target.add",
+                    &mut scenario,
+                    &Args::none()
+                        .with("name", Arg::Text(name.to_owned()))
+                        .with("points", Arg::Text(points.to_owned())),
+                )
+                .expect("adds target");
+        }
+        assert_eq!(scenario.targets.len(), 3);
+        assert_eq!(
+            scenario.targets.last().expect("the polygon").vertices.len(),
+            2
+        );
+
+        let outcome = registry
+            .run(
+                "access.targets",
+                &mut scenario,
+                &Args::none().with("step-seconds", Arg::Number(30.0)),
+            )
+            .expect("computes");
+        let targets = outcome.targets.expect("target access");
+        assert_eq!(targets.len(), 3, "one per satellite/target pair");
+        let find = |name: &str| {
+            targets
+                .iter()
+                .find(|entry| entry.target == name)
+                .expect("the target")
+        };
+        let west = find("west").windows.clone();
+        let east = find("east").windows.clone();
+        let both = find("both").windows.clone();
+        // The region's windows are exactly the union of its corners' — computed the same way here, from the
+        // two point targets the command just produced.
+        let expected = crate::analysis::union(&[west.clone(), east.clone()]);
+        assert_eq!(
+            both, expected,
+            "the region's windows are not the union of its corners'"
+        );
+        // And the union cannot be shorter than either corner.
+        assert!(
+            both.len() <= west.len() + east.len(),
+            "the union did not merge anything at all"
+        );
+        assert!(
+            both.len() >= west.len().max(east.len()),
+            "the union lost a window"
+        );
+
+        // A target with no points is refused, and so is one with a bad coordinate.
+        for points in ["", "  ", "40.4", "north,-3.7"] {
+            let answer = registry.run(
+                "target.add",
+                &mut scenario,
+                &Args::none()
+                    .with("name", Arg::Text("bad".to_owned()))
+                    .with("points", Arg::Text(points.to_owned())),
+            );
+            assert!(answer.is_err(), "`{points}` was accepted as a target");
         }
     }
 }

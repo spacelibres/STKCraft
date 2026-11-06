@@ -9,6 +9,45 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.75] — Targets are in the scenario, and the region's windows are its corners' union
+
+F5's third slice: `target.add` and `access.targets`, with targets in the scenario document.
+
+```sh
+stkcraft ... target.add +name=Madrid +points=40.4,-3.7
+              target.add +name=Triangle +points=0,0;0,1;1,1
+              access.targets +step-seconds=30
+```
+
+- **`Target { id, name, vertices, sensor }`** in `Scenario`, with `#[serde(default)]` so a document written
+  before targets existed still loads and still means what it meant.
+- **A polygon is its corners**, and the geometry is the model: a region is visible while any vertex is, so a
+  target's windows are `analysis::union` of its vertices' windows.
+- **Corners arrive as one text parameter**, `lat,lon;lat,lon`, because a polygon has as many corners as a person
+  drew: one parameter per corner would fix the count, and a command to append one would make a triangle four
+  calls.
+- **An empty or malformed target is refused**: no vertices, a coordinate that is not a number, or a place no
+  latitude reaches.
+
+### Verified at the command level
+
+`a_target_is_added_from_points_and_its_windows_are_the_union_of_its_vertices` builds **three** targets through
+the registry — `west` at `(0, -0.5)`, `east` at `(0, 0.5)` and `both` as both corners — then computes target
+access and asserts:
+
+- the region's windows are **exactly** `union(west, east)`, compared as a window list;
+- the union is **no longer than the sum** of the corners' windows (something merged) and **no shorter than
+  either** (nothing was lost).
+
+The engine suite is 51 tests; the four rejection cases (`""`, `"  "`, `"40.4"`, `"north,-3.7"`) are in the same
+test.
+
+### Not built yet
+
+- **The window and the agent do not see targets yet**: the panels draw satellites and stations, and the MCP
+  `tools/list` will offer the two new commands but no resource describes a target.
+- Remaining F5 work: target rendering, a polygon drawn on the globe, and the coverage grid.
+
 ## [0.1.74] — A region is visible while any part of it is, and the union is what a test can pin
 
 F5's second slice: the geometry a target rests on. `TargetAccess` and `compute_target_access` compute one
