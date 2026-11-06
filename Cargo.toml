@@ -10,13 +10,14 @@ members = [
     "crates/access",
     "crates/engine",
     "crates/mcp",
+    "crates/agent",
     "crates/viewport",
     "apps/stkcraft",
     "xtask",
 ]
 
 [workspace.package]
-version = "0.1.19"
+version = "0.1.20"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -25,16 +26,17 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-core = { path = "crates/core", version = "0.1.19" }
-stkcraft-time = { path = "crates/time", version = "0.1.19" }
-stkcraft-body = { path = "crates/body", version = "0.1.19" }
-stkcraft-ephemeris = { path = "crates/ephemeris", version = "0.1.19" }
-stkcraft-frames = { path = "crates/frames", version = "0.1.19" }
-stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.19" }
-stkcraft-access = { path = "crates/access", version = "0.1.19" }
-stkcraft-engine = { path = "crates/engine", version = "0.1.19" }
-stkcraft-mcp = { path = "crates/mcp", version = "0.1.19" }
-stkcraft-viewport = { path = "crates/viewport", version = "0.1.19" }
+stkcraft-core = { path = "crates/core", version = "0.1.20" }
+stkcraft-time = { path = "crates/time", version = "0.1.20" }
+stkcraft-body = { path = "crates/body", version = "0.1.20" }
+stkcraft-ephemeris = { path = "crates/ephemeris", version = "0.1.20" }
+stkcraft-frames = { path = "crates/frames", version = "0.1.20" }
+stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.20" }
+stkcraft-access = { path = "crates/access", version = "0.1.20" }
+stkcraft-engine = { path = "crates/engine", version = "0.1.20" }
+stkcraft-mcp = { path = "crates/mcp", version = "0.1.20" }
+stkcraft-agent = { path = "crates/agent", version = "0.1.20" }
+stkcraft-viewport = { path = "crates/viewport", version = "0.1.20" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.

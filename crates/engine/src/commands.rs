@@ -480,7 +480,7 @@ const BUILTIN: [Builtin; 8] = [
             parameters: &[
                 Parameter {
                     name: "body",
-                    description: "The body the station stands on and the orbit is about, by IAU name                                   (e.g. Mars, Titan).",
+                    description: "The body the station stands on and the orbit is about, by IAU name (e.g. Mars, Titan).",
                     required: true,
                 },
                 Parameter {

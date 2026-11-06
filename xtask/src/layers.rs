@@ -12,7 +12,9 @@
 //! L2  sgp4      orbit propagation
 //! L3  access    access and coverage geometry
 //! L4  engine    scenario, commands and analysis
-//! L4  viewport  3D rendering (GPU), above the analysis layers
+//! L5  mcp       the command registry spoken to an outside client
+//! L5  viewport  3D rendering (GPU), above the analysis layers
+//! L6  agent     a model driving the engine through the MCP tools
 //! ...
 //!     apps      the desktop app, CLI and web shell
 //! ```
@@ -36,7 +38,11 @@ pub struct CrateSpec {
 pub const FIRST_LAYER: u32 = 0;
 
 /// How many layers the analysis crates occupy. The apps sit just above the top one.
-pub const LAYER_COUNT: u32 = 6;
+///
+/// Layers 0 to 5 were not enough once the agent landed: the MCP server is a transport onto the
+/// engine (L5) and the agent drives the engine *through that server* (L6), so the two need layers
+/// of their own. The viewport keeps the transport's height — nothing below the app consumes it.
+pub const LAYER_COUNT: u32 = 7;
 
 /// The highest layer that must stay free of any GUI dependency.
 ///
@@ -116,13 +122,13 @@ pub const LAYOUT: &[CrateSpec] = &[
         path: "crates/engine",
         layer: 4,
     },
-    // The agent interface is a transport onto the engine: a menu, a CLI and an MCP session all
-    // reach the same command registry, and nothing below knows any of them exists. It sits at the
-    // viewport's height — one below the app — because it consumes the engine and nothing consumes it.
+    // The MCP server is a transport onto the engine: a menu, a CLI and an MCP session all reach
+    // the same command registry, and nothing below knows any of them exists. It sits with the
+    // viewport, one below the agent, because it consumes the engine and nothing consumes it.
     CrateSpec {
         name: "stkcraft-mcp",
         path: "crates/mcp",
-        layer: APP_LAYER - 1,
+        layer: APP_LAYER - 2,
     },
     // The 3D viewport sits above the analysis layers because it is a UI crate: it may use
     // `wgpu` and `egui`, which `LAST_NON_UI_LAYER` forbids below. It still depends only on
@@ -130,6 +136,14 @@ pub const LAYOUT: &[CrateSpec] = &[
     CrateSpec {
         name: "stkcraft-viewport",
         path: "crates/viewport",
+        layer: APP_LAYER - 2,
+    },
+    // The agent drives the engine through the MCP server's tools, so it sits strictly above that
+    // server and knows nothing the protocol does not expose. Replacing the model, or talking to the
+    // server from another process, leaves this crate out of the picture entirely.
+    CrateSpec {
+        name: "stkcraft-agent",
+        path: "crates/agent",
         layer: APP_LAYER - 1,
     },
     CrateSpec {

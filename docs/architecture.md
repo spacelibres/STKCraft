@@ -13,9 +13,10 @@ L2  frames    reference frames and rotations
 L2  sgp4      SGP4/SDP4 propagation from a two-line element set
 L3  access    line of sight, elevation masks, occultation, access windows
 L4  engine    scenario, propagation, analysis, the command registry
-L4  mcp       the MCP server: every command as an agent tool, every skill as a prompt
-L4  viewport  the 3D viewport: GPU rendering and generated geometry
-    apps      stkcraft (window, CLI and MCP server)
+L5  mcp       the MCP server: every command as an agent tool, every skill as a prompt
+L5  viewport  the 3D viewport: GPU rendering and generated geometry
+L6  agent     a model that drives the engine through the MCP tools
+    apps      stkcraft (window, CLI, MCP server and agent)
 ```
 
 Planned, in the order they will land:
@@ -26,7 +27,6 @@ L1  astro     low-precision Sun, Moon and planet positions
 L2  ephemeris SP3 and CCSDS OEM/OPM/OMM readers
 L2  atmos     neutral atmosphere density
 L3  coverage  grids and grids-of-figures over time
-    mcp       the MCP server, dispatching the same command ids
 ```
 
 `cargo xtask layers` enforces that a crate depends only on a strictly lower layer, and that
@@ -94,6 +94,61 @@ Two consequences follow, and both are visible in the API rather than buried:
 
 A day that ends with an inserted second uses the offset in force *before* that leap, which
 is SOFA's convention and the one ephemeris files assume.
+
+## The agent-first core
+
+STKCraft is meant to be driven by a model, and the difference from a product that merely
+*offers* an assistant is structural: the model is not inside the kernel, and the kernel is
+completely reachable from outside it.
+
+The kernel — everything through `stkcraft-engine` — makes no network call, links no HTTP
+client, and does not know a language model exists. What it does instead is expose itself
+completely:
+
+- **Every command is a tool.** `tools/list` is generated from the command registry, so a
+  command's id, its description and the schema of its parameters come from the same
+  descriptor the menu and the CLI use. There is no second list to keep in step; a command
+  that lands with tests is an agent capability the same day.
+- **Scenario, catalogue and skills are resources**, read as JSON: the live scenario, the
+  bodies and their constants, the command catalogue, and every skill document.
+- **Skills are prompts.** A skill is a markdown procedure with a one-line description, served
+  through `resources/read` and `prompts/get`, and listed in the system prompt by name only.
+  That is deliberate progressive disclosure: a procedure is loaded when a job needs it, so a
+  large library costs nothing until it is used.
+
+The payoff is testability. `stkcraft_mcp::Server::handle` is a pure function of a request and
+the session, so the whole protocol is covered without a pipe, and an agent's tool call is the
+same call a test makes. A model that cannot reach a network can still be tested end to end: the
+`ChatModel` trait means a scripted turn exercises the entire loop — the request body, the tool
+dispatch, the result fed back, the final answer — with no credential and no socket.
+
+Two layers hold this up, and the split is the point. `stkcraft-mcp` (L5) is a *transport*: it
+turns the registry into a protocol and knows nothing about models. `stkcraft-agent` (L6) is a
+*client* of that protocol — from the server's point of view it is indistinguishable from Claude
+Desktop connected to the same stdin. The agent therefore cannot reach a capability the protocol
+does not expose, which keeps "the model can do anything the user can" a property of the design
+rather than a promise. Swapping `DeepSeek` for another model, or moving the agent into another
+process, changes nothing below it; `stkcraft mcp` and `stkcraft ask` are two clients of one
+surface.
+
+The model's transport is `curl` on standard input rather than an HTTP crate: no TLS stack in the
+build, no client to audit, and the request and response stay text a person can read when a number
+looks wrong. That is the same reasoning that makes the bulk data a `curl` download.
+
+### What "plugin" means today, and what it does not
+
+A plugin, at this stage, is a *registration*, not a loaded shared object:
+
+- a **command** is one registry entry (id, label, menu path, parameters, `enabled`, `run`), and
+  the menu, shortcut, CLI, control channel, MCP server and agent all dispatch by id;
+- a **skill** is one markdown document picked up from `skills/`, needing no code and no rebuild;
+- a **bulk file** is one row in `cargo xtask fetch-data`, with a checksum recorded in
+  `docs/ephemeris-data.md`.
+
+Dynamic third-party code is deliberately *not* built yet. Running someone else's code inside an
+analysis process needs a capability story — what a plugin may read, what it may compute, what it
+may spend — and a story invented after the fact is a hole. The registry already gives the useful
+half: anything expressible as a command or a document is a plugin today.
 
 ## Verification
 

@@ -23,6 +23,8 @@ pub enum Invocation {
     Planet(PlanetRequest),
     /// Serve the command registry to an agent over standard input and output.
     Mcp,
+    /// Ask a model a question; it answers by running the engine's commands.
+    Ask(String),
 }
 
 /// The parameters of the `passes` subcommand.
@@ -67,6 +69,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Passes(request) => passes(&request),
         Invocation::Planet(request) => planet(&request),
         Invocation::Mcp => mcp(),
+        Invocation::Ask(question) => ask(&question),
     }
 }
 
@@ -88,6 +91,7 @@ COMMANDS
     passes      Compute satellite passes over a ground station
     planet      Compute passes over a station on another body
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
+    ask         Ask DeepSeek a question; it answers by running the engine's commands
     version     Print the version
     help        Print this text
 
@@ -142,6 +146,13 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "passes" => parse_passes(arguments),
         "planet" => parse_planet(arguments),
         "mcp" => Ok(Invocation::Mcp),
+        "ask" => {
+            let question = arguments.next().ok_or_else(|| {
+                "`ask` needs a question, e.g. `stkcraft ask \"when does the ISS pass over London?\"`"
+                    .to_owned()
+            })?;
+            Ok(Invocation::Ask(question))
+        }
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
 }
@@ -364,6 +375,30 @@ fn mcp() -> Result<(), String> {
     let mut server =
         stkcraft_mcp::Server::new(app_demo_scenario()?, stkcraft_mcp::load_skills(&skills));
     server.serve()
+}
+
+/// Ask `DeepSeek` a question, with the engine's commands as its tools and the skills as its library.
+///
+/// The model needs `DEEPSEEK_API_KEY`; without one the message says so instead of failing inside a
+/// request. Every tool call it makes is printed as it happens, because an analysis whose steps a
+/// person cannot see is an analysis nobody can check.
+fn ask(question: &str) -> Result<(), String> {
+    let model = stkcraft_agent::DeepSeek::from_environment()?;
+    let server = stkcraft_mcp::Server::new(
+        app_demo_scenario()?,
+        stkcraft_mcp::load_skills(&skills_directory()),
+    );
+    let mut agent = stkcraft_agent::Agent::new(model, server);
+    match agent.ask(question) {
+        Ok(answer) => {
+            for line in &answer.trace {
+                println!("  · {line}");
+            }
+            println!("{}", answer.text);
+            Ok(())
+        }
+        Err(message) => Err(message),
+    }
 }
 
 /// Where the skill documents live, if they are anywhere this build can find them.

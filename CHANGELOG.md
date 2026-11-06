@@ -9,6 +9,60 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.20] — The model drives the engine
+
+`stkcraft ask "<question>"` puts a model in front of the tools 0.1.19 published. `DeepSeek` reads
+the question, calls the engine's own commands, sees what they returned, and answers from those
+numbers — the loop that makes the MCP surface worth having rather than a second way to write a
+command line. The split is unchanged and deliberate: the kernel gained no model, no prompt and no
+network call, and `stkcraft mcp` and `stkcraft ask` are two clients of one protocol.
+
+### Added
+
+- **`stkcraft-agent`** — a chat-completions client and the loop over it: system prompt, tool
+  schema from `Server::tools_json`, tool calls executed through `Server::handle`, and the result
+  fed back until the model answers or [`MAX_TURNS`] is reached. `ChatModel` is a trait so the loop
+  is tested with a scripted model — ten tests cover a plain answer, a tool call whose result comes
+  back, an unknown tool, a failed command, the skills listed in the prompt, and an empty script
+  that must end the loop rather than spin.
+- **`skill.read`** — the one tool the agent adds to the server's set. A system prompt that carried
+  every skill would be long, expensive and mostly irrelevant; the model is told which skills exist
+  and reads one when a job needs it, which is the same progressive disclosure an MCP client gets
+  from `prompts/get`.
+- **`stkcraft ask "<question>"`**, printing every tool call as it happens — `name(args) → summary`
+  — because an analysis whose steps a person cannot see is an analysis nobody can check. The model
+  is configured by `DEEPSEEK_API_KEY`, with `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` overridable;
+  without a key the message says so instead of failing inside a request.
+- **`docs/architecture.md` gains "The agent-first core"**: why the model is outside the kernel,
+  what the two layers above the engine are for, and what "plugin" means today (a command is one
+  registry entry; a skill is a document; a bulk file is one verified row) and what a dynamic plugin
+  registry would still need — a capability story, before any third-party code runs.
+
+### Changed
+
+- **The layer table grows to seven**, and the agent sits above the MCP server rather than beside
+  it: the server is a transport onto the engine and knows nothing about models, the agent is a
+  client of that transport, and the ordering now says so. A layering rule that allowed them to sit
+  at the same height would have let the agent reach past the protocol.
+- **`AGENTS.md` gains the agent rules**: the kernel stays free of prompts and network calls, an
+  agent capability is added by adding a command, and a skill is a document with one heading and a
+  description rather than code.
+- **`planet.access`'s `body` description** loses the run of spaces it shipped with, so the schema a
+  model reads is the sentence a person wrote.
+
+### Fixed
+
+- **0.1.19's changelog claimed a `docs/architecture.md` section that its commit did not contain.**
+  The section is written here and the claim is removed from 0.1.19, because a changelog that
+  describes documentation nobody wrote is the one thing a changelog must never do.
+
+### Not built yet
+
+- **The desktop app still has no agent panel.** `stkcraft ask` is the CLI client; the window's own
+  channel, tool-call cards and a view of the trace are not built.
+- **`resources/updated` notifications and subscribed resources** are not sent: a client reads the
+  scenario once. Dynamic third-party plugins are unchanged and still need a capability story.
+
 ## [0.1.19] — The core is agent-first: MCP tools and skills
 
 `stkcraft mcp` serves the engine to a large language model over the Model Context Protocol.
@@ -33,10 +87,6 @@ usable from there, and swapping the model changes nothing in the analysis.
 
 ### Changed
 
-- **`docs/architecture.md` gains "The agent-first core"**, which records why the model is outside
-  the kernel, what "plugin" means today (a command is one registry entry; a skill is a document) and
-  what a dynamic-plugin registry would need before it is worth building — a capability story about
-  what third-party code may do.
 - **The layer table grows to six**, with the MCP server one below the app: it consumes the engine and
   nothing consumes it, which is the same relationship the viewport has.
 

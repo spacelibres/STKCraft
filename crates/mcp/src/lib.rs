@@ -186,7 +186,7 @@ impl Server {
                                  approach the common jobs.",
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({"tools": self.tools()})),
+            "tools/list" => Ok(json!({"tools": self.tools_json()})),
             "tools/call" => {
                 let name = params
                     .get("name")
@@ -222,7 +222,12 @@ impl Server {
     }
 
     /// Every command as an MCP tool, with a schema built from its documented parameters.
-    fn tools(&self) -> Vec<Value> {
+    ///
+    /// Public because a second client — the `DeepSeek` agent in `stkcraft-agent` — must build its
+    /// function schema from the same source of truth. Two copies of a schema is two things to keep
+    /// in step, and the one that falls behind is always the one an agent uses.
+    #[must_use]
+    pub fn tools_json(&self) -> Vec<Value> {
         self.registry
             .iter()
             .map(|command| {
@@ -332,7 +337,7 @@ impl Server {
                 .map(|text| ("application/json", text))
                 .map_err(|error| format!("the scenario cannot be written as JSON: {error}")),
             "stkcraft://commands" => {
-                let catalogue: Vec<Value> = self.tools();
+                let catalogue: Vec<Value> = self.tools_json();
                 serde_json::to_string_pretty(&catalogue)
                     .map(|text| ("application/json", text))
                     .map_err(|error| format!("the catalogue cannot be written as JSON: {error}"))

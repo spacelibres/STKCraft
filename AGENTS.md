@@ -86,6 +86,16 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   an agent can do anything a user can.
 - **Programmatic calls never open dialogs.** A command run through the control channel or
   MCP uses defaults; only a menu click starts an interactive sequence.
+- **The model stays outside the kernel.** `stkcraft-engine` makes no network call and links no
+  HTTP client; it exposes commands as MCP tools, its state as resources, and procedures as
+  skills. `stkcraft-mcp` (a transport, L5) and `stkcraft-agent` (a client of that protocol, L6)
+  sit above it. The agent reaches nothing the protocol does not expose, so a capability a user
+  has is a capability an agent has, and adding one means adding a command — never teaching the
+  model a number. Do not put a prompt, a model name or a network call below the app layer.
+- **Skills are documents, not code.** A `skills/<name>/SKILL.md` starts with one `#` heading
+  whose text is its description, then the procedure: the order of commands, what the answer
+  means, and the traps. They are loaded at run time, so a new skill needs no rebuild; they are
+  listed by name in the system prompt and read only when a job needs one.
 - **Layering** is enforced by `cargo xtask layers`. A crate may depend only on a strictly
   lower layer, and nothing at or below `LAST_NON_UI_LAYER` may depend on egui, eframe,
   winit or rfd. Register every new crate in `xtask/src/layers.rs`.
@@ -107,6 +117,8 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 ```sh
 cargo run --release -p stkcraft                # the desktop app
 cargo run --release -p stkcraft -- --help      # the command line
+cargo run --release -p stkcraft -- mcp         # serve the engine to a model over stdio
+cargo run --release -p stkcraft -- ask "..."   # ask the model, with the engine as its tools
 cargo xtask ci                                 # the full gate
 cargo xtask version                            # print the workspace version
 cargo xtask version bump                       # bump it, smallest component

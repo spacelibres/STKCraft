@@ -17,6 +17,8 @@ stkcraft-engine.workspace = true
 stkcraft-viewport.workspace = true
 # The agent interface: `stkcraft mcp` serves the command registry over stdio.
 stkcraft-mcp.workspace = true
+# `stkcraft ask` puts a model in front of the same tools an MCP client sees.
+stkcraft-agent.workspace = true
 log.workspace = true
 
 # The window. `default-features = false` plus explicit features because the default set pulls in
