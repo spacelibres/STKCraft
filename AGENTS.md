@@ -117,6 +117,13 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   winit or rfd. Register every new crate in `xtask/src/layers.rs`.
 - **The UI is thin and swappable.** Panels read engine state and act by running commands.
   The 3D viewport is a separate crate so it can be replaced without touching the engine.
+- **The window uses the family's UI stack, not a local one.** `egui`/`eframe`/`winit` come from the
+  pinned `storytold/egui` fork in `[patch.crates-io]`, the shared library is `craft-ui` from
+  `storytold/craft-libs` at the one revision every `craft-*` dependency uses, and text is drawn by
+  `craft_ui::fonts::UiFonts` — which searches the machine's installed fonts, the only reason a CJK
+  interface renders at all. Do not add a second font stack, a private theme token set or a widget
+  that exists in `craft-ui`. `STKCRAFT_FONTS=off` renders without installed fonts, for a
+  machine-independent screenshot. See `docs/standards.md` §5.
 - **Time goes through `stkcraft-time`.** Never hand-roll calendar conversion, leap seconds
   or time-scale offsets; never use a bare `f64` to mean "seconds since some epoch".
 - **Units are types.** `Angle`, `Distance`, `Duration` and `EpochOffset` exist so a

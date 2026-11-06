@@ -454,6 +454,9 @@ pub fn screenshot_panels(app: &mut App, path: &str) -> Result<(), String> {
     app.open_assistant();
     let gpu = Gpu::open()?;
     let context = egui::Context::default();
+    // The family font stack, so an image of a Chinese interface is drawn with the faces the window
+    // draws with rather than as tofu.
+    app.install_fonts(&context);
     let screen = egui::vec2(WIDTH as f32, HEIGHT as f32);
     let raw_input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),

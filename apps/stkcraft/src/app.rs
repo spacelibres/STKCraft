@@ -76,6 +76,9 @@ pub struct App {
     translation: Option<crate::translate::Run>,
     /// What the language section says when a translation finished or could not start.
     translation_status: Option<(bool, String)>,
+    /// The language the font stack was built for; a change to the language rebuilds it, because the
+    /// Han faces are ordered by language.
+    fonts_for: Option<String>,
 }
 
 impl App {
@@ -119,7 +122,21 @@ impl App {
             prefs,
             translation: None,
             translation_status: None,
+            fonts_for: None,
         }
+    }
+
+    /// Install the family font stack for the current language, if it is not already installed.
+    ///
+    /// Called from the window and from the offscreen verification path, so an image of a Chinese
+    /// interface is drawn with the same faces the window uses. Without it `egui` has a Latin face
+    /// only, and every translated label is tofu.
+    pub fn install_fonts(&mut self, ctx: &egui::Context) {
+        if self.fonts_for.as_deref() == Some(self.language.as_str()) {
+            return;
+        }
+        crate::fonts::install(ctx, &self.language);
+        self.fonts_for = Some(self.language.clone());
     }
 
     /// Rebuild the catalogs from what the build embeds and what this person has generated.
@@ -185,6 +202,8 @@ impl App {
     /// forget the language someone just picked, and one file write per click is nothing.
     fn set_language(&mut self, language: &stkcraft_i18n::Language) {
         language.code().clone_into(&mut self.language);
+        // The font stack is language-dependent (Han glyph shapes), so the next frame rebuilds it.
+        self.fonts_for = None;
         self.prefs.language = Some(self.language.clone());
         if let Err(error) = self.prefs.save() {
             eprintln!("stkcraft: {error}");
@@ -301,6 +320,7 @@ impl App {
     /// Kept as one function for the same reason the scene is: an image that laid the panels out
     /// itself would be evidence of a layout the window does not have.
     pub fn panels(&mut self, ui: &mut egui::Ui) {
+        self.install_fonts(ui.ctx());
         self.poll_translation();
         if self.translation.is_some() {
             // A translation is a network round trip; keep drawing so its result is picked up.
@@ -558,6 +578,8 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Before anything is drawn: a label in a script no installed face covers is tofu.
+        self.install_fonts(ui.ctx());
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_update).as_secs_f64();
         self.last_update = now;

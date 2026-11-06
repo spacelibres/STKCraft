@@ -33,6 +33,7 @@ mod catalogs {
 mod assistant;
 mod cli;
 mod extensions;
+mod fonts;
 mod frame_builder;
 mod prefs;
 mod render;

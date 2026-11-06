@@ -127,6 +127,15 @@ strings with my key**, which:
 Nothing is committed and nothing ships: it is your machine, your key and your language. Run it again
 after an update and it asks only about the strings that are new.
 
+## Fonts
+
+The interface draws with the family font stack (`craft_ui::fonts::UiFonts`): `egui`'s faces, then the
+faces for the language, then the fonts installed on the machine. `egui` alone carries a Latin face,
+so without the stack every translated label is tofu — which is what this project looked like until
+0.1.30. A shipped catalog's characters are checked by
+`craft_ui::fonts::missing_glyphs` in `cargo test`, and `STKCRAFT_FONTS=off` reproduces the tofu on
+purpose.
+
 ## Adding a language
 
 1. Pick the code: lowercase BCP 47, as the family requires — `de`, `zh`, `pt-br`, `zh-hans`,

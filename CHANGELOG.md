@@ -9,6 +9,52 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.30] — The interface is drawn by the family's stack, and Chinese looks like Chinese
+
+A translated interface was tofu boxes. `egui` ships a Latin face and nothing else, so every Chinese,
+Japanese, Korean, Arabic and Thai label rendered as `▯▯▯▯` — the catalog was right and the pixels were
+wrong. The window now installs the ArtCraft family's font stack, which searches the fonts installed
+on the machine, and the same stack is what every sibling uses.
+
+The other half of this release is the unification it took to get there: `egui`, `eframe` and `winit`
+now come from the pinned `storytold/egui` fork that every Craft app builds against, and the shared UI
+library is `craft-ui` from `storytold/craft-libs` at the one revision the family pins.
+
+### Added
+
+- **`craft_ui::fonts::UiFonts` installs the interface fonts**: the app's faces, the faces for the
+  interface language and the other scripts, then the machine's installed fonts, then emoji and
+  `egui`'s defaults. STKCraft supplies what the library asks an app for — the scripts its languages
+  are written in, and which language is on screen — and nothing else.
+- **A coverage test over every shipped catalog**, using the family's `missing_glyphs`: a character
+  the fonts cannot draw fails the build with its codepoint and the string it came from, instead of
+  shipping as a box.
+- **`STKCRAFT_FONTS=off`**, the family's reproducible-text mode: the same frame on every machine, and
+  the fastest way to tell a glyph problem from a real one.
+
+### Changed
+
+- **`[patch.crates-io]` pins `storytold/egui`** (with `storytold/winit`) at the revision the family
+  documents, so a widget behaves here as it does in the siblings and a fix lands once.
+- **`craft-ui` replaces the local furniture** the window had started to grow. `docs/standards.md`
+  gains §5, which states the rule: the window uses the family's stack, not a local arrangement of
+  `egui`.
+
+### Fixed
+
+- **Translated text renders.** Verified rather than asserted: the same frame rendered with
+  `STKCRAFT_FONTS=off` shows hollow `▯` boxes and with the stack shows the Han characters, and the
+  scene images are byte-identical to the ones from before the fork swap — so the swap changed the
+  text and nothing else.
+
+### Not built yet
+
+- **`craft-ui`'s theme tokens and widgets are adopted for text only**; the panels still draw their
+  own layout and colours, which is the next step of the unification rather than part of this one.
+- **No font file is committed**, as the family requires: fonts come from the machine or from
+  `storytold/craft-fonts` as an optional build input.
+- **Number and date localization, right-to-left layout and the extension store** are unchanged.
+
 ## [0.1.29] — Your key, your language, in the window
 
 Until now a translation was a developer's job: `cargo xtask i18n translate`, in a checkout, with

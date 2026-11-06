@@ -19,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.29"
+version = "0.1.30"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -28,19 +28,19 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-core = { path = "crates/core", version = "0.1.29" }
-stkcraft-time = { path = "crates/time", version = "0.1.29" }
-stkcraft-body = { path = "crates/body", version = "0.1.29" }
-stkcraft-ephemeris = { path = "crates/ephemeris", version = "0.1.29" }
-stkcraft-extensions = { path = "crates/extensions", version = "0.1.29" }
-stkcraft-frames = { path = "crates/frames", version = "0.1.29" }
-stkcraft-i18n = { path = "crates/i18n", version = "0.1.29" }
-stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.29" }
-stkcraft-access = { path = "crates/access", version = "0.1.29" }
-stkcraft-engine = { path = "crates/engine", version = "0.1.29" }
-stkcraft-mcp = { path = "crates/mcp", version = "0.1.29" }
-stkcraft-agent = { path = "crates/agent", version = "0.1.29" }
-stkcraft-viewport = { path = "crates/viewport", version = "0.1.29" }
+stkcraft-core = { path = "crates/core", version = "0.1.30" }
+stkcraft-time = { path = "crates/time", version = "0.1.30" }
+stkcraft-body = { path = "crates/body", version = "0.1.30" }
+stkcraft-ephemeris = { path = "crates/ephemeris", version = "0.1.30" }
+stkcraft-extensions = { path = "crates/extensions", version = "0.1.30" }
+stkcraft-frames = { path = "crates/frames", version = "0.1.30" }
+stkcraft-i18n = { path = "crates/i18n", version = "0.1.30" }
+stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.30" }
+stkcraft-access = { path = "crates/access", version = "0.1.30" }
+stkcraft-engine = { path = "crates/engine", version = "0.1.30" }
+stkcraft-mcp = { path = "crates/mcp", version = "0.1.30" }
+stkcraft-agent = { path = "crates/agent", version = "0.1.30" }
+stkcraft-viewport = { path = "crates/viewport", version = "0.1.30" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.
@@ -56,6 +56,10 @@ log = "0.4"
 # changes the pipeline descriptors and the WGSL entry-point surface.
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 egui = "0.37"
+# The ArtCraft family's shared UI library: the font stack every Craft app installs (including
+# installed system fonts, which is how a CJK interface renders at all), the theme tokens, and the
+# widgets the siblings share. One craft-libs revision for every craft-* crate, as the family does.
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", features = ["system_fonts"] }
 # The viewport draws inside `egui`'s own render pass, which is what `egui-wgpu` paint callbacks
 # are for. Pinned alongside `egui` because the two share the `wgpu` types in their signatures.
 egui-wgpu = "0.37"
@@ -98,3 +102,18 @@ inherits = "release"
 opt-level = "z"
 lto = "fat"
 codegen-units = 1
+
+# The ArtCraft family's reviewed egui stack. Every Craft app builds against the same fork revision,
+# so a widget behaves the same in all of them and a fix lands once; `craft-ui`'s font stack and the
+# docking widgets depend on the fork's additions. The revisions are pinned to the one the family's
+# `craft-ai-integrations`/`craft-libs` documents; bumping them is a review, not a caret range.
+[patch.crates-io]
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

@@ -15,6 +15,7 @@ here.
 | Agent + skills + MCP | `storytold/craft-ai-integrations`, `craft-skills` | `cargo xtask ci`, `cargo xtask layers` | built, see §2 |
 | Extensions and plug-ins | `storytold/craft-extensions` package contract | `cargo test` (feature and trust tests) | partial, see §3 |
 | API documentation | this document, §4 | `cargo xtask api-docs check` | built, see §4 |
+| UI library and fonts | `storytold/craft-libs` (`craft-ui`), `storytold/egui` fork | `cargo test`, `[patch.crates-io]` | built |
 | Layering | `AGENTS.md`, `xtask/src/layers.rs` | `cargo xtask layers` | built |
 | Version and release | `AGENTS.md` | `cargo xtask version`, `cargo xtask release` | built |
 
@@ -119,7 +120,32 @@ a shared on-disk store, themes carrying no code, and plug-ins whose v1 permissio
   It does not yet document every public item's signature, and command parameter *descriptions* stay
   English in the reference — they are translated in the interface, where the catalogs carry them.
 
-## 5. What every rule here has in common
+## 5. The interface library
+
+**The window is drawn with the family's stack, not with a local arrangement of `egui`.**
+
+- **The egui version is the family's fork**, pinned by revision in `[patch.crates-io]` — the same
+  `storytold/egui` commit every Craft app builds against, with `storytold/winit` beside it. A widget
+  behaves the same in all of them, and a fix lands once instead of once per app. The revision is a
+  review, never a caret range; bumping it is its own change.
+- **The UI library is `craft-ui`** from `storytold/craft-libs`, at the one revision every
+  `craft-*` dependency uses. An app that invented its own theme tokens, font stack or combo box
+  would drift from eight siblings at once.
+- **Text is drawn by the family font stack** (`craft_ui::fonts::UiFonts`): the app's faces, then the
+  shipped faces for the interface language and the other scripts, then **the fonts installed on the
+  machine**, then emoji and `egui`'s defaults. `egui` alone ships a Latin face, so a Chinese,
+  Japanese, Korean, Arabic or Thai label is tofu boxes without this — which is precisely what this
+  project shipped until 0.1.30.
+- **A shipped catalog's characters are covered by a test**: `craft_ui::fonts::missing_glyphs` over
+  every embedded catalog, so "the Chinese looks wrong" becomes a named character and a named string.
+  `STKCRAFT_FONTS=off` turns the installed fonts off, which is the reproducible-tofu switch: text
+  that draws the same on every machine, and the fastest way to prove a glyph problem is or is not
+  the machine's fonts.
+- **No font file is committed.** Fonts come from the machine, or from
+  [`storytold/craft-fonts`](https://github.com/storytold/craft-fonts) as an optional build input —
+  the family rule every Craft app follows.
+
+## 6. What every rule here has in common
 
 - **The gate is the enforcement.** A rule that `cargo xtask ci` does not check is a rule that will be
   broken by the next contributor in good faith. When adding a rule, add the check.
