@@ -303,7 +303,8 @@ impl Server {
                 "description": "Search the user's own documents — their requirements, data sheets, \
                                 notes — for passages about a question. Call this BEFORE answering \
                                 anything factual or numeric, then quote what it returns and cite \
-                                `path:lines a-b`. If it reports that nothing matched, say so \
+                                it exactly as printed — `path:lines a-b`, or `path:page P, \
+                                lines a-b` for a PDF. If it reports that nothing matched, say so \
                                 plainly instead of answering from memory.",
                 "inputSchema": {
                     "type": "object",
@@ -452,7 +453,8 @@ impl Server {
                 } else {
                     format!(
                         "{} passage(s) from the user's documents, best first. Quote them and cite \
-                         `path:lines a-b`.",
+                         each one exactly as it is printed here — `path:lines a-b`, or \
+                         `path:page P, lines a-b` for a PDF.",
                         search.hits.len()
                     )
                 };
@@ -474,6 +476,7 @@ impl Server {
                         .iter()
                         .map(|hit| json!({
                             "path": hit.path,
+                            "page": hit.page,
                             "line_start": hit.line_start,
                             "line_end": hit.line_end,
                             "score": hit.score,
@@ -973,6 +976,8 @@ mod tests {
                 stkcraft_agent_knowledge::Document {
                     path: "sensor-spec.md".to_owned(),
                     bytes: 80,
+                    pages: None,
+                    limited: false,
                     chunks: stkcraft_agent_knowledge::chunk(
                         "Sensor\n\nMaximum off-nadir angle is 45 degrees.",
                     ),
@@ -980,6 +985,8 @@ mod tests {
                 stkcraft_agent_knowledge::Document {
                     path: "thermal.txt".to_owned(),
                     bytes: 40,
+                    pages: None,
+                    limited: false,
                     chunks: stkcraft_agent_knowledge::chunk(
                         "Thermal\n\nRadiator area 2.4 square metres.",
                     ),

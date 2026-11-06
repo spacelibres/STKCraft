@@ -86,9 +86,10 @@ the product.
 - **Every factual or numeric question starts with a search of the library.** The agent's prompt makes
   it rule one, and the tool is named in the same prompt. A model that answers first and cites
   afterwards has already produced the answer nobody can check.
-- **A hit is a citation, not a summary**: document path and line range, so a person opens the file and
-  reads the sentence the model used. `stkcraft knowledge "<query>"` prints the same citations the
-  model sees.
+- **A hit is a citation, not a summary**: document path and line range — or page and line range, when
+  the document is a PDF — so a person opens the file and reads the sentence the model used. `paper.pdf:
+  page 7, lines 3-9` is a place in a paper; `notes.md:lines 12-18` is a place in a file.
+  `stkcraft knowledge "<query>"` prints the same citations the model sees.
 - **"Nothing matched" is an answer.** The search reports `missed`, the tool says so in words, and the
   prompt requires the model to say the library does not cover the question before it offers general
   knowledge — labelled as general knowledge. A retrieval that always returns something is a retrieval
@@ -97,11 +98,11 @@ the product.
   project cares about are exact tokens and because a test can only assert an order that is the same on
   every machine.
 - **Hostile input is bounded before it is read**: file count, file size, depth, no symlinks below the
-  root, UTF-8 only. Pointing the library at `/` is slow, not fatal.
+  root, and for a PDF its pages, glyphs and characters. Pointing the library at `/` is slow, not fatal.
 - **The documents win ties.** Where a document disagrees with the model's general knowledge, the
   answer follows the document and says which one.
-- **Not built:** PDF/DOCX/XLSX text extraction (extract beside them), page-level citations, an index
-  cache, and the side-by-side comparison of a document's answer with the engine's computation.
+- **Not built:** DOCX/XLSX text extraction (extract beside them), OCR for a scanned PDF that carries no
+  text layer, and the side-by-side comparison of a document's answer with the engine's computation.
   `docs/design/knowledge.md` states each limit.
 
 ## 3. Extensions and plug-ins

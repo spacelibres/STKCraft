@@ -25,6 +25,13 @@ Used for serialization. Licensed under the MIT License or the Apache License, Ve
 at your option.
 https://github.com/serde-rs/serde
 
+craft-pdf and the hayro PDF backends
+------------------------------------
+PDF reading, from the ArtCraft family's shared reader (`craft-pdf` in
+https://github.com/storytold/craft-libs) over the patched `hayro` parser and interpreter
+(https://github.com/LaurenzV/hayro). Licensed under the MIT License or the Apache License,
+Version 2.0, at your option.
+
 Reference standards
 -------------------
 STKCraft implements published standards rather than any product's implementation:

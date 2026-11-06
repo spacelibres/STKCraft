@@ -461,7 +461,8 @@ impl<M: ChatModel> Agent<M> {
              Rules:\n\
              1. **Read the user's own documents first.** Before answering any factual or numeric \
              question, call `knowledge.search` with the words the document would use. When it returns \
-             passages, quote them and cite `path:lines a-b`. When it reports that nothing matched, \
+             passages, quote them and cite each exactly as it is printed — `path:lines a-b`, or \
+             `path:page P, lines a-b` for a PDF. When it reports that nothing matched, \
              say so plainly, and only then may you answer from general knowledge — labelled as \
              general knowledge, not as the library's.\n\
              2. Every number you report must come from a tool call or a cited passage. Never \

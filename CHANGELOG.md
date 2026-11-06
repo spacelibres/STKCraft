@@ -9,6 +9,69 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.38] — The knowledge base reads papers, and cites the page
+
+A paper is a PDF. Until now the library read text and nothing else, so the one kind of document a
+mission engineer actually works from — the standard, the paper, the interface control document — had
+to be converted by hand before it could be searched. This release opens PDFs, and it cites them the
+way a person cites a paper: by page.
+
+The reader is not new code. It is `craft-pdf`, the ArtCraft family's shared reader over the patched
+`hayro` parser and interpreter, at the same `craft-libs` revision as `craft-ui` — so a PDF parses here
+exactly as it does in `pdfcraft`, and a defect in parsing is one fix for the whole family rather than
+six. What is new is the part a parser does not do: **placing text**.
+
+A PDF has no lines. It has glyphs, each painted at a position with a font and a size, in the order the
+generator wrote them — which for a two-column paper is column-interleaved. So the interpreter's device
+is implemented, every glyph arrives with the matrix that put it there, and the assembly works from the
+geometry:
+
+- **lines** are runs of glyphs whose baselines agree to within a fraction of the type size;
+- **word breaks** are the gap left over after the previous glyph's own advance, past a tenth of an em
+  — measured against the font's advance, because an `M` advances three times as far as an `i` and
+  comparing origins alone put a space before every wide letter;
+- **paragraph breaks** are vertical gaps past the line pitch, which is what keeps a paragraph whole
+  when the page is cut into passages;
+- **columns** are read one at a time. Fragments are split at gaps wider than an em, and a page is
+  ordered column-major when a vertical strip no fragment crosses divides it into groups that each hold
+  a real share of it. A page with no such gutter — single column, or a table — is read line by line.
+  Both directions have a test, because a page read in the wrong order is text no human wrote.
+
+### Added
+
+- **`stkcraft_agent_knowledge::pdf`** — the text extractor: pages in reading order, with the glyphs,
+  the unnamed glyphs and the pages a bound cut short all reported. Tested against hand-built PDFs
+  (a line, a paragraph gap, a positioned word gap, a two-column page, a page with no text layer, a
+  truncated file) rather than a committed fixture nobody can read.
+- **Page-level citations.** A hit carries the page it came from, and `Hit::cite` prints
+  `paper.pdf:page 7, lines 3-9` — a place a person can turn to, which a line number in a PDF is not.
+  The same page travels through the index cache, so a warm open cites it identically.
+- **`Opened::skipped`** names the files in the knowledge directory that are *not* in the library and
+  says why: a scan with no text layer, a PDF that will not open, a binary dressed as text. One
+  unreadable paper does not make the other nine hundred unusable, and silence about it was the worse
+  answer.
+- **`stkcraft knowledge`** lists a paper with its page count, and prints the skipped files with their
+  reasons.
+
+### Changed
+
+- **The library reads content, not extensions.** A PDF named `.txt` is read as a PDF and a text file
+  named `.pdf` is refused as one, because the header is what a reader can trust.
+- **A PDF has its own size bound** (64 MiB against 8 MiB for text): a scanned paper is tens of
+  megabytes of images, and a text file of that size is not a document anybody reads.
+
+### Fixed
+
+- Nothing in this release changes a computed number. The engine is untouched.
+
+### Not built yet
+
+- **OCR.** A scanned page has text in its picture and none in its file; it is reported as a scan
+  rather than guessed at.
+- **The paper corpus fetcher** — pinning NASA NTRS and ESA documents with checksums into `data/` — is
+  the next step, and now it has somewhere to put what it downloads.
+- **The window does not open the control channel**, and `ui.screenshot` is not a method yet.
+
 ## [0.1.37] — A crate name you can read without opening the file
 
 No behaviour changed in this release. Every crate in the workspace was renamed so that its package name

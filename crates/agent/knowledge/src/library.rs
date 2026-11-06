@@ -1,8 +1,9 @@
 //! A directory of the user's documents, and the search over it.
 //!
 //! This is the whole point of the crate: a person drops the documents they trust into one folder —
-//! mission requirements, a sensor data sheet, a thermal memo, a colleagues' email saved as text —
-//! and every answer the platform gives can be checked against them.
+//! mission requirements, a sensor data sheet, a thermal memo, a colleague's paper — and every answer
+//! the platform gives can be checked against them. A paper is a PDF, so a PDF is read rather than
+//! skipped: [`crate::pdf`] turns its pages into lines, and a hit cites `paper.pdf:page 7, lines 3-9`.
 //!
 //! # Ranking
 //!
@@ -31,11 +32,12 @@ pub const DEFAULT_THRESHOLD: f64 = 0.6;
 
 /// The extensions the library reads.
 ///
-/// Text only, and deliberately so: a PDF needs a parser and a page model, and a citation into a PDF
-/// is a page and a paragraph rather than a line. Extract the text beside the file and it is indexed;
-/// the limit is stated rather than hidden.
-pub const READABLE_EXTENSIONS: [&str; 12] = [
+/// Text, and PDF: the two things a mission's documents actually are. A PDF is not decoded here — the
+/// family's reader is ([`crate::pdf`]) — but it is decided here, so one folder can hold a specification
+/// written in Markdown beside the paper it cites, and both are searchable.
+pub const READABLE_EXTENSIONS: [&str; 13] = [
     "txt", "md", "markdown", "csv", "tsv", "json", "log", "rst", "tex", "org", "adoc", "text",
+    "pdf",
 ];
 
 /// Limits applied before anything is read, so pointing the library at `/` is slow rather than fatal.
@@ -43,8 +45,13 @@ pub const READABLE_EXTENSIONS: [&str; 12] = [
 pub struct Limits {
     /// The most documents to read.
     pub max_documents: usize,
-    /// The largest single file to read.
+    /// The largest single text file to read.
     pub max_bytes: usize,
+    /// The largest single PDF to read.
+    ///
+    /// Larger than [`Self::max_bytes`] because a scanned paper is tens of megabytes of images while a
+    /// text file of that size is not a document anybody reads.
+    pub max_pdf_bytes: usize,
     /// The deepest directory nesting to follow.
     pub max_depth: usize,
     /// Whether to follow symbolic links below the root.
@@ -56,6 +63,7 @@ impl Default for Limits {
         Self {
             max_documents: 2_000,
             max_bytes: 8 << 20,
+            max_pdf_bytes: crate::pdf::Bounds::default().max_bytes,
             max_depth: 8,
             follow_links: false,
         }
@@ -70,6 +78,13 @@ pub struct Document {
     pub path: String,
     /// The file's size in bytes, for the listing.
     pub bytes: usize,
+    /// How many pages the document has, when it is paged.
+    ///
+    /// `None` for a text file, whose passages are cited by line in the file. A PDF's are cited by page,
+    /// so the count is what tells a reader the paper was read.
+    pub pages: Option<usize>,
+    /// Whether a bound cut the document short, so the pages read are not all of it.
+    pub limited: bool,
     /// The chunked text.
     pub chunks: Vec<Chunk>,
 }
@@ -79,7 +94,9 @@ pub struct Document {
 pub struct Hit {
     /// The document's path, relative to the library root.
     pub path: String,
-    /// One-based first line of the passage.
+    /// The one-based page the passage starts on, for a paged document.
+    pub page: Option<usize>,
+    /// One-based first line of the passage, within the page when it has one.
     pub line_start: usize,
     /// One-based last line of the passage, inclusive.
     pub line_end: usize,
@@ -90,10 +107,14 @@ pub struct Hit {
 }
 
 impl Hit {
-    /// `path:lines 12-18`, the form a citation is printed in.
+    /// `path:lines 12-18`, or `path:page 7, lines 3-9`, the form a citation is printed in.
     #[must_use]
     pub fn cite(&self) -> String {
-        format!("{}:lines {}-{}", self.path, self.line_start, self.line_end)
+        format!(
+            "{}:{}",
+            self.path,
+            crate::chunk::label(self.page, self.line_start, self.line_end)
+        )
     }
 }
 
@@ -121,6 +142,26 @@ pub struct Opened {
     pub library: Library,
     /// How many were parsed and how many came from the cache.
     pub reuse: crate::cache::Reuse,
+    /// The files that are in the directory and are not in the library, and why.
+    ///
+    /// Empty on a warm open: the file was dealt with when it was first read. Reported rather than
+    /// swallowed, because a person who added a paper and cannot find it deserves the reason.
+    pub skipped: Vec<Skipped>,
+}
+
+/// A file the library could not use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Skipped {
+    /// The path, relative to the library root.
+    pub path: String,
+    /// Why it is not in the library.
+    pub reason: String,
+}
+
+impl std::fmt::Display for Skipped {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} ({})", self.path, self.reason)
+    }
 }
 
 /// The user's documents, indexed for search.
@@ -207,20 +248,22 @@ impl Library {
                     threshold: DEFAULT_THRESHOLD,
                 },
                 reuse,
+                skipped: Vec::new(),
             });
         }
         // Cold: read and index every file, then remember the whole thing.
         let mut documents = Vec::with_capacity(files.len());
+        let mut skipped = Vec::new();
         for file in &files {
-            let Ok(text) = std::fs::read_to_string(&file.absolute) else {
-                // Not UTF-8: a binary dressed as text, skipped rather than decoded on a guess.
-                continue;
-            };
-            documents.push(Document {
-                path: file.relative.clone(),
-                bytes: text.len(),
-                chunks: chunk(&text),
-            });
+            match read_document(file, limits) {
+                Ok(document) => documents.push(document),
+                // One unreadable paper must not make the other nine hundred unusable, and a person
+                // who added a file and cannot search it deserves the reason rather than silence.
+                Err(reason) => skipped.push(Skipped {
+                    path: file.relative.clone(),
+                    reason,
+                }),
+            }
         }
         let passaged = documents.len();
         let library = Self::from_documents(directory, documents);
@@ -236,6 +279,7 @@ impl Library {
                 parsed: passaged,
                 reused: 0,
             },
+            skipped,
         })
     }
 
@@ -321,6 +365,7 @@ impl Library {
                 let chunk = document.chunks.get(chunk)?;
                 Some(Hit {
                     path: document.path.clone(),
+                    page: chunk.page,
                     line_start: chunk.line_start,
                     line_end: chunk.line_end,
                     score,
@@ -360,16 +405,69 @@ impl Library {
 pub fn load_directory(directory: &Path, limits: Limits) -> Result<Vec<Document>, String> {
     let mut documents = Vec::new();
     for file in scan(directory, limits)? {
-        let Ok(text) = std::fs::read_to_string(&file.absolute) else {
-            continue;
-        };
-        documents.push(Document {
-            path: file.relative,
-            bytes: text.len(),
-            chunks: chunk(&text),
-        });
+        // A file that cannot be read is left out, as it is by [`Library::open_cached`]; that one
+        // reports why, and a caller that wants the reasons takes `Opened`.
+        if let Ok(document) = read_document(&file, limits) {
+            documents.push(document);
+        }
     }
     Ok(documents)
+}
+
+/// Read one file into a document, or say why it could not be.
+///
+/// Content decides, not the extension: a PDF named `.txt` and a text file named `.pdf` both exist, and
+/// the header is what a reader can trust. A PDF goes through the family's reader ([`crate::pdf`]) and
+/// keeps its page numbers; a text file is chunked by line.
+fn read_document(file: &File, limits: Limits) -> Result<Document, String> {
+    // The scan already refused anything over the PDF bound, which is the larger of the two, so one
+    // bounded read covers both kinds; the text bound is applied below, once the content has said
+    // which kind this is.
+    let bytes =
+        std::fs::read(&file.absolute).map_err(|error| format!("could not be read: {error}"))?;
+    if bytes.len() > limits.max_pdf_bytes {
+        return Err(format!(
+            "larger than the {}-byte limit",
+            limits.max_pdf_bytes
+        ));
+    }
+    if crate::pdf::looks_like_pdf(&bytes) {
+        return read_pdf(&file.relative, &bytes, limits);
+    }
+    if bytes.len() > limits.max_bytes {
+        return Err(format!("larger than the {}-byte limit", limits.max_bytes));
+    }
+    let Ok(text) = String::from_utf8(bytes) else {
+        // Not UTF-8: a binary dressed as text, skipped rather than decoded on a guess.
+        return Err("not UTF-8 text".to_owned());
+    };
+    Ok(Document {
+        path: file.relative.clone(),
+        bytes: text.len(),
+        pages: None,
+        limited: false,
+        chunks: chunk(&text),
+    })
+}
+
+/// Read a PDF into a document whose passages are cited by page.
+fn read_pdf(path: &str, bytes: &[u8], limits: Limits) -> Result<Document, String> {
+    let extracted = crate::pdf::extract(bytes, limits.max_pdf_bytes)
+        .map_err(|error| format!("a PDF that could not be read: {error}"))?;
+    if extracted.characters() == 0 {
+        // A scan with no OCR layer: there is text in the picture and none in the file, and indexing
+        // nothing while claiming the file is in the library is the worse answer.
+        return Err(
+            "a PDF with no text layer (a scan needs OCR before it can be searched)".to_owned(),
+        );
+    }
+    Ok(Document {
+        path: path.to_owned(),
+        bytes: bytes.len(),
+        pages: Some(extracted.pages.len()),
+        limited: extracted.skipped > 0,
+        chunks: crate::chunk::chunk_pages(&extracted.passages()),
+    })
 }
 
 /// One file the library would index: where it is, what it is called inside the library, and the
@@ -448,7 +546,13 @@ fn scan_into(
         {
             continue;
         }
-        if resolved.len() > limits.max_bytes as u64 {
+        // A PDF is allowed to be larger than a text file: a scanned paper is tens of megabytes.
+        let bound = if is_pdf(&path) {
+            limits.max_pdf_bytes
+        } else {
+            limits.max_bytes
+        };
+        if resolved.len() > bound as u64 {
             continue;
         }
         let modified = resolved
@@ -470,6 +574,13 @@ fn scan_into(
     Ok(())
 }
 
+/// Whether the extension says the file is a PDF, which decides which size bound applies before the
+/// content has been read.
+fn is_pdf(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+}
+
 /// Whether the extension is one the library reads.
 fn is_readable(path: &Path) -> bool {
     path.extension()
@@ -486,6 +597,8 @@ mod tests {
         Document {
             path: path.to_owned(),
             bytes: text.len(),
+            pages: None,
+            limited: false,
             chunks: chunk(text),
         }
     }
@@ -654,12 +767,18 @@ mod tests {
     }
 
     #[test]
-    fn only_text_extensions_are_read() {
+    fn text_and_pdf_are_the_two_kinds_of_document_read() {
         assert!(is_readable(Path::new("a.md")));
         assert!(is_readable(Path::new("b.CSV")));
-        assert!(!is_readable(Path::new("c.pdf")));
+        // A paper is a PDF, so a knowledge base that could not read one could not hold a paper.
+        assert!(is_readable(Path::new("c.pdf")));
         assert!(!is_readable(Path::new("d.bin")));
         assert!(!is_readable(Path::new("no-extension")));
+        // The size bound chosen before the content is read follows the extension, so a PDF gets the
+        // larger one: a scanned paper is tens of megabytes of images.
+        assert!(is_pdf(Path::new("c.pdf")));
+        assert!(is_pdf(Path::new("D.PDF")));
+        assert!(!is_pdf(Path::new("c.md")));
     }
 
     #[test]
@@ -674,7 +793,14 @@ mod tests {
             "Radiator 2.4 square metres.",
         )
         .expect("written");
-        std::fs::write(root.join("ignored.pdf"), "%PDF-1.7 binary").expect("written");
+        // A file that claims to be a PDF and is not: it is in the directory, it is not in the library,
+        // and `Opened::skipped` is where the reason is reported.
+        std::fs::write(root.join("broken.pdf"), "%PDF-1.7 not really").expect("written");
+        std::fs::write(
+            root.join("binary.md"),
+            [0xff_u8, 0xfe, 0x00, 0x01].as_slice(),
+        )
+        .expect("written");
         std::fs::write(root.join(".hidden.md"), "hidden").expect("written");
 
         let documents = load_directory(&root, Limits::default()).expect("loaded");
@@ -683,6 +809,93 @@ mod tests {
             .map(|document| document.path.as_str())
             .collect();
         assert_eq!(paths, vec!["notes/thermal.txt", "spec.md"]);
+
+        // The same directory through `Opened`, which says which files it could not use and why: a
+        // person who added a paper and cannot search it deserves the reason rather than silence.
+        let opened = Library::open_cached(&root, Limits::default(), None).expect("opened");
+        let reasons: Vec<(String, String)> = opened
+            .skipped
+            .iter()
+            .map(|skipped| (skipped.path.clone(), skipped.reason.clone()))
+            .collect();
+        assert_eq!(reasons.len(), 2, "{reasons:#?}");
+        assert_eq!(reasons[0].0, "binary.md");
+        assert!(reasons[0].1.contains("UTF-8"), "{}", reasons[0].1);
+        assert_eq!(reasons[1].0, "broken.pdf");
+        assert!(reasons[1].1.contains("PDF"), "{}", reasons[1].1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_paper_in_the_directory_is_searchable_and_cited_by_page() {
+        // The whole point of reading PDFs: a person drops a paper in the folder and the answer cites
+        // the page they can turn to, not a line number in a file that has no lines.
+        let root = std::env::temp_dir().join("stkcraft-knowledge-pdf");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a directory");
+        let first = crate::pdf::test_line("Maximum off-nadir angle is 45 degrees.", 720);
+        let second = crate::pdf::test_line("The swath is 1200 km at that angle.", 720);
+        std::fs::write(
+            root.join("paper.pdf"),
+            crate::pdf::test_pdf(&[first, second]),
+        )
+        .expect("written");
+
+        let opened = Library::open_cached(&root, Limits::default(), None).expect("opened");
+        assert!(opened.skipped.is_empty(), "{:#?}", opened.skipped);
+        let library = &opened.library;
+        let document = library.documents().first().expect("the paper");
+        assert_eq!(document.path, "paper.pdf");
+        assert_eq!(document.pages, Some(2), "the page count was not kept");
+        assert!(!document.limited);
+
+        let search = library.search("maximum off-nadir angle", 3);
+        assert!(!search.missed, "{search:#?}");
+        let best = search.hits.first().expect("a hit");
+        assert_eq!(best.path, "paper.pdf");
+        assert_eq!(best.page, Some(1));
+        assert_eq!(best.cite(), "paper.pdf:page 1, lines 1-1");
+        assert!(
+            best.text.contains("Maximum off-nadir angle"),
+            "{:?}",
+            best.text
+        );
+
+        // The second page answers about the swath, and its citation says page 2.
+        let search = library.search("swath 1200 km", 3);
+        let best = search.hits.first().expect("a hit");
+        assert_eq!(best.page, Some(2));
+        assert_eq!(best.cite(), "paper.pdf:page 2, lines 1-1");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_text_file_and_a_paper_share_one_library() {
+        let root = std::env::temp_dir().join("stkcraft-knowledge-mixed");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a directory");
+        std::fs::write(
+            root.join("sensor-spec.md"),
+            "Sensor specification\n\nRadiator area 2.4 square metres.",
+        )
+        .expect("written");
+        std::fs::write(
+            root.join("paper.pdf"),
+            crate::pdf::test_pdf(&[crate::pdf::test_line(
+                "Maximum off-nadir angle is 45 degrees.",
+                720,
+            )]),
+        )
+        .expect("written");
+
+        let library = Library::open(&root).expect("opened");
+        assert_eq!(library.documents().len(), 2);
+        // One cites a line in a file, the other a page in a paper, and neither invents the other's
+        // form.
+        let text_hit = library.search("radiator area", 2);
+        assert_eq!(text_hit.hits[0].cite(), "sensor-spec.md:lines 1-3");
+        let paper_hit = library.search("off-nadir angle", 2);
+        assert_eq!(paper_hit.hits[0].cite(), "paper.pdf:page 1, lines 1-1");
         let _ = std::fs::remove_dir_all(&root);
     }
 

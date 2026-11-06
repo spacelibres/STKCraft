@@ -19,10 +19,10 @@ Or point a session anywhere else:
 STKCRAFT_KNOWLEDGE=/path/to/documents cargo run --release -p stkcraft -- chat
 ```
 
-Every `.txt`, `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, `.log`, `.rst`, `.tex`, `.org`, `.adoc`
-and `.text` file under that directory is indexed, up to 8 MiB each, 2 000 files, 8 levels deep.
-Hidden files are skipped. Nothing is uploaded anywhere: the search is local, and only the passages a
-question retrieves are sent to the model.
+Every `.txt`, `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, `.log`, `.rst`, `.tex`, `.org`, `.adoc`,
+`.text` and `.pdf` file under that directory is indexed, up to 8 MiB each for text and 64 MiB for a
+PDF, 2 000 files, 8 levels deep. Hidden files are skipped. Nothing is uploaded anywhere: the search is
+local, and only the passages a question retrieves are sent to the model.
 
 ## Commands
 
@@ -39,6 +39,8 @@ the same session. An MCP client sees the library as two tools — `knowledge.sea
 
 - **Chunking** is by paragraph, with the line range kept, so a citation is `sensor-spec.md:lines 1-5`
   and a reader can open the file and read exactly those lines. A heading takes the paragraph below it.
+  A page of a PDF is chunked on its own, so a citation is `paper.pdf:page 7, lines 3-9` — a paragraph
+  does not continue across a page turn in a way a reader can follow.
 - **Tokens** are lowercased words with the punctuation a number needs (`0.5`, `1e-3`, `24 h`), and
   Chinese, Japanese and Korean text is indexed as characters and character pairs, because those
   languages do not put spaces between words.
@@ -49,14 +51,46 @@ the same session. An MCP client sees the library as two tools — `knowledge.sea
   instead, and the model is required to say the library does not cover the question. A search that
   always returns something is a search that always lies about its evidence.
 
+## Reading a PDF
+
+A paper is a PDF, and a knowledge base that cannot open one cannot hold a paper. The reading is done
+by the family's shared reader — `craft-pdf` over the patched `hayro` parser and interpreter, the same
+pair `pdfcraft` uses, at the same `craft-libs` revision as `craft-ui` — and what
+[`stkcraft_agent_knowledge::pdf`](../../crates/agent/knowledge/src/pdf.rs) adds is the part a parser
+does not do: **placing text**.
+
+- **A PDF has no lines.** It has glyphs, each painted at a position with a font and a size, in the
+  order the generator wrote them — which for a two-column paper is column-interleaved. So the
+  interpreter's device is implemented, every glyph arrives with the matrix that placed it, and the
+  matrix supplies the position and the type size the assembly needs:
+  - a **line** is a run of glyphs whose baselines agree to within a fraction of the type size;
+  - a **word break** is the gap left over after the previous glyph's own advance, past a tenth of an
+    em — measured against the font's advance, not against the distance between two origins, because an
+    `M` advances three times as far as an `i`;
+  - a **paragraph break** is a vertical gap past the line pitch, which is what keeps a paragraph whole.
+- **A two-column page is read one column at a time.** Fragments are split at gaps wider than an em, and
+  the page is ordered column-major when a vertical strip no fragment crosses divides it into groups
+  that each hold a real share of the page. A page with no such gutter — the single-column case, and a
+  table — is read line by line. The distinction has a test either way, because a page silently read in
+  the wrong order is text no human wrote.
+- **Work is bounded before it starts**: input size, pages (4 000), glyphs (4 000 000) and characters
+  (32 MiB). A document cut short says so: `Document.limited` is set and `stkcraft knowledge` prints
+  "read in part".
+- **A file that cannot be used is reported.** `Opened::skipped` names it and gives the reason — a scan
+  with no text layer, a PDF that will not open, a binary dressed as text — and `stkcraft knowledge`
+  prints the list. Indexing nothing while claiming the file is in the library is the worse answer.
+- **What the reader cannot do:** OCR. A scanned page has text in its picture and none in its file, and
+  that is reported as a scan rather than guessed at. Running headers and footers remain in the text,
+  because nothing distinguishes them from a first line; the citation is still the right page.
+
 ## What it deliberately does not do
 
 - **No embeddings.** A vector index needs a model to build, which makes retrieval non-deterministic
   and untestable — and the numbers this project cares about are exact tokens (a frequency, an angle, a
   file name), which lexical search matches better than a vector does.
-- **No PDF, DOCX or XLSX reading.** A citation into a PDF is a page and a paragraph, not a line, and
-  a parser for each format is a project of its own. Extract the text beside the file — `pdftotext
-  spec.pdf spec.txt` — and the library indexes it.
+- **No DOCX or XLSX reading.** Those are zip archives of XML with their own layout model; export to
+  text or CSV beside the original and the library indexes that. A PDF *is* read (above), including its
+  page numbers.
 - **No writing.** The library is read-only: the platform never edits, moves or deletes a document.
 
 ## A conversation outlives the process

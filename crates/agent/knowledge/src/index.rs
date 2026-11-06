@@ -354,6 +354,14 @@ impl<'a> Reader<'a> {
         ))
     }
 
+    pub(crate) fn take_byte(&mut self) -> Result<u8, String> {
+        let bytes = self.take(1)?;
+        bytes
+            .first()
+            .copied()
+            .ok_or_else(|| "the index ends early".to_owned())
+    }
+
     pub(crate) fn take_string(&mut self) -> Result<String, String> {
         let length = usize::try_from(self.take_u32()?).map_err(|_| "length overflow".to_owned())?;
         let bytes = self.take(length)?;

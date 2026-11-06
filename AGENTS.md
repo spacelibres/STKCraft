@@ -110,7 +110,8 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   extracted, so the macros take literals. Rules and format: `docs/standards.md` §1,
   `docs/guides/localization.md`.
 - **The user's documents come before the model's memory.** Anything factual or numeric starts with
-  `knowledge.search` over the person's own library, and the answer cites `path:lines a-b`. A search
+  `knowledge.search` over the person's own library, and the answer cites `path:lines a-b` — or
+  `paper.pdf:page 7, lines 3-9`, because a paper's place is a page and a file's is a line. A search
   that finds nothing is reported as nothing: the model says the library does not cover the question
   before it offers general knowledge, and never dresses memory up as a document. Rules:
   `docs/standards.md` §2a, `docs/design/knowledge.md`.

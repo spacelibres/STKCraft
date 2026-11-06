@@ -26,7 +26,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.37"
+version = "0.1.38"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -35,22 +35,32 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-core = { path = "crates/framework/core", version = "0.1.37" }
-stkcraft-time = { path = "crates/framework/time", version = "0.1.37" }
-stkcraft-astro-body = { path = "crates/astro/body", version = "0.1.37" }
-stkcraft-astro-ephemeris = { path = "crates/astro/ephemeris", version = "0.1.37" }
-stkcraft-extensions = { path = "crates/framework/extensions", version = "0.1.37" }
-stkcraft-storage = { path = "crates/framework/storage", version = "0.1.37" }
-stkcraft-astro-frames = { path = "crates/astro/frames", version = "0.1.37" }
-stkcraft-i18n = { path = "crates/framework/i18n", version = "0.1.37" }
-stkcraft-agent-control = { path = "crates/agent/control", version = "0.1.37" }
-stkcraft-agent-knowledge = { path = "crates/agent/knowledge", version = "0.1.37" }
-stkcraft-astro-sgp4 = { path = "crates/astro/sgp4", version = "0.1.37" }
-stkcraft-astro-access = { path = "crates/astro/access", version = "0.1.37" }
-stkcraft-astro-engine = { path = "crates/astro/engine", version = "0.1.37" }
-stkcraft-agent-mcp = { path = "crates/agent/mcp", version = "0.1.37" }
-stkcraft-agent-runtime = { path = "crates/agent/runtime", version = "0.1.37" }
-stkcraft-ui-viewport = { path = "crates/ui/viewport", version = "0.1.37" }
+stkcraft-core = { path = "crates/framework/core", version = "0.1.38" }
+stkcraft-time = { path = "crates/framework/time", version = "0.1.38" }
+stkcraft-astro-body = { path = "crates/astro/body", version = "0.1.38" }
+stkcraft-astro-ephemeris = { path = "crates/astro/ephemeris", version = "0.1.38" }
+stkcraft-extensions = { path = "crates/framework/extensions", version = "0.1.38" }
+stkcraft-storage = { path = "crates/framework/storage", version = "0.1.38" }
+stkcraft-astro-frames = { path = "crates/astro/frames", version = "0.1.38" }
+stkcraft-i18n = { path = "crates/framework/i18n", version = "0.1.38" }
+stkcraft-agent-control = { path = "crates/agent/control", version = "0.1.38" }
+stkcraft-agent-knowledge = { path = "crates/agent/knowledge", version = "0.1.38" }
+stkcraft-astro-sgp4 = { path = "crates/astro/sgp4", version = "0.1.38" }
+stkcraft-astro-access = { path = "crates/astro/access", version = "0.1.38" }
+stkcraft-astro-engine = { path = "crates/astro/engine", version = "0.1.38" }
+stkcraft-agent-mcp = { path = "crates/agent/mcp", version = "0.1.38" }
+stkcraft-agent-runtime = { path = "crates/agent/runtime", version = "0.1.38" }
+stkcraft-ui-viewport = { path = "crates/ui/viewport", version = "0.1.38" }
+
+# PDF reading, from the family's shared reader: the same `craft-pdf` the siblings use, over the
+# same patched reader backends, so a paper parses here exactly as it does in `pdfcraft`. Only the
+# reader and the interpreter are enabled — this app extracts text and never draws a page — which
+# keeps the rasteriser, and with it `wgpu`, out of the knowledge crate.
+craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", version = "=0.1.0", default-features = false, features = ["interpret"] }
+# The geometry types the PDF interpreter's device trait speaks in. Named directly because a device
+# signature contains them, and the version has to be the one `hayro-interpret` was built against or
+# the trait does not match.
+kurbo = "0.13"
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.
@@ -130,3 +140,14 @@ egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc7996
 egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+
+# The family's patched PDF reader backends, at the same `craft-libs` revision as `craft-ui`.
+# `craft-pdf` calls methods these forks add — the interpreter device's `actual_text`, the bounded
+# `Pdf::new_with_password_and_limits` — so an unpatched `hayro` from crates.io does not compile
+# against it. Cargo ignores dependency-local patches: these have to live in the consumer's root
+# manifest, which is why `craft-pdf`'s README states them as the consumer's obligation.
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", version = "=0.7.2" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", version = "=0.7.0" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", version = "=0.3.0" }
+hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", version = "=0.1.0" }
+hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", version = "=0.1.0" }

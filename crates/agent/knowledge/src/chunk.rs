@@ -23,6 +23,12 @@ pub const MIN_CHUNK_LINES: usize = 2;
 pub struct Chunk {
     /// Zero-based index of the chunk within its document.
     pub index: usize,
+    /// The one-based page the passage starts on, for a document that has pages.
+    ///
+    /// A text file has none, and its citation is a line range in the file. A PDF does: the lines are
+    /// numbered within the page, because that is what a reader can turn to — "page 7" is a place in a
+    /// paper, and "line 812" is a place in a file nobody can open.
+    pub page: Option<usize>,
     /// One-based first line, as an editor numbers them.
     pub line_start: usize,
     /// One-based last line, inclusive.
@@ -37,10 +43,21 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    /// A short label for a citation: `lines 12-18`.
+    /// A short label for a citation: `lines 12-18`, or `page 7, lines 3-9` in a paged document.
     #[must_use]
     pub fn lines_label(&self) -> String {
-        format!("lines {}-{}", self.line_start, self.line_end)
+        label(self.page, self.line_start, self.line_end)
+    }
+}
+
+/// The label a citation uses: `lines 12-18`, or `page 7, lines 3-9` in a paged document.
+///
+/// One function so a passage and a hit cannot print the same place two ways.
+#[must_use]
+pub fn label(page: Option<usize>, line_start: usize, line_end: usize) -> String {
+    match page {
+        Some(page) => format!("page {page}, lines {line_start}-{line_end}"),
+        None => format!("lines {line_start}-{line_end}"),
     }
 }
 
@@ -107,12 +124,35 @@ pub fn chunk(text: &str) -> Vec<Chunk> {
     chunks
 }
 
+/// Split a paged document — a PDF, whose text came out of [`crate::pdf`] — into citable chunks.
+///
+/// `pages` are one-based page numbers with the text of each page, in reading order. Each page is
+/// chunked on its own: a paragraph does not continue across a page turn in a way a reader can follow,
+/// and a citation that spanned one would send a person to two places at once. Every chunk remembers
+/// its page, so the citation reads `page 7, lines 3-9` instead of a line number in a file that has no
+/// lines.
+#[must_use]
+pub fn chunk_pages(pages: &[(usize, String)]) -> Vec<Chunk> {
+    let mut chunks: Vec<Chunk> = Vec::new();
+    for (number, text) in pages {
+        for chunk in chunk(text) {
+            chunks.push(Chunk {
+                index: chunks.len(),
+                page: Some(*number),
+                ..chunk
+            });
+        }
+    }
+    chunks
+}
+
 /// Build one chunk from a half-open line range.
 fn build(index: usize, start: usize, end: usize, lines: &[&str]) -> Chunk {
     let slice = lines.get(start..end).unwrap_or_default();
     let text = slice.join("\n");
     Chunk {
         index,
+        page: None,
         line_start: start + 1,
         line_end: end,
         text,
@@ -196,6 +236,46 @@ mod tests {
                 pair[1]
             );
         }
+    }
+
+    #[test]
+    fn a_paged_document_cites_the_page_it_came_from() {
+        let pages = vec![
+            (
+                1_usize,
+                "Sensor specification\n\nMaximum off-nadir angle is 45 degrees.\n".to_owned(),
+            ),
+            (
+                2,
+                "The swath is 1200 km.\nIt is measured at that angle.\n".to_owned(),
+            ),
+        ];
+        let chunks = chunk_pages(&pages);
+        assert_eq!(chunks.len(), 2, "{chunks:#?}");
+        // The heading takes the paragraph under it, on the page it is on.
+        assert_eq!(chunks[0].page, Some(1));
+        assert_eq!(chunks[0].lines_label(), "page 1, lines 1-3");
+        // The second page starts again at line 1, and says which page it is on.
+        assert_eq!(chunks[1].page, Some(2));
+        assert_eq!((chunks[1].line_start, chunks[1].line_end), (1, 2));
+        assert_eq!(chunks[1].lines_label(), "page 2, lines 1-2");
+        // The chunk indices are the document's, not the page's.
+        assert_eq!(
+            chunks.iter().map(|chunk| chunk.index).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn a_text_document_has_no_page_and_says_so_in_its_label() {
+        let chunks = chunk("one\ntwo\n");
+        assert_eq!(chunks[0].page, None);
+        assert_eq!(chunks[0].lines_label(), "lines 1-2");
+        // An empty page adds nothing, so a PDF whose pages hold no text yields no passages.
+        assert_eq!(
+            chunk_pages(&[(1, String::new()), (2, "\n\n".to_owned())]),
+            vec![]
+        );
     }
 
     #[test]

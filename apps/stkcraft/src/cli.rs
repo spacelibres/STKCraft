@@ -779,6 +779,20 @@ fn knowledge_library() -> Result<stkcraft_agent_knowledge::Library, String> {
     Ok(knowledge_opened()?.library)
 }
 
+/// Say which files in the directory are not in the library, and why.
+///
+/// A person who dropped a paper in the folder and cannot search it is owed the reason rather than a
+/// listing that quietly leaves it out.
+fn knowledge_skipped(opened: &stkcraft_agent_knowledge::Opened) {
+    if opened.skipped.is_empty() {
+        return;
+    }
+    println!("  {} file(s) not in the library:", opened.skipped.len());
+    for skipped in &opened.skipped {
+        println!("    {skipped}");
+    }
+}
+
 /// The library and what opening it cost, so the command can say whether the cache worked.
 fn knowledge_opened() -> Result<stkcraft_agent_knowledge::Opened, String> {
     let explicit = std::env::var("STKCRAFT_KNOWLEDGE")
@@ -801,6 +815,7 @@ fn knowledge_opened() -> Result<stkcraft_agent_knowledge::Opened, String> {
         return Ok(stkcraft_agent_knowledge::Opened {
             library: stkcraft_agent_knowledge::Library::default(),
             reuse: stkcraft_agent_knowledge::Reuse::default(),
+            skipped: Vec::new(),
         });
     }
     // The derived index is cached under the data directory, so a second run over a paper corpus is a
@@ -827,7 +842,8 @@ fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
                 library.root().display()
             );
             if library.is_empty() {
-                println!("  no documents: drop text, markdown or CSV files in that directory");
+                println!("  no documents: drop text, markdown, CSV or PDF files in that directory");
+                knowledge_skipped(&opened);
                 return Ok(());
             }
             println!(
@@ -838,13 +854,30 @@ fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
                 opened.reuse.reused
             );
             for document in library.documents() {
-                println!(
-                    "  {} ({} byte(s), {} passage(s))",
-                    document.path,
-                    document.bytes,
-                    document.chunks.len()
-                );
+                // A paper is cited by page, so its page count is part of what the listing says; a text
+                // file has none, and saying "0 page(s)" would be a lie about a document without pages.
+                match document.pages {
+                    Some(pages) => println!(
+                        "  {} ({} byte(s), {} page(s), {} passage(s){})",
+                        document.path,
+                        document.bytes,
+                        pages,
+                        document.chunks.len(),
+                        if document.limited {
+                            ", read in part: a bound was reached"
+                        } else {
+                            ""
+                        }
+                    ),
+                    None => println!(
+                        "  {} ({} byte(s), {} passage(s))",
+                        document.path,
+                        document.bytes,
+                        document.chunks.len()
+                    ),
+                }
             }
+            knowledge_skipped(&opened);
             Ok(())
         }
         Some(query) => {
