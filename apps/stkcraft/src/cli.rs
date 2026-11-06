@@ -118,6 +118,7 @@ COMMANDS
     control     Serve the control channel on loopback (`control --port 7979`)
     model       Show or change the model this installation uses:
                 `model --key <KEY>`, `--endpoint <URL>`, `--name <MODEL>`, `--clear`
+                `--protocol deepseek|compatible`, `--thinking enabled|disabled`
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
     version     Print the version
@@ -720,16 +721,22 @@ pub struct ModelRequest {
     endpoint: Option<String>,
     /// A model name to store.
     name: Option<String>,
+    /// An explicitly selected protocol.
+    protocol: Option<String>,
+    /// An explicitly selected thinking mode.
+    thinking: Option<String>,
     /// Remove the stored credential.
     clear: bool,
 }
 
-/// Parse `model [--key K] [--endpoint URL] [--name M] [--clear]`.
+/// Parse model connection, protocol and thinking settings without making a model request.
 fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
     let mut request = ModelRequest {
         key: None,
         endpoint: None,
         name: None,
+        protocol: None,
+        thinking: None,
         clear: false,
     };
     while let Some(flag) = arguments.next() {
@@ -742,6 +749,20 @@ fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocatio
             "--key" => request.key = Some(value("--key")?),
             "--endpoint" => request.endpoint = Some(value("--endpoint")?),
             "--name" => request.name = Some(value("--name")?),
+            "--protocol" => {
+                let selected = value("--protocol")?;
+                if !matches!(selected.as_str(), "deepseek" | "compatible") {
+                    return Err("--protocol must be deepseek or compatible".to_owned());
+                }
+                request.protocol = Some(selected);
+            }
+            "--thinking" => {
+                let selected = value("--thinking")?;
+                if !matches!(selected.as_str(), "enabled" | "disabled") {
+                    return Err("--thinking must be enabled or disabled".to_owned());
+                }
+                request.thinking = Some(selected);
+            }
             "--clear" => request.clear = true,
             other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
         }
@@ -765,6 +786,16 @@ fn model(request: &ModelRequest) -> Result<(), String> {
         prefs.model = Some(name.trim().to_owned());
         changed.push(format!("model {name}"));
     }
+    if let Some(protocol) = &request.protocol {
+        prefs.model_protocol = Some(protocol.clone());
+        changed.push(format!("protocol {protocol}"));
+    }
+    if let Some(thinking) = &request.thinking {
+        prefs.model_thinking = Some(thinking.clone());
+        changed.push(format!("thinking {thinking}"));
+    }
+    // Validate before any preference or credential mutation, including key-only/clear-only calls.
+    crate::prefs::validate_model_options(&prefs)?;
     if !changed.is_empty() {
         prefs.save()?;
     }
@@ -788,6 +819,10 @@ fn model(request: &ModelRequest) -> Result<(), String> {
                 env!("CARGO_PKG_VERSION"),
                 provider.model,
                 provider.base_url
+            );
+            println!(
+                "  protocol: {:?}; thinking: {:?}",
+                provider.options.protocol, provider.options.thinking
             );
             println!(
                 "  credential: {} ({}-byte stored or environment key, timeout {} s)",
@@ -1056,6 +1091,27 @@ fn app_demo_scenario() -> Result<stkcraft_astro_engine::Scenario, String> {
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_protocol_flags_are_parsed_without_a_credential() {
+        let result = parse_model(
+            ["--protocol", "deepseek", "--thinking", "enabled"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+        let Ok(Invocation::Model(request)) = result else {
+            panic!("protocol options were not accepted");
+        };
+        assert_eq!(request.protocol.as_deref(), Some("deepseek"));
+        assert_eq!(request.thinking.as_deref(), Some("enabled"));
+        for options in [
+            vec!["--protocol", "typo"],
+            vec!["--thinking", "turbo"],
+            vec!["--thinking"],
+        ] {
+            assert!(parse_model(options.into_iter().map(str::to_owned)).is_err());
+        }
+    }
 
     #[test]
     fn a_run_is_recorded_with_its_provenance_and_its_windows() {

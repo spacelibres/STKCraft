@@ -9,6 +9,33 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.83] — Explicit DeepSeek protocol and resumable tool thinking
+
+### Added
+
+- `stkcraft model --protocol deepseek|compatible --thinking enabled|disabled`, with matching
+  environment and saved settings, makes the wire protocol a deliberate choice. Saved settings
+  win over environment values; invalid modes are rejected before saving. Custom gateways keep
+  the original compatible request format unless explicitly opted into DeepSeek extensions.
+- DeepSeek reasoning fields survive tool rounds, final turns and local session resume without
+  becoming the answer, trace, summary or debug/error text. Enabled-mode tool responses missing
+  required protocol state fail before any tool executes; incompatible legacy thinking histories
+  are refused with a recovery choice instead of fabricated reasoning.
+
+### Changed
+
+- A fresh shipped configuration selects `deepseek-flash` with thinking explicitly disabled.
+  Existing saved model names are preserved. Developer translations share the provider adapter
+  and explicitly use ordinary mode; generic provider construction retains its old request shape.
+- Conversation-size accounting includes opaque reasoning and uses one saturating Unicode-aware
+  calculation for live and persisted messages.
+
+### Not built yet
+
+- This is protocol compatibility, verified with scripted models and request/session fixtures;
+  live model quality, usage accounting, output caps and cancellable bounded transport remain
+  separate stages. The runtime is still a single-model tool loop.
+
 ## [0.1.82] — Assistant results preserve edits made while they run
 
 ### Fixed

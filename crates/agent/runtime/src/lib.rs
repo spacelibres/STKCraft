@@ -128,7 +128,7 @@ pub fn command_id(function: &str) -> String {
 ///
 /// The same values are what a [`session::Session`] writes to disk, so a conversation survives the
 /// process: the transcript is this enum, one JSON object per line.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Message {
     /// The instruction the model starts from.
     System(String),
@@ -142,6 +142,8 @@ pub enum Message {
         text: String,
         /// The calls it asked for.
         calls: Vec<ToolCall>,
+        /// Opaque provider state, never displayed or summarized.
+        reasoning_content: Option<String>,
     },
     /// What a tool answered.
     Tool {
@@ -150,6 +152,56 @@ pub enum Message {
         /// The tool's output.
         content: String,
     },
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Assistant { text, calls, .. } => f
+                .debug_struct("Assistant")
+                .field("text", text)
+                .field("calls", calls)
+                .finish_non_exhaustive(),
+            Self::System(text) => f.debug_tuple("System").field(text).finish(),
+            Self::Summary(text) => f.debug_tuple("Summary").field(text).finish(),
+            Self::User(text) => f.debug_tuple("User").field(text).finish(),
+            Self::Tool { call_id, content } => f
+                .debug_struct("Tool")
+                .field("call_id", call_id)
+                .field("content", content)
+                .finish(),
+        }
+    }
+}
+
+/// Saturating Unicode character cost of retained protocol payloads, not a token count.
+#[must_use]
+pub fn message_characters(message: &Message) -> usize {
+    match message {
+        Message::System(text) | Message::Summary(text) | Message::User(text) => {
+            text.chars().count()
+        }
+        Message::Assistant {
+            text,
+            calls,
+            reasoning_content,
+        } => calls.iter().fold(
+            text.chars().count().saturating_add(
+                reasoning_content
+                    .as_deref()
+                    .map_or(0, |value| value.chars().count()),
+            ),
+            |cost, call| {
+                cost.saturating_add(call.id.chars().count())
+                    .saturating_add(call.name.chars().count())
+                    .saturating_add(call.arguments.to_string().chars().count())
+            },
+        ),
+        Message::Tool { call_id, content } => call_id
+            .chars()
+            .count()
+            .saturating_add(content.chars().count()),
+    }
 }
 
 /// One tool call the model asked for.
@@ -164,12 +216,81 @@ pub struct ToolCall {
 }
 
 /// What one model turn produced.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default)]
 pub struct Turn {
     /// The text of the answer, possibly empty.
     pub text: String,
     /// The tool calls to run before the next turn.
     pub calls: Vec<ToolCall>,
+    /// Opaque provider state, never displayed or summarized.
+    pub reasoning_content: Option<String>,
+}
+
+impl std::fmt::Debug for Turn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Turn")
+            .field("text", &self.text)
+            .field("calls", &self.calls)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The explicitly selected wire protocol; a model name never implies capability.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ProviderProtocol {
+    /// The original generic chat-completions shape.
+    #[default]
+    OpenAiCompatible,
+    /// `DeepSeek`'s documented thinking and reasoning replay extensions.
+    DeepSeek,
+}
+
+/// Explicit `DeepSeek` thinking selection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ThinkingMode {
+    /// Request thinking mode.
+    Enabled,
+    /// Request ordinary mode.
+    #[default]
+    Disabled,
+}
+
+/// Credential-free provider protocol options.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProviderOptions {
+    /// Wire protocol to use.
+    pub protocol: ProviderProtocol,
+    /// Thinking selection, meaningful only for `DeepSeek`.
+    pub thinking: ThinkingMode,
+}
+
+impl ProviderOptions {
+    /// Resolve explicit strings and endpoint defaults, shared by environment and app settings.
+    ///
+    /// # Errors
+    /// Unknown explicit modes, or thinking enabled on the compatible protocol.
+    pub fn resolve(
+        base_url: &str,
+        protocol: Option<&str>,
+        thinking: Option<&str>,
+    ) -> Result<Self, String> {
+        let protocol = match protocol {
+            Some("deepseek") => ProviderProtocol::DeepSeek,
+            Some("compatible") => ProviderProtocol::OpenAiCompatible,
+            Some(_) => return Err("model protocol must be deepseek or compatible".to_owned()),
+            None if base_url == DEEPSEEK_BASE_URL => ProviderProtocol::DeepSeek,
+            None => ProviderProtocol::OpenAiCompatible,
+        };
+        let thinking = match thinking {
+            Some("enabled") => ThinkingMode::Enabled,
+            Some("disabled") | None => ThinkingMode::Disabled,
+            Some(_) => return Err("model thinking must be enabled or disabled".to_owned()),
+        };
+        if protocol == ProviderProtocol::OpenAiCompatible && thinking == ThinkingMode::Enabled {
+            return Err("thinking enabled requires the deepseek protocol; select --protocol deepseek or --thinking disabled".to_owned());
+        }
+        Ok(Self { protocol, thinking })
+    }
 }
 
 /// Something that can answer a conversation.
@@ -188,15 +309,12 @@ pub trait ChatModel {
 
 /// A chat-completions endpoint, spoken over `curl`.
 ///
-/// One type for every OpenAI-compatible provider, because the shape of the protocol is the shape
-/// every one of them implements: a base URL, a model name and a credential. Which provider a person
-/// uses is therefore *configuration*, not code — the platform ships `DeepSeek` as the default and
-/// nothing in the loop knows the difference, which is what lets a mission shop point it at its own
-/// gateway without a rebuild.
+/// Generic construction preserves the OpenAI-compatible request shape. Provider extensions are
+/// selected explicitly through [`ProviderOptions`], independently of the model's name, so a custom
+/// gateway is never assumed to support `DeepSeek` reasoning replay.
 ///
-/// Nothing is retried silently and nothing is streamed: a request that fails is an error with the
-/// provider's own words in it (see `--fail-with-body` below), because a model call that quietly
-/// retried four times turns a wrong key into a two-minute hang.
+/// Nothing is retried silently and nothing is streamed. Errors report protocol fields or curl's
+/// process status without echoing response bodies, which can contain opaque reasoning.
 #[derive(Clone)]
 pub struct Provider {
     /// The endpoint: an OpenAI-compatible `/chat/completions` URL.
@@ -207,6 +325,8 @@ pub struct Provider {
     pub api_key: String,
     /// How long one request may take, in seconds.
     pub timeout_seconds: u64,
+    /// Explicit wire protocol options.
+    pub options: ProviderOptions,
 }
 
 impl std::fmt::Debug for Provider {
@@ -219,6 +339,7 @@ impl std::fmt::Debug for Provider {
             .field("model", &self.model)
             .field("api_key", &format_args!("<{} bytes>", self.api_key.len()))
             .field("timeout_seconds", &self.timeout_seconds)
+            .field("options", &self.options)
             .finish()
     }
 }
@@ -226,7 +347,7 @@ impl std::fmt::Debug for Provider {
 /// The default provider, so a person who sets only a key gets a working model.
 pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1/chat/completions";
 /// The default model name.
-pub const DEEPSEEK_MODEL: &str = "deepseek-chat";
+pub const DEEPSEEK_MODEL: &str = "deepseek-flash";
 
 impl Provider {
     /// A provider with an explicit endpoint, model and credential.
@@ -241,7 +362,41 @@ impl Provider {
             model: model.into(),
             api_key: api_key.into(),
             timeout_seconds: 120,
+            options: ProviderOptions::default(),
         }
+    }
+
+    /// Select extensions explicitly; construction itself never infers endpoint capabilities.
+    #[must_use]
+    pub fn with_options(mut self, options: ProviderOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Check compatibility before opening a network connection.
+    fn validate_history(&self, messages: &[Message]) -> Result<(), String> {
+        if self.options.protocol == ProviderProtocol::OpenAiCompatible
+            && self.options.thinking == ThinkingMode::Enabled
+        {
+            return Err("thinking enabled requires the deepseek protocol".to_owned());
+        }
+        if self.options.protocol == ProviderProtocol::DeepSeek && self.options.thinking == ThinkingMode::Enabled && messages.iter().any(|message| matches!(message, Message::Assistant { calls, reasoning_content: None, .. } if !calls.is_empty())) {
+            return Err("cannot resume DeepSeek thinking with assistant tool calls missing reasoning_content; start a new session or explicitly select --thinking disabled".to_owned());
+        }
+        Ok(())
+    }
+
+    /// Validate response protocol state before handing any calls to the agent's dispatcher.
+    fn parse_turn(&self, response: &str) -> Result<Turn, String> {
+        let turn = parse_response(response)?;
+        if self.options.protocol == ProviderProtocol::DeepSeek
+            && self.options.thinking == ThinkingMode::Enabled
+            && !turn.calls.is_empty()
+            && turn.reasoning_content.is_none()
+        {
+            return Err("DeepSeek thinking tool response is missing reasoning_content; no tool calls were executed; retry in a new session or explicitly select --thinking disabled".to_owned());
+        }
+        Ok(turn)
     }
 
     /// Whether a credential is present at all.
@@ -251,7 +406,8 @@ impl Provider {
     }
 
     /// Read the configuration from `DEEPSEEK_API_KEY`, with the endpoint and model overridable by
-    /// `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL`.
+    /// `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL`. `DEEPSEEK_PROTOCOL` and `DEEPSEEK_THINKING`
+    /// select explicit protocol options; custom endpoints default to compatible mode.
     ///
     /// This is the fallback, not the primary path: the application reads the person's settings
     /// first, so a key stored in the settings works with no environment at all.
@@ -266,13 +422,18 @@ impl Provider {
                 "DEEPSEEK_API_KEY is not set; export it to give the agent a model".to_owned(),
             );
         };
-        Ok(Self {
-            base_url: std::env::var("DEEPSEEK_BASE_URL")
-                .unwrap_or_else(|_| DEEPSEEK_BASE_URL.to_owned()),
-            model: std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| DEEPSEEK_MODEL.to_owned()),
+        let base_url =
+            std::env::var("DEEPSEEK_BASE_URL").unwrap_or_else(|_| DEEPSEEK_BASE_URL.to_owned());
+        let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
+        let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+        let options =
+            ProviderOptions::resolve(&base_url, protocol.as_deref(), thinking.as_deref())?;
+        Ok(Self::new(
+            base_url,
+            std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| DEEPSEEK_MODEL.to_owned()),
             api_key,
-            timeout_seconds: 120,
-        })
+        )
+        .with_options(options))
     }
 
     /// The request body for a conversation.
@@ -288,8 +449,12 @@ impl Provider {
                     "content": format!("Earlier in this conversation, in summary:\n{text}"),
                 }),
                 Message::User(text) => json!({"role": "user", "content": text}),
-                Message::Assistant { text, calls } => {
-                    if calls.is_empty() {
+                Message::Assistant {
+                    text,
+                    calls,
+                    reasoning_content,
+                } => {
+                    let mut converted = if calls.is_empty() {
                         json!({"role": "assistant", "content": text})
                     } else {
                         json!({
@@ -304,7 +469,14 @@ impl Provider {
                                 },
                             })).collect::<Vec<_>>(),
                         })
+                    };
+                    if self.options.protocol == ProviderProtocol::DeepSeek
+                        && let Some(reasoning) = reasoning_content
+                        && let Some(object) = converted.as_object_mut()
+                    {
+                        object.insert("reasoning_content".to_owned(), json!(reasoning));
                     }
+                    converted
                 }
                 Message::Tool { call_id, content } => json!({
                     "role": "tool",
@@ -313,7 +485,7 @@ impl Provider {
                 }),
             });
         }
-        json!({
+        let mut body = json!({
             "model": self.model,
             "messages": converted,
             "tools": tools.iter().map(|tool| json!({
@@ -326,19 +498,30 @@ impl Provider {
             })).collect::<Vec<_>>(),
             "tool_choice": "auto",
             "temperature": 0.0,
-        })
+        });
+        // DeepSeek API thinking-mode guide, verified 2026-11-07:
+        // https://api-docs.deepseek.com/guides/thinking_mode/
+        if self.options.protocol == ProviderProtocol::DeepSeek
+            && let Some(object) = body.as_object_mut()
+        {
+            object.insert("thinking".to_owned(), json!({"type": match self.options.thinking { ThinkingMode::Enabled => "enabled", ThinkingMode::Disabled => "disabled" }}));
+            if self.options.thinking == ThinkingMode::Enabled {
+                object.remove("temperature");
+            }
+        }
+        body
     }
 }
 
 impl ChatModel for Provider {
     fn complete(&self, messages: &[Message], tools: &[Value]) -> Result<Turn, String> {
+        self.validate_history(messages)?;
         let body = self.body(messages, tools).to_string();
         let mut child = std::process::Command::new("curl")
             .args([
                 "-sS",
-                // `--fail` throws the response away with the status; `--fail-with-body` keeps it, and
-                // the body is where the provider says *what* it did not like. Without it a 400 is a
-                // bare status code, which is what made `Invalid 'tools[0].function.name'` invisible.
+                // Retain curl's HTTP failure detection. Response bodies stay private because they
+                // may contain provider reasoning or an echoed request.
                 "--fail-with-body",
                 "--max-time",
                 &self.timeout_seconds.to_string(),
@@ -365,16 +548,14 @@ impl ChatModel for Provider {
             .wait_with_output()
             .map_err(|error| format!("the model request did not finish: {error}"))?;
         if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            let body = String::from_utf8_lossy(&output.stdout);
-            let body = body.trim();
-            return Err(if body.is_empty() {
-                format!("the model endpoint refused the request: {detail}")
-            } else {
-                format!("the model endpoint refused the request: {detail}: {body}")
-            });
+            // A provider error may echo an entire assistant message, including opaque reasoning.
+            // Keep curl's process status useful without publishing its response payload.
+            return Err(format!(
+                "the model endpoint refused the request (curl {})",
+                output.status
+            ));
         }
-        parse_response(&String::from_utf8_lossy(&output.stdout))
+        self.parse_turn(&String::from_utf8_lossy(&output.stdout))
     }
 }
 
@@ -382,26 +563,26 @@ impl ChatModel for Provider {
 ///
 /// # Errors
 ///
-/// A message quoting the response when it is not the shape the API documents: a malformed answer
-/// is a bug to see, not a reason to pretend the model said nothing.
+/// A message naming the invalid protocol field, without quoting opaque reasoning payloads.
 pub fn parse_response(text: &str) -> Result<Turn, String> {
     let response: Value = serde_json::from_str(text)
         .map_err(|error| format!("the model's answer is not JSON: {error}"))?;
-    if let Some(error) = response.get("error") {
-        return Err(format!("the model reported an error: {error}"));
+    if response.get("error").is_some() {
+        return Err("the model reported an error".to_owned());
     }
     let message = response
         .get("choices")
         .and_then(|choices| choices.get(0))
         .and_then(|choice| choice.get("message"))
         .and_then(Value::as_object)
-        .ok_or_else(|| {
-            format!(
-                "the answer has no message: {}",
-                text.chars().take(200).collect::<String>()
-            )
-        })?;
+        .ok_or_else(|| "the answer has no message".to_owned())?;
+    let reasoning_content = match message.get("reasoning_content") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(_) => return Err("the answer's reasoning_content must be a string or null".to_owned()),
+    };
     let mut turn = Turn {
+        reasoning_content,
         text: message
             .get("content")
             .and_then(Value::as_str)
@@ -642,12 +823,14 @@ impl<M: ChatModel> Agent<M> {
             if turn.calls.is_empty() {
                 answer.text.clone_from(&turn.text);
                 self.push(Message::Assistant {
+                    reasoning_content: turn.reasoning_content,
                     text: turn.text,
                     calls: Vec::new(),
                 });
                 return Ok(answer);
             }
             self.push(Message::Assistant {
+                reasoning_content: turn.reasoning_content.clone(),
                 text: turn.text.clone(),
                 calls: turn.calls.clone(),
             });
@@ -734,7 +917,7 @@ impl<M: ChatModel> Agent<M> {
             let line = match message {
                 Message::System(text) | Message::Summary(text) => format!("[context] {text}"),
                 Message::User(text) => format!("[user] {text}"),
-                Message::Assistant { text, calls } => {
+                Message::Assistant { text, calls, .. } => {
                     let mut line = format!("[assistant] {text}");
                     for call in calls {
                         let _ = std::fmt::Write::write_fmt(
@@ -771,29 +954,17 @@ impl<M: ChatModel> Agent<M> {
     /// The characters the next request would carry: messages and tool schemas.
     #[must_use]
     pub fn context_characters(&self) -> usize {
-        let messages: usize = self
+        let messages = self
             .messages
             .iter()
-            .map(|message| match message {
-                Message::System(text) | Message::Summary(text) | Message::User(text) => {
-                    text.chars().count()
-                }
-                Message::Assistant { text, calls } => {
-                    text.chars().count()
-                        + calls
-                            .iter()
-                            .map(|call| call.name.len() + call.arguments.to_string().len())
-                            .sum::<usize>()
-                }
-                Message::Tool { content, .. } => content.chars().count(),
-            })
-            .sum();
+            .map(message_characters)
+            .fold(0usize, usize::saturating_add);
         let tools: usize = self
             .tools_with_skill_reader()
             .iter()
             .map(|tool| tool.to_string().chars().count())
-            .sum();
-        messages + tools
+            .fold(0usize, usize::saturating_add);
+        messages.saturating_add(tools)
     }
 
     /// Forget the conversation, keeping the system prompt.
@@ -991,11 +1162,336 @@ mod tests {
     }
 
     #[test]
+    fn provider_response_boundary_requires_new_enabled_tool_reasoning_before_dispatch() {
+        let mut provider = Provider::new("unused", "m", "test").with_options(ProviderOptions {
+            protocol: ProviderProtocol::DeepSeek,
+            thinking: ThinkingMode::Enabled,
+        });
+        let tool = json!({"id":"c1","function":{"name":"scenario__rename","arguments":"{\"name\":\"changed\"}"}});
+        for reasoning in [
+            None,
+            Some(Value::Null),
+            Some(json!("")),
+            Some(json!(" private 雪\n")),
+        ] {
+            let mut message = json!({"tool_calls":[tool.clone()]});
+            if let Some(value) = &reasoning {
+                message["reasoning_content"] = value.clone();
+            }
+            let response = json!({"choices":[{"message":message}]}).to_string();
+            assert_eq!(
+                provider.parse_turn(&response).is_ok(),
+                reasoning.as_ref().is_some_and(Value::is_string)
+            );
+            provider.options.thinking = ThinkingMode::Disabled;
+            assert!(provider.parse_turn(&response).is_ok());
+            provider.options = ProviderOptions::default();
+            assert!(provider.parse_turn(&response).is_ok());
+            provider.options = ProviderOptions {
+                protocol: ProviderProtocol::DeepSeek,
+                thinking: ThinkingMode::Enabled,
+            };
+        }
+        assert!(
+            provider
+                .parse_turn(r#"{"choices":[{"message":{"content":"answer"}}]}"#)
+                .is_ok()
+        );
+        let contradictory =
+            Provider::new("invalid-no-network", "m", "test").with_options(ProviderOptions {
+                protocol: ProviderProtocol::OpenAiCompatible,
+                thinking: ThinkingMode::Enabled,
+            });
+        assert!(
+            contradictory
+                .complete(&[], &[])
+                .expect_err("before curl")
+                .contains("requires the deepseek protocol")
+        );
+    }
+
+    #[test]
+    fn malformed_reasoning_cannot_dispatch_otherwise_valid_calls() {
+        struct InvalidReasoning;
+        impl ChatModel for InvalidReasoning {
+            fn complete(&self, _: &[Message], _: &[Value]) -> Result<Turn, String> {
+                parse_response(
+                    r#"{"choices":[{"message":{"reasoning_content":false,"tool_calls":[{"id":"c1","function":{"name":"scenario__rename","arguments":"{\"name\":\"changed\"}"}}]}}]}"#,
+                )
+            }
+        }
+        let mut agent = Agent::new(
+            InvalidReasoning,
+            Server::new(Scenario::empty("unchanged"), vec![]),
+        );
+        let before = serde_json::to_value(agent.server().scenario()).expect("scenario");
+        let mut trace = vec![];
+        let error = agent
+            .ask_observing("rename", &mut |line| trace.push(line.to_owned()))
+            .expect_err("invalid reasoning");
+        assert!(error.contains("reasoning_content"));
+        assert_eq!(trace, Vec::<String>::new());
+        assert_eq!(
+            serde_json::to_value(agent.server().scenario()).expect("scenario"),
+            before
+        );
+    }
+
+    #[test]
+    fn provider_error_payload_never_echoes_opaque_reasoning() {
+        let error = parse_response(
+            r#"{"error":{"message":"refused","reasoning_content":"secret-reasoning-marker"}}"#,
+        )
+        .expect_err("provider error");
+        assert!(!error.contains("secret-reasoning-marker"));
+    }
+
+    #[test]
+    fn summaries_use_only_public_text_and_agent_session_costs_agree() {
+        struct SummaryModel;
+        impl ChatModel for SummaryModel {
+            fn complete(&self, messages: &[Message], _: &[Value]) -> Result<Turn, String> {
+                assert!(!format!("{messages:?}").contains("secret-reasoning"));
+                assert!(format!("{messages:?}").contains("public-answer"));
+                Ok(Turn {
+                    text: "public summary".into(),
+                    ..Turn::default()
+                })
+            }
+        }
+        let directory = std::env::temp_dir().join("stkcraft-reasoning-cost");
+        std::fs::create_dir_all(&directory).expect("directory");
+        let mut session = session::Session::create(&directory).expect("session");
+        let message = Message::Assistant {
+            text: "public-answer".into(),
+            calls: vec![],
+            reasoning_content: Some("secret-reasoning 雪".into()),
+        };
+        session.record(message.clone()).expect("record");
+        let path = session.path.clone();
+        let cost = session.characters();
+        let agent = Agent::new(SummaryModel, Server::new(Scenario::empty("test"), vec![]))
+            .with_session(session);
+        let schemas = agent
+            .tools_with_skill_reader()
+            .iter()
+            .map(|tool| tool.to_string().chars().count())
+            .sum::<usize>();
+        assert_eq!(agent.context_characters(), cost + schemas);
+        assert_eq!(agent.summarize(&[message]), Some("public summary".into()));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn reasoning_survives_two_tool_rounds_final_answer_and_resume() {
+        struct Replay {
+            index: std::cell::Cell<usize>,
+        }
+        impl ChatModel for Replay {
+            fn complete(&self, messages: &[Message], _: &[Value]) -> Result<Turn, String> {
+                let index = self.index.get();
+                let provider = Provider::new("unused", "m", "test").with_options(ProviderOptions {
+                    protocol: ProviderProtocol::DeepSeek,
+                    thinking: ThinkingMode::Enabled,
+                });
+                provider.validate_history(messages)?;
+                let body = provider.body(messages, &[]);
+                let reasoning: Vec<_> = body["messages"]
+                    .as_array()
+                    .expect("messages")
+                    .iter()
+                    .filter_map(|message| message.get("reasoning_content").and_then(Value::as_str))
+                    .collect();
+                assert_eq!(
+                    reasoning,
+                    ["earlier private", " private 雪\n", ""][..=index]
+                );
+                self.index.set(index + 1);
+                Ok(Turn {
+                    text: if index == 2 {
+                        "public answer".into()
+                    } else {
+                        String::new()
+                    },
+                    calls: if index == 2 {
+                        vec![]
+                    } else {
+                        vec![ToolCall {
+                            id: format!("c{index}"),
+                            name: "scenario__read".into(),
+                            arguments: json!({}),
+                        }]
+                    },
+                    reasoning_content: Some([" private 雪\n", "", "final private"][index].into()),
+                })
+            }
+        }
+        let directory = std::env::temp_dir().join("stkcraft-reasoning-replay");
+        std::fs::create_dir_all(&directory).expect("directory");
+        let mut session = session::Session::create(&directory).expect("session");
+        session
+            .record(Message::System("rules".into()))
+            .expect("record");
+        session
+            .record(Message::User("earlier".into()))
+            .expect("record");
+        session
+            .record(Message::Assistant {
+                text: "earlier answer".into(),
+                calls: vec![],
+                reasoning_content: Some("earlier private".into()),
+            })
+            .expect("record");
+        let mut agent = Agent::new(
+            Replay {
+                index: std::cell::Cell::new(0),
+            },
+            Server::new(Scenario::empty("test"), vec![]),
+        )
+        .with_session(session);
+        let mut trace = vec![];
+        let answer = agent
+            .ask_observing("continue", &mut |value| trace.push(value.to_owned()))
+            .expect("answer");
+        assert_eq!(answer.text, "public answer");
+        assert!(!format!("{answer:?} {trace:?}").contains("private"));
+        let saved = agent.session.as_ref().expect("session");
+        let resumed = session::Session::open(&directory, &saved.id).expect("resume");
+        assert_eq!(resumed.messages, agent.messages);
+        let provider = Provider::new("unused", "m", "test").with_options(ProviderOptions {
+            protocol: ProviderProtocol::DeepSeek,
+            thinking: ThinkingMode::Enabled,
+        });
+        assert_eq!(
+            provider.body(&resumed.messages, &[]),
+            provider.body(&agent.messages, &[])
+        );
+        assert!(!format!("{:?}", resumed.messages).contains("private"));
+        let _ = std::fs::remove_file(&saved.path);
+    }
+
+    #[test]
+    fn legacy_tool_history_is_refused_before_network_only_for_enabled_deepseek() {
+        let messages = vec![Message::Assistant {
+            text: String::new(),
+            calls: vec![ToolCall {
+                id: "legacy".into(),
+                name: "scenario__read".into(),
+                arguments: json!({}),
+            }],
+            reasoning_content: None,
+        }];
+        let mut provider =
+            Provider::new("invalid-no-network", "m", "test").with_options(ProviderOptions {
+                protocol: ProviderProtocol::DeepSeek,
+                thinking: ThinkingMode::Enabled,
+            });
+        let error = provider
+            .complete(&messages, &[])
+            .expect_err("refused before curl");
+        assert!(error.contains("new session"));
+        assert!(error.contains("--thinking disabled"));
+        provider.options.thinking = ThinkingMode::Disabled;
+        assert!(provider.validate_history(&messages).is_ok());
+        provider.options = ProviderOptions::default();
+        assert!(provider.validate_history(&messages).is_ok());
+    }
+
+    #[test]
+    fn reasoning_parser_distinguishes_absent_null_empty_and_unicode_and_rejects_all_wrong_types() {
+        for value in [Value::Null, json!(""), json!(" 私密\n")] {
+            let turn = parse_response(
+                &json!({"choices":[{"message":{"reasoning_content":value}}]}).to_string(),
+            )
+            .expect("valid reasoning");
+            assert_eq!(turn.reasoning_content, value.as_str().map(str::to_owned));
+            assert!(!format!("{turn:?}").contains("私密"));
+        }
+        assert_eq!(
+            parse_response(r#"{"choices":[{"message":{}}]}"#)
+                .expect("absent")
+                .reasoning_content,
+            None
+        );
+        for value in [
+            json!(true),
+            json!(123),
+            json!([]),
+            json!({"private":"secret"}),
+        ] {
+            assert!(
+                parse_response(
+                    &json!({"choices":[{"message":{"reasoning_content":value}}]}).to_string()
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_protocol_modes_preserve_generic_requests_and_replay_reasoning() {
+        let generic = Provider::new(DEEPSEEK_BASE_URL, "deepseek-chat", "test");
+        let messages = vec![Message::Assistant {
+            text: "answer".into(),
+            calls: vec![],
+            reasoning_content: Some(" 秘密\n".into()),
+        }];
+        let original = generic.body(&messages, &[]);
+        assert!(original.get("thinking").is_none());
+        assert!(original["messages"][0].get("reasoning_content").is_none());
+        assert_eq!(original["temperature"], 0.0);
+        for (mode, name) in [
+            (ThinkingMode::Enabled, "enabled"),
+            (ThinkingMode::Disabled, "disabled"),
+        ] {
+            let provider = generic.clone().with_options(ProviderOptions {
+                protocol: ProviderProtocol::DeepSeek,
+                thinking: mode,
+            });
+            let body = provider.body(&messages, &[]);
+            assert_eq!(body["thinking"]["type"], name);
+            assert_eq!(body["messages"][0]["reasoning_content"], " 秘密\n");
+            assert_eq!(
+                body.get("temperature").is_none(),
+                mode == ThinkingMode::Enabled
+            );
+            assert!(body.get("max_tokens").is_none());
+        }
+        assert_eq!(
+            ProviderOptions::resolve(DEEPSEEK_BASE_URL, None, None)
+                .expect("defaults")
+                .protocol,
+            ProviderProtocol::DeepSeek
+        );
+        assert_eq!(
+            ProviderOptions::resolve("https://proxy.invalid", None, None)
+                .expect("proxy")
+                .protocol,
+            ProviderProtocol::OpenAiCompatible
+        );
+        assert!(ProviderOptions::resolve(DEEPSEEK_BASE_URL, Some("typo"), None).is_err());
+        assert!(
+            ProviderOptions::resolve(DEEPSEEK_BASE_URL, Some("compatible"), Some("enabled"))
+                .is_err()
+        );
+        assert!(ProviderOptions::resolve(DEEPSEEK_BASE_URL, None, Some("typo")).is_err());
+    }
+
+    #[test]
+    fn malformed_reasoning_is_rejected_without_echoing_it() {
+        let response = r#"{"choices":[{"message":{"content":"ok","reasoning_content":{"secret":"private-reasoning"}}}]}"#;
+        let error = parse_response(response).expect_err("reasoning must be a string or null");
+        assert!(error.contains("reasoning_content"));
+        assert!(!error.contains("private-reasoning"));
+    }
+
+    #[test]
     fn the_observer_sees_each_tool_call_as_it_happens() {
         // A caller that shows progress needs the lines while the loop runs, not afterwards: the
         // same sequence arrives in `answer.trace`, in the same order.
         let mut agent = agent(vec![
             Turn {
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![
                     ToolCall {
@@ -1011,6 +1507,7 @@ mod tests {
                 ],
             },
             Turn {
+                reasoning_content: None,
                 text: "Done.".to_owned(),
                 calls: Vec::new(),
             },
@@ -1035,10 +1532,12 @@ mod tests {
         let session = crate::session::Session::create(&directory).expect("a session");
         let mut agent = agent(vec![
             Turn {
+                reasoning_content: None,
                 text: "Renamed.".to_owned(),
                 calls: Vec::new(),
             },
             Turn {
+                reasoning_content: None,
                 text: "It is still Gemini.".to_owned(),
                 calls: Vec::new(),
             },
@@ -1058,6 +1557,7 @@ mod tests {
         let mut agent = Agent::new(
             Script {
                 turns: std::cell::RefCell::new(vec![Turn {
+                    reasoning_content: None,
                     text: "Still Gemini.".to_owned(),
                     calls: Vec::new(),
                 }]),
@@ -1105,6 +1605,7 @@ mod tests {
             Recorder {
                 turns: RefCell::new(vec![
                     Turn {
+                        reasoning_content: None,
                         text: String::new(),
                         calls: vec![ToolCall {
                             id: "call-1".to_owned(),
@@ -1113,10 +1614,12 @@ mod tests {
                         }],
                     },
                     Turn {
+                        reasoning_content: None,
                         text: "Renamed.".to_owned(),
                         calls: Vec::new(),
                     },
                     Turn {
+                        reasoning_content: None,
                         text: "It is still called Gemini.".to_owned(),
                         calls: Vec::new(),
                     },
@@ -1164,6 +1667,7 @@ mod tests {
         let server = Server::new(Scenario::empty("history test"), Vec::new());
         let turns = (0..MAX_HISTORY)
             .map(|index| Turn {
+                reasoning_content: None,
                 text: format!("answer {index}"),
                 calls: Vec::new(),
             })
@@ -1222,6 +1726,7 @@ mod tests {
     fn a_call_named_the_way_the_model_sees_it_reaches_the_command() {
         let mut agent = agent(vec![
             Turn {
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
                     id: "call-1".to_owned(),
@@ -1230,6 +1735,7 @@ mod tests {
                 }],
             },
             Turn {
+                reasoning_content: None,
                 text: "Renamed.".to_owned(),
                 calls: Vec::new(),
             },
@@ -1283,6 +1789,7 @@ mod tests {
         // cannot know. The document is an MCP resource; this tool is how the model reaches it.
         let mut agent = agent(vec![
             Turn {
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
                     id: "call-1".to_owned(),
@@ -1291,6 +1798,7 @@ mod tests {
                 }],
             },
             Turn {
+                reasoning_content: None,
                 text: "It has none.".to_owned(),
                 calls: Vec::new(),
             },
@@ -1326,6 +1834,7 @@ mod tests {
     #[test]
     fn a_plain_answer_needs_no_tools() {
         let mut agent = agent(vec![Turn {
+            reasoning_content: None,
             text: "I can compute passes.".to_owned(),
             calls: Vec::new(),
         }]);
@@ -1340,6 +1849,7 @@ mod tests {
         // remote client uses, so an agent cannot drift from what MCP clients see.
         let mut agent = agent(vec![
             Turn {
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
                     id: "call-1".to_owned(),
@@ -1348,6 +1858,7 @@ mod tests {
                 }],
             },
             Turn {
+                reasoning_content: None,
                 text: "Renamed.".to_owned(),
                 calls: Vec::new(),
             },
@@ -1371,6 +1882,7 @@ mod tests {
         // loop must survive it.
         let mut agent = agent(vec![
             Turn {
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
                     id: "call-1".to_owned(),
@@ -1379,6 +1891,7 @@ mod tests {
                 }],
             },
             Turn {
+                reasoning_content: None,
                 text: "I could not add it.".to_owned(),
                 calls: Vec::new(),
             },
@@ -1403,6 +1916,7 @@ mod tests {
         impl ChatModel for Endless {
             fn complete(&self, _messages: &[Message], _tools: &[Value]) -> Result<Turn, String> {
                 Ok(Turn {
+                    reasoning_content: None,
                     text: String::new(),
                     calls: vec![ToolCall {
                         id: "x".to_owned(),
@@ -1441,6 +1955,7 @@ mod tests {
     #[test]
     fn the_request_body_maps_tools_and_messages_to_the_documented_shape() {
         let deepseek = Provider {
+            options: ProviderOptions::default(),
             timeout_seconds: 120,
             base_url: "https://example.invalid".to_owned(),
             model: "deepseek-chat".to_owned(),
@@ -1455,6 +1970,7 @@ mod tests {
             Message::System("rules".to_owned()),
             Message::User("when".to_owned()),
             Message::Assistant {
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
                     id: "c1".to_owned(),
@@ -1589,12 +2105,12 @@ mod tests {
     }
 
     #[test]
-    fn response_boundary_quotes_unicode_without_panicking() {
+    fn response_boundary_does_not_echo_unicode_payloads() {
         let response = format!("{{\"padding\":\"{}\"}}", "星".repeat(100));
         assert!(!response.is_char_boundary(200));
         let error = parse_response(&response).expect_err("no message");
         assert!(error.contains("no message"));
-        assert!(error.ends_with(&response.chars().take(200).collect::<String>()));
+        assert!(!error.contains("星"));
     }
 
     #[test]
@@ -1621,7 +2137,7 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_response_is_an_error_that_quotes_it() {
+    fn a_malformed_response_is_an_error() {
         assert!(parse_response("not json").is_err());
         assert!(parse_response(r#"{"error":{"message":"bad key"}}"#).is_err());
         assert!(parse_response(r#"{"choices":[]}"#).is_err());

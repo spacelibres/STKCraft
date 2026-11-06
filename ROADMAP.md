@@ -70,7 +70,9 @@ MCP and knowledge library; it does not move models or network clients into the n
 - **Shared library initialization shipped in 0.1.81:** the window loads the configured knowledge
   root using the CLI's policy. **Conflict-safe scene adoption shipped in 0.1.82:** a stale assistant
   result cannot replace edits made while the request was running.
-- **Then:** explicit DeepSeek protocol/session compatibility, bounded model transport and usage,
+- **DeepSeek protocol shipped in 0.1.83:** explicit thinking selection and opaque protocol-state
+  preservation, with generic endpoint compatibility. See [model configuration](docs/guides/model-provider.md).
+- **Then:** bounded model transport and usage,
   role contracts, a controlled executor, and separately evaluated product/development pilots.
 
 The existing single-model loop is still the shipped runtime. A task graph, a role registry and

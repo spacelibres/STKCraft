@@ -250,6 +250,7 @@ mod tests {
             }
             match answers.remove(0) {
                 Ok(text) => Ok(crate::Turn {
+                    reasoning_content: None,
                     text,
                     calls: Vec::new(),
                 }),

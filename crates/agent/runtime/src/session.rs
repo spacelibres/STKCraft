@@ -33,16 +33,15 @@ use crate::{Message, ToolCall};
 
 /// How many characters of conversation to keep before dropping the oldest turns.
 ///
-/// A token is around four characters of English and less of Chinese; 120 000 characters is roughly
-/// 30 000 tokens, which leaves room in a 64 k-token window for the system prompt, the skills a model
-/// may read, and a long tool result.
+/// This is a Unicode character heuristic, including opaque reasoning and tool payloads. It is not
+/// a token count or a claim about the selected model's context limit.
 pub const CONTEXT_BUDGET_CHARS: usize = 120_000;
 
 /// How many turns survive a compaction, at least.
 pub const KEEP_TURNS: usize = 6;
 
 /// One message as it is stored: a tagged JSON object, so the file reads as a transcript.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Stored {
     /// The instruction the model starts from.
@@ -55,6 +54,9 @@ enum Stored {
         text: String,
         /// The calls it asked for.
         calls: Vec<StoredCall>,
+        /// Opaque provider replay state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_content: Option<String>,
     },
     /// A tool's answer.
     Tool {
@@ -110,7 +112,12 @@ impl From<&Message> for Stored {
             Message::System(text) => Self::System(text.clone()),
             Message::Summary(text) => Self::Summary(text.clone()),
             Message::User(text) => Self::User(text.clone()),
-            Message::Assistant { text, calls } => Self::Assistant {
+            Message::Assistant {
+                text,
+                calls,
+                reasoning_content,
+            } => Self::Assistant {
+                reasoning_content: reasoning_content.clone(),
                 text: text.clone(),
                 calls: calls
                     .iter()
@@ -136,7 +143,12 @@ impl Stored {
             Self::System(text) => Some(Message::System(text)),
             Self::Summary(text) => Some(Message::Summary(text)),
             Self::User(text) => Some(Message::User(text)),
-            Self::Assistant { text, calls } => Some(Message::Assistant {
+            Self::Assistant {
+                text,
+                calls,
+                reasoning_content,
+            } => Some(Message::Assistant {
+                reasoning_content,
                 text,
                 calls: calls
                     .into_iter()
@@ -215,6 +227,17 @@ impl Session {
                 continue;
             }
             let Ok(stored) = serde_json::from_str::<Stored>(line) else {
+                // Preserve the truncated-line recovery policy, but never silently discard a
+                // complete assistant record whose opaque protocol state is the wrong type.
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+                    && let Some(reasoning) = value
+                        .get("assistant")
+                        .and_then(|assistant| assistant.get("reasoning_content"))
+                    && !reasoning.is_null()
+                    && !reasoning.is_string()
+                {
+                    return Err("stored assistant reasoning_content must be a string or null; use an intact session".to_owned());
+                }
                 continue;
             };
             // The last `Meta` line wins: the file is a log, and the newest statement about the
@@ -332,20 +355,8 @@ impl Session {
     pub fn characters(&self) -> usize {
         self.messages
             .iter()
-            .map(|message| match message {
-                Message::System(text) | Message::Summary(text) | Message::User(text) => {
-                    text.chars().count()
-                }
-                Message::Assistant { text, calls } => {
-                    text.chars().count()
-                        + calls
-                            .iter()
-                            .map(|call| call.name.len() + call.arguments.to_string().len())
-                            .sum::<usize>()
-                }
-                Message::Tool { content, .. } => content.chars().count(),
-            })
-            .sum()
+            .map(crate::message_characters)
+            .fold(0usize, usize::saturating_add)
     }
 
     /// Drop the oldest turns until the conversation fits the budget.
@@ -497,6 +508,7 @@ mod tests {
             .expect("recorded");
         session
             .record(Message::Assistant {
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
                     id: "call-1".to_owned(),
@@ -513,10 +525,106 @@ mod tests {
             .expect("recorded");
         session
             .record(Message::Assistant {
+                reasoning_content: None,
                 text: "45 degrees".to_owned(),
                 calls: Vec::new(),
             })
             .expect("recorded");
+    }
+
+    #[test]
+    fn malformed_stored_reasoning_does_not_silently_drop_an_assistant() {
+        let directory = scratch("stkcraft-session-invalid-reasoning");
+        std::fs::write(directory.join("invalid.jsonl"),r#"{"assistant":{"text":"public","calls":[],"reasoning_content":{"secret":"private"}}}"#).expect("write");
+        let error = Session::open(&directory, "invalid").expect_err("invalid protocol state");
+        assert!(error.contains("reasoning_content"));
+        assert!(!error.contains("private"));
+    }
+
+    #[test]
+    fn old_and_new_assistant_records_round_trip_without_changing_tags() {
+        let old: Stored =
+            serde_json::from_str(r#"{"assistant":{"text":"old","calls":[]}}"#).expect("old");
+        let message = old.into_message().expect("message");
+        assert!(matches!(
+            message,
+            Message::Assistant {
+                reasoning_content: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            serde_json::to_value(Stored::from(&message)).expect("json"),
+            serde_json::json!({"assistant":{"text":"old","calls":[]}})
+        );
+        for reasoning in [None, Some(String::new()), Some(" private 雪\n".to_owned())] {
+            let message = Message::Assistant {
+                text: "answer".into(),
+                calls: vec![],
+                reasoning_content: reasoning,
+            };
+            let encoded = serde_json::to_string(&Stored::from(&message)).expect("encode");
+            let read: Stored = serde_json::from_str(&encoded).expect("decode");
+            assert_eq!(read.into_message(), Some(message));
+        }
+    }
+
+    #[test]
+    fn reasoning_and_unicode_identifiers_count_toward_compaction_and_retained_fields_survive() {
+        let directory = scratch("stkcraft-session-reasoning-budget");
+        let mut session = Session::create(&directory).expect("session");
+        let payload = Message::Assistant {
+            text: "字".into(),
+            reasoning_content: Some("秘".repeat(CONTEXT_BUDGET_CHARS)),
+            calls: vec![ToolCall {
+                id: "号".into(),
+                name: "名".into(),
+                arguments: json!({}),
+            }],
+        };
+        assert_eq!(
+            crate::message_characters(&payload),
+            CONTEXT_BUDGET_CHARS + 5
+        );
+        session.record(Message::System("s".into())).expect("record");
+        session.record(Message::User("old".into())).expect("record");
+        session.record(payload).expect("record");
+        for index in 0..KEEP_TURNS {
+            session
+                .record(Message::User(index.to_string()))
+                .expect("record");
+            session
+                .record(Message::Assistant {
+                    text: "a".into(),
+                    calls: vec![],
+                    reasoning_content: Some(format!("retained {index}")),
+                })
+                .expect("record");
+        }
+        assert!(session.characters() > CONTEXT_BUDGET_CHARS);
+        assert!(session.compact() > 0);
+        assert_eq!(
+            session
+                .messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    Message::Assistant {
+                        reasoning_content: Some(_),
+                        ..
+                    }
+                ))
+                .count(),
+            KEEP_TURNS
+        );
+        assert!(matches!(session.messages.get(2), Some(Message::User(_))));
+        assert_eq!(
+            crate::message_characters(&Message::Tool {
+                call_id: "号".into(),
+                content: "字".into()
+            }),
+            2
+        );
     }
 
     #[test]
@@ -585,6 +693,7 @@ mod tests {
                 .expect("recorded");
             session
                 .record(Message::Assistant {
+                    reasoning_content: None,
                     text: format!("answer {index}"),
                     calls: Vec::new(),
                 })
@@ -654,6 +763,7 @@ mod tests {
                 .expect("recorded");
             session
                 .record(Message::Assistant {
+                    reasoning_content: None,
                     text: format!("answer {index}"),
                     calls: Vec::new(),
                 })

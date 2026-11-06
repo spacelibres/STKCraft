@@ -18,80 +18,122 @@ pub fn json_object_in(text: &str) -> Option<serde_json::Value> {
     serde_json::from_str(&trimmed[start..=end]).ok()
 }
 
-/// One chat completion through `DeepSeek`, spoken over `curl`.
-///
-/// The same transport the assistant uses, for the same reasons: no TLS stack in the build, no HTTP
-/// client to audit, and a request and response a person can read when a translation looks wrong.
+/// One translation completion through the shared provider and its protocol resolver.
 pub fn chat_completion(key: &str, prompt: &str) -> Result<String, String> {
     let base_url = std::env::var("DEEPSEEK_BASE_URL")
-        .unwrap_or_else(|_| "https://api.deepseek.com/v1/chat/completions".to_owned());
-    let model = std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| "deepseek-chat".to_owned());
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "You translate software interfaces. You answer with JSON \
-                                           only, exactly as asked."},
-            {"role": "user", "content": prompt},
-        ],
-        "temperature": 0.0,
-    })
-    .to_string();
-    let mut child = std::process::Command::new("curl")
-        .args([
-            "-sS",
-            // The body is the only place a provider says what it disliked; `--fail` would throw it
-            // away and leave a bare status code.
-            "--fail-with-body",
-            "--max-time",
-            "300",
-            "-X",
-            "POST",
-            &base_url,
-            "-H",
-            "Content-Type: application/json",
-            "-H",
-        ])
-        .arg(format!("Authorization: Bearer {key}"))
-        .args(["--data-binary", "@-"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("could not run curl: {error}"))?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        use std::io::Write as _;
-        stdin
-            .write_all(body.as_bytes())
-            .map_err(|error| format!("could not send the request: {error}"))?;
+        .unwrap_or_else(|_| stkcraft_agent_runtime::DEEPSEEK_BASE_URL.to_owned());
+    let model = std::env::var("DEEPSEEK_MODEL")
+        .unwrap_or_else(|_| stkcraft_agent_runtime::DEEPSEEK_MODEL.to_owned());
+    let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
+    let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+    let provider = translation_provider(
+        key,
+        &base_url,
+        &model,
+        protocol.as_deref(),
+        thinking.as_deref(),
+    )?;
+    completion_with(&provider, prompt)
+}
+
+fn translation_provider(
+    key: &str,
+    base_url: &str,
+    model: &str,
+    protocol: Option<&str>,
+    thinking: Option<&str>,
+) -> Result<stkcraft_agent_runtime::Provider, String> {
+    use stkcraft_agent_runtime::{Provider, ProviderOptions, ProviderProtocol, ThinkingMode};
+    let mut options = ProviderOptions::resolve(base_url, protocol, thinking)?;
+    // Translation is a single JSON task, so the role explicitly selects ordinary mode.
+    if options.protocol == ProviderProtocol::DeepSeek {
+        options.thinking = ThinkingMode::Disabled;
     }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("the translation request did not finish: {error}"))?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        let body = String::from_utf8_lossy(&output.stdout);
-        let body = body.trim();
-        return Err(if body.is_empty() {
-            format!("the model refused the request: {detail}")
-        } else {
-            format!("the model refused the request: {detail}: {body}")
-        });
-    }
-    let answer: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("the model's answer is not JSON: {error}"))?;
-    answer
-        .get("choices")
-        .and_then(|choices| choices.get(0))
-        .and_then(|choice| choice.get("message"))
-        .and_then(|message| message.get("content"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| "the model's answer has no message".to_owned())
+    let mut provider = Provider::new(base_url, model, key).with_options(options);
+    provider.timeout_seconds = 300;
+    Ok(provider)
+}
+
+fn completion_with(
+    model: &impl stkcraft_agent_runtime::ChatModel,
+    prompt: &str,
+) -> Result<String, String> {
+    use stkcraft_agent_runtime::Message;
+    model.complete(&[
+        Message::System("You translate software interfaces. You answer with JSON only, exactly as asked.".to_owned()),
+        Message::User(prompt.to_owned()),
+    ], &[]).map(|turn| turn.text)
 }
 
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translation_uses_explicit_ordinary_mode_and_preserves_custom_protocols() {
+        use stkcraft_agent_runtime::{ProviderProtocol, ThinkingMode};
+        let provider = translation_provider(
+            "test-only-key",
+            stkcraft_agent_runtime::DEEPSEEK_BASE_URL,
+            stkcraft_agent_runtime::DEEPSEEK_MODEL,
+            None,
+            Some("enabled"),
+        )
+        .expect("translation provider");
+        assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
+        assert_eq!(provider.options.thinking, ThinkingMode::Disabled);
+        assert_eq!(provider.timeout_seconds, 300);
+        let provider = translation_provider(
+            "test-only-key",
+            "https://proxy.invalid/completions",
+            "chosen-model",
+            None,
+            None,
+        )
+        .expect("generic provider");
+        assert_eq!(
+            provider.options.protocol,
+            ProviderProtocol::OpenAiCompatible
+        );
+        assert_eq!(provider.model, "chosen-model");
+        assert!(
+            translation_provider(
+                "test-only-key",
+                "https://proxy.invalid/completions",
+                "m",
+                Some("typo"),
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn translation_completion_exposes_only_the_requested_answer() {
+        struct Script;
+        impl stkcraft_agent_runtime::ChatModel for Script {
+            fn complete(
+                &self,
+                messages: &[stkcraft_agent_runtime::Message],
+                tools: &[serde_json::Value],
+            ) -> Result<stkcraft_agent_runtime::Turn, String> {
+                assert_eq!(tools, &[] as &[serde_json::Value]);
+                assert!(
+                    matches!(messages.last(), Some(stkcraft_agent_runtime::Message::User(text)) if text == "translate this")
+                );
+                Ok(stkcraft_agent_runtime::Turn {
+                    text: "{\"Save\":\"Speichern\"}".to_owned(),
+                    reasoning_content: Some("private-protocol-marker".to_owned()),
+                    ..stkcraft_agent_runtime::Turn::default()
+                })
+            }
+        }
+        assert_eq!(
+            completion_with(&Script, "translate this").expect("answer"),
+            "{\"Save\":\"Speichern\"}"
+        );
+    }
 
     #[test]
     fn a_json_object_is_found_in_a_fenced_answer() {

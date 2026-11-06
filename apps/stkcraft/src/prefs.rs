@@ -29,6 +29,10 @@ pub struct Prefs {
     pub model_endpoint: Option<String>,
     /// The model name, when the person chose one.
     pub model: Option<String>,
+    /// Explicit wire protocol: `deepseek` or `compatible`.
+    pub model_protocol: Option<String>,
+    /// Explicit `DeepSeek` thinking selection: `enabled` or `disabled`.
+    pub model_thinking: Option<String>,
 }
 
 /// The file the model's credential lives in, beside the preferences.
@@ -113,6 +117,8 @@ pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
     let environment = std::env::var("DEEPSEEK_API_KEY").ok();
     let base_url = std::env::var("DEEPSEEK_BASE_URL").ok();
     let model = std::env::var("DEEPSEEK_MODEL").ok();
+    let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
+    let thinking = std::env::var("DEEPSEEK_THINKING").ok();
     model_provider_from(
         &prefs,
         stored.as_deref(),
@@ -120,6 +126,8 @@ pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
             key: environment.as_deref(),
             base_url: base_url.as_deref(),
             model: model.as_deref(),
+            protocol: protocol.as_deref(),
+            thinking: thinking.as_deref(),
         },
     )
 }
@@ -137,6 +145,43 @@ pub struct ModelEnvironment<'a> {
     pub base_url: Option<&'a str>,
     /// `DEEPSEEK_MODEL`.
     pub model: Option<&'a str>,
+    /// `DEEPSEEK_PROTOCOL`.
+    pub protocol: Option<&'a str>,
+    /// `DEEPSEEK_THINKING`.
+    pub thinking: Option<&'a str>,
+}
+
+/// Resolve credential-free protocol settings with the same precedence as the model connection.
+pub fn model_options_from(
+    prefs: &Prefs,
+    environment: &ModelEnvironment<'_>,
+) -> Result<stkcraft_agent_runtime::ProviderOptions, String> {
+    stkcraft_agent_runtime::ProviderOptions::resolve(
+        prefs
+            .model_endpoint
+            .as_deref()
+            .or(environment.base_url)
+            .unwrap_or(stkcraft_agent_runtime::DEEPSEEK_BASE_URL),
+        prefs.model_protocol.as_deref().or(environment.protocol),
+        prefs.model_thinking.as_deref().or(environment.thinking),
+    )
+}
+
+/// Validate a proposed settings change without requiring or reading a credential.
+pub fn validate_model_options(prefs: &Prefs) -> Result<(), String> {
+    let base_url = std::env::var("DEEPSEEK_BASE_URL").ok();
+    let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
+    let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+    model_options_from(
+        prefs,
+        &ModelEnvironment {
+            base_url: base_url.as_deref(),
+            protocol: protocol.as_deref(),
+            thinking: thinking.as_deref(),
+            ..ModelEnvironment::default()
+        },
+    )
+    .map(|_| ())
 }
 
 /// Resolve the provider from the person's settings and the environment, in that order.
@@ -174,9 +219,8 @@ pub fn model_provider_from(
         .clone()
         .or_else(|| environment.model.map(str::to_owned))
         .unwrap_or_else(|| stkcraft_agent_runtime::DEEPSEEK_MODEL.to_owned());
-    Ok(stkcraft_agent_runtime::Provider::new(
-        endpoint, model, api_key,
-    ))
+    let options = model_options_from(prefs, environment)?;
+    Ok(stkcraft_agent_runtime::Provider::new(endpoint, model, api_key).with_options(options))
 }
 
 impl Prefs {
@@ -359,11 +403,118 @@ mod tests {
     use super::*;
 
     #[test]
+    fn model_protocol_invalid_explicit_settings_are_errors() {
+        for raw in [
+            r#"{"model_protocol":"unknown"}"#,
+            r#"{"model_thinking":"turbo"}"#,
+        ] {
+            let prefs: Prefs = serde_json::from_str(raw).expect("settings object");
+            let result =
+                model_provider_from(&prefs, Some("test-only-key"), &ModelEnvironment::default());
+            assert!(
+                result.is_err(),
+                "invalid explicit settings were accepted: {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_protocol_settings_win_and_proxy_opt_in_is_explicit() {
+        use stkcraft_agent_runtime::{ProviderProtocol, ThinkingMode};
+        let environment = ModelEnvironment {
+            key: Some("test-only-key"),
+            protocol: Some("compatible"),
+            thinking: Some("enabled"),
+            ..ModelEnvironment::default()
+        };
+        let prefs = Prefs {
+            model: Some("deepseek-chat".to_owned()),
+            model_protocol: Some("deepseek".to_owned()),
+            model_thinking: Some("disabled".to_owned()),
+            ..Prefs::default()
+        };
+        let provider = model_provider_from(&prefs, None, &environment).expect("saved settings win");
+        assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
+        assert_eq!(provider.options.thinking, ThinkingMode::Disabled);
+        assert_eq!(
+            provider.model, "deepseek-chat",
+            "explicit model selections survive"
+        );
+
+        let proxy = ModelEnvironment {
+            key: Some("test-only-key"),
+            base_url: Some("https://proxy.invalid/chat/completions"),
+            ..ModelEnvironment::default()
+        };
+        let provider = model_provider_from(&Prefs::default(), None, &proxy).expect("generic proxy");
+        assert_eq!(
+            provider.options.protocol,
+            ProviderProtocol::OpenAiCompatible
+        );
+        let enabled_proxy = ModelEnvironment {
+            protocol: Some("deepseek"),
+            thinking: Some("enabled"),
+            ..proxy
+        };
+        let provider = model_provider_from(&Prefs::default(), None, &enabled_proxy)
+            .expect("explicit proxy opt-in");
+        assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
+        assert_eq!(provider.options.thinking, ThinkingMode::Enabled);
+    }
+
+    #[test]
+    fn model_protocol_shipped_defaults_and_legacy_preferences_are_compatible() {
+        use stkcraft_agent_runtime::{ProviderProtocol, ThinkingMode};
+        let prefs: Prefs = serde_json::from_str(r#"{"language":"zh"}"#).expect("old preferences");
+        assert!(prefs.model_protocol.is_none());
+        assert!(prefs.model_thinking.is_none());
+        let provider =
+            model_provider_from(&prefs, Some("test-only-key"), &ModelEnvironment::default())
+                .expect("shipped defaults");
+        assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
+        assert_eq!(provider.options.thinking, ThinkingMode::Disabled);
+        assert_eq!(provider.model, "deepseek-flash");
+        assert!(
+            model_options_from(
+                &Prefs::default(),
+                &ModelEnvironment {
+                    protocol: Some("typo"),
+                    ..ModelEnvironment::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            model_options_from(
+                &Prefs::default(),
+                &ModelEnvironment {
+                    thinking: Some("turbo"),
+                    ..ModelEnvironment::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            model_options_from(
+                &Prefs::default(),
+                &ModelEnvironment {
+                    protocol: Some("compatible"),
+                    thinking: Some("enabled"),
+                    ..ModelEnvironment::default()
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn preferences_round_trip_through_json() {
         let prefs = Prefs {
             language: Some("de".to_owned()),
             model_endpoint: Some("https://mine.example/v1/chat/completions".to_owned()),
             model: Some("mine".to_owned()),
+            model_protocol: Some("compatible".to_owned()),
+            model_thinking: Some("disabled".to_owned()),
         };
         let text = serde_json::to_string(&prefs).expect("serialised");
         let read: Prefs = serde_json::from_str(&text).expect("deserialised");
@@ -402,6 +553,7 @@ mod tests {
             key: Some("from-environment"),
             base_url: Some("https://env.example/v1/chat/completions"),
             model: Some("env-model"),
+            ..ModelEnvironment::default()
         };
         let provider =
             model_provider_from(&prefs, Some("from-settings"), &environment).expect("a provider");
@@ -435,6 +587,7 @@ mod tests {
             language: None,
             model_endpoint: Some("https://mine.example/v1/chat/completions".to_owned()),
             model: Some("mine".to_owned()),
+            ..Prefs::default()
         };
         let provider = model_provider_from(
             &chosen,
