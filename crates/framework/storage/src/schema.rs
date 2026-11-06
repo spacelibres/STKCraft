@@ -12,7 +12,7 @@
 //!   is the version nobody develops on.
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The statements that create version 1.
 ///
@@ -132,9 +132,52 @@ CREATE TABLE extension_package (
 pub fn migration(version: i64) -> Option<&'static str> {
     match version {
         1 => Some(V1),
+        2 => Some(V2),
         _ => None,
     }
 }
+
+/// The statements that create version 2: the formula store.
+///
+/// A formula is a *record* with provenance (`docs/design/mathematics.md`), so it lives in the
+/// relational store rather than in the index cache: the box, both renderings, the sentence that
+/// introduces it — what it solves — the engine that read it, and the digests that make the chain
+/// re-verifiable. Two strings are never the same formula, so the natural key is the region: a document,
+/// a page and a box.
+pub const V2: &str = r"
+CREATE TABLE formula (
+    id             INTEGER PRIMARY KEY,
+    document       TEXT NOT NULL,
+    page           INTEGER NOT NULL,
+    x0             REAL NOT NULL,
+    y0             REAL NOT NULL,
+    x1             REAL NOT NULL,
+    y1             REAL NOT NULL,
+    -- What the text layer says, always, and what a recogniser made of the image when there is one.
+    unicode        TEXT NOT NULL,
+    latex          TEXT,
+    -- What it solves: the sentence or caption that introduces it, and where that line is.
+    problem        TEXT,
+    problem_lines  TEXT,
+    source         TEXT NOT NULL,
+    confidence     REAL,
+    mathlib_name   TEXT,
+    mathlib_score  REAL,
+    mathlib_domain TEXT,
+    mathlib_rev    TEXT,
+    classifier     TEXT,
+    -- Provenance: the PDF it came from and the pixels of the region.
+    paper_digest   TEXT NOT NULL,
+    region_digest  TEXT NOT NULL,
+    recorded_at    TEXT NOT NULL,
+    UNIQUE (document, page, x0, y0, x1, y1) ON CONFLICT REPLACE
+) STRICT;
+
+-- The classification is a query: which formulas are about this concept, which are in this domain.
+CREATE INDEX formula_by_mathlib ON formula(mathlib_name);
+CREATE INDEX formula_by_domain ON formula(mathlib_domain);
+CREATE INDEX formula_by_document ON formula(document, page);
+";
 
 #[cfg(test)]
 mod tests {
@@ -151,7 +194,7 @@ mod tests {
     #[test]
     fn every_table_is_strict() {
         // The rule the schema exists for: an `INTEGER` column cannot quietly hold text.
-        for statement in V1.split(';') {
+        for statement in V1.split(';').chain(V2.split(';')) {
             let statement = statement.trim_start().to_ascii_uppercase();
             if statement.starts_with("CREATE TABLE") {
                 assert!(

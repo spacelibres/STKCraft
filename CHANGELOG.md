@@ -9,6 +9,36 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.53] — The formula store, with its provenance, as schema version 2
+
+The relational store gains the table `docs/design/mathematics.md` specified: `formula`, keyed by the
+region a formula occupies — a document, a page and a box — because two different formulas can never share
+a box, while two strings can easily share a LaTeX spelling.
+
+It carries what the design says makes a formula checkable rather than plausible: what the text layer says
+and what a recogniser made of it, **what it solves** (`problem` and the lines it came from), the engine
+and its `classifier`, the Mathlib declaration and score and the revision the index was built at, and the
+two digests — the PDF's and the region's — that let `verify-formulas` prove it is re-reading the same
+pixels. Three indexes answer the questions the classification exists for: which formulas are about a
+concept, which are in a domain, and what a document contains.
+
+### Changed
+
+- **`SCHEMA_VERSION` is 2**, and `migration(2)` returns `V2`. The migration is forward-only and additive:
+  every version-1 table is untouched, and the strictness test now walks both versions, so a table added
+  later cannot skip `STRICT`.
+
+### Verified
+
+`cargo test -p stkcraft-framework-storage`: 30 tests, including the strictness walk over `V1` and `V2` —
+which caught a comment containing a semicolon, because a schema that splits statements on `;` is a schema
+where punctuation is load-bearing.
+
+### Not built yet
+
+- **Insert, query and the wiring**: `Store::record_formula`, reading formulas back, and having the PDF
+  layer call `math::segment` so a real document produces these rows. Then the index over them.
+
 ## [0.1.52] — Regions: a formula becomes a box on a page
 
 0.1.51 decided whether a run of glyphs *is* mathematics. This decides **where a formula starts and
