@@ -95,7 +95,10 @@ table, their own recogniser, their own box-shaped citation, and a rule that a fo
 **Done when** (1) display mathematics is segmented from the text layer deterministically, stored with its
 box and Unicode, indexed, and cited as `paper.pdf:page 12, formula at (120,340)-(300,388)`; (2) a
 transcription table over the CCSDS corpus and the SGP4 papers passes; (3) OCR and a formula model run
-behind two environment commands, recording engine and version, with the `unrecognised` path tested.
+behind two environment commands, recording engine and version, with the `unrecognised` path tested;
+(4) every formula records **what problem it solves** (the introducing sentence) and is **classified
+against Mathlib** — a pinned declaration index, a scored match, a domain taxonomy — with the limits
+stated: classification, never proof.
 
 #### F5. Sensors and targets, and what they can see
 

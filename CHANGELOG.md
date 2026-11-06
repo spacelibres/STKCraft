@@ -9,6 +9,43 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.49] — A formula records what it solves, and which mathematics it is
+
+Two additions to `docs/design/mathematics.md`, both from the same objection: a LaTeX string on page 12
+is not an answer.
+
+**What it solves.** Every formula now carries `problem` — the sentence or caption that introduces it,
+captured with the region. A formula without its sentence is a fragment; the sentence is what makes it
+citable and what tells a person which question it answers.
+
+**Which mathematics it is.** Formulas are classified against **Mathlib**, the largest machine-readable
+body of mathematics under a licence this project can use. The integration is an *index*, not a
+dependency: `cargo xtask mathlib` parses a pinned Mathlib checkout into one table of declarations — name,
+kind, module path, statement, docstring, digest — and a deterministic classifier normalises the formula's
+operators, scores candidates against that table, and records the match (`mathlib_name`,
+`mathlib_score`, `mathlib_domain`, `classifier`). The module path gives the taxonomy — Analysis,
+Algebra, Topology, Probability, Numerics — which is what makes a corpus *classifiable*: listed by domain,
+searched within one, or asked "which of my papers are about this as a numerical problem".
+
+The limits are written into the document because they decide whether the feature helps or lies:
+**classification is not verification**. "This formula is about `Real.sqrt` with score 0.83, and the words
+around it match that declaration's docstring" is the claim; "this paper proves the theorem" is not, and
+the assistant is required to say it the first way. A wrong classification costs a bad tag; a fake proof
+costs the project its reason to exist.
+
+### Changed
+
+- **`formulas` gains `problem`, `mathlib_name`, `mathlib_score`, `mathlib_domain`, `classifier`**, and
+  the knowledge index now indexes the Mathlib name as well, so a search for `sqrt` finds the formula
+  classified as `Real.sqrt`.
+- **The transcription table records the problem sentence with the LaTeX**, so "what does it solve" is
+  measured at the same time as "what does it say".
+
+### Not built yet
+
+- **The implementation**, in the document's order: segmentation and storage, the transcription table,
+  OCR and the formula model, then the Mathlib index and classifier.
+
 ## [0.1.48] — Mathematics is a store, not a kind of prose
 
 The requirement: formulas must be recognised well, and stored separately, because a misread formula

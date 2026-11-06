@@ -65,6 +65,67 @@ Layers 1 and 2 are ours, deterministic, offline and testable to the character. L
 external because the honest state of formula recognition is *models*, and a model is configuration in
 this project, not a dependency baked into the binary.
 
+## What a formula is for, and what mathematics it is
+
+A formula on page 12 is not useful because it has a LaTeX spelling. It is useful because a person can
+ask *what does this solve* and *which mathematics is this*, and get an answer that points at both the
+paper and the concept. Two fields carry that, and neither is guessed:
+
+- **`problem`** — what the formula is for, in the paper's own words: the sentence or caption that
+  introduces it, captured with the region. A formula without its sentence is a fragment; the sentence
+  is what makes it citable.
+- **`classification`** — the mathematics it belongs to, resolved against **Mathlib**, with a score and
+  the declaration it matched.
+
+### Mathlib as the vocabulary
+
+Mathlib is the largest machine-readable body of mathematics that exists under a licence this project can
+use (Apache-2.0), and its *taxonomy is the useful part*: `Mathlib/Analysis/SpecialFunctions/Sqrt.lean`
+says what a square root is, `Mathlib/Analysis/Calculus/FDeriv/Basic.lean` says what a derivative is, and
+the docstring of each declaration says what it is for.
+
+So the integration is an **index, not a dependency**: `cargo xtask mathlib` fetches a pinned Mathlib
+checkout, parses it for declarations (`def`, `theorem`, `lemma`, `structure`, `class`) with their module
+path, statement and docstring, and writes one table:
+
+```sql
+CREATE TABLE mathlib_declarations (
+    name          TEXT PRIMARY KEY,   -- `Real.sqrt`, `HasDerivAt`, `Finset.sum`
+    kind          TEXT NOT NULL,      -- def | theorem | lemma | structure | class
+    module        TEXT NOT NULL,      -- `Mathlib/Analysis/SpecialFunctions/Sqrt.lean`
+    domain        TEXT NOT NULL,      -- the top-level taxonomy: Analysis, Algebra, Topology, …
+    statement     TEXT,               -- the declaration's type, as written
+    docstring     TEXT,               -- what it is for, verbatim
+    digest        TEXT NOT NULL       -- SHA-256 of the declaration text, for reproducibility
+) STRICT;
+```
+
+Nothing of Lean is linked and no proof is checked: this is a **lexicon of names, statements and
+purposes**, which is exactly what classification needs and what a Rust program can hold.
+
+### How a formula is classified
+
+Deterministic, scored, and honest about being a guess with a number:
+
+1. **Symbol normalisation.** The recognised LaTeX and its Unicode fallback are normalised to canonical
+   operators (`√`→`sqrt`, `∑`→`sum`, `∂`→`deriv`, `∫`→`integral`, `|x|`→`abs`, …). Math symbols in the
+   text layer are the strong evidence; OCR'd symbols are the weak kind and are recorded as such.
+2. **Candidates.** Declarations whose name or statement contains the normalised operators, fetched from
+   an inverted index over `mathlib_declarations` — the same interned index the knowledge base uses.
+3. **Score.** Operator overlap, arity shape (a derivative has one argument and one variable, a sum has an
+   index and a body), and the paper's own surrounding words against the declaration's docstring. Each
+   formula keeps its top candidates with their scores.
+4. **Domain.** The winning candidate's module path yields the taxonomy (`Analysis`, `Algebra`,
+   `Topology`, `Probability`, `Geometry`, `Numerics`), which is what makes a corpus *classifiable*: a
+   library can be listed by domain, a search can be restricted to one, and a mission engineer can ask
+   "which of my papers are about orbit determination as a numerical problem".
+
+**What this is not.** It is not verification, and it is not a proof. A classification says *this formula
+is about `Real.sqrt`, with score 0.83, and the words around it match `Real.sqrt`'s docstring*. The
+assistant is required to present it that way — "the library's formula for X (page 12) matches Mathlib's
+`Mathlib.Analysis.SpecialFunctions.Sqrt.sqrt`, which is defined as …" — and never as "this paper proves
+the theorem". A wrong classification costs a bad tag; a fake proof costs the project its reason to exist.
+
 ## Where a formula lives
 
 The relational store (SQLite, `docs/design/storage.md`) gains one table, because a formula is a *record*
@@ -79,16 +140,22 @@ CREATE TABLE formulas (
     latex         TEXT,                   -- when the recogniser produced it
     unicode       TEXT,                   -- always: what the text layer says, if anything
     surroundings  TEXT,                   -- the sentence that introduces it, for retrieval
+    problem       TEXT,                   -- the sentence or caption that introduces it: what it solves
     source        TEXT NOT NULL,          -- deterministic/text-layer | model/<engine>/<version> | unrecognised
     confidence    REAL,                   -- when the source reports one
+    mathlib_name  TEXT,                   -- the declaration it matched, when it matched one
+    mathlib_score REAL,                   -- and how strongly
+    mathlib_domain TEXT,                  -- the taxonomy the match implies
+    classifier    TEXT,                   -- the scoring engine and version, like `source`
     digest        TEXT NOT NULL,          -- SHA-256 of the region image
     FOREIGN KEY (document) REFERENCES documents(path)
 ) STRICT;
 ```
 
-The knowledge index (`crates/agent/knowledge/src/index.rs`) indexes three things from each row: the
-LaTeX tokens, the Unicode fallback, and the surrounding sentence — so a search for `off-nadir` finds the
-equation whose caption says off-nadir, and a search for `\frac` finds it too. The citation a hit prints
+The knowledge index (`crates/agent/knowledge/src/index.rs`) indexes four things from each row: the LaTeX
+tokens, the Unicode fallback, the sentence that introduces it, and the Mathlib name it was classified
+as — so a search for `off-nadir` finds the equation whose caption says off-nadir, a search for `\frac`
+finds it too, and a search for `sqrt` finds the formula classified as `Real.sqrt`. The citation a hit prints
 is `paper.pdf:page 12, formula at (120, 340)-(300, 388)`, not a line range: a box is what a reader can
 find on a page that has no lines.
 
@@ -106,8 +173,9 @@ as the default.
 1. **Detection and storage** (ours, deterministic): segment math regions from the text layer, store them
    with their boxes and Unicode, index them, and cite them by box. A test proves a display equation in a
    CCSDS PDF is found on the page it is on and stored with its glyphs.
-2. **The transcription table** for layer 1, so the segmentation is measured rather than claimed.
+2. **The transcriptions and the problem sentences**: each row of the table records the expected LaTeX
+   *and* the sentence that introduces the formula, so "what does it solve" is measured with the formula.
 3. **OCR and the formula model** behind the two environment commands, with `source` and `confidence`
    recorded, and the `unrecognised` path tested — including that it never produces text it did not read.
-4. **Agent and panel**: `knowledge.search` returns formulas as their own hits with the box citation, and
+5. **Agent and panel**: `knowledge.search` returns formulas as their own hits with the box citation, and
    a formula is quoted with its page so a person can check the pixels.
