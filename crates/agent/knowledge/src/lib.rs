@@ -67,6 +67,7 @@ pub mod cache;
 pub mod chunk;
 pub mod index;
 pub mod library;
+pub mod math;
 pub mod pdf;
 pub mod tokens;
 
@@ -74,5 +75,6 @@ pub use cache::Reuse;
 pub use chunk::{Chunk, chunk, chunk_pages};
 pub use index::Index;
 pub use library::{Document, Hit, Library, Limits, Opened, Search, load_directory};
+pub use math::Evidence;
 pub use pdf::{Bounds, Extracted, Page, PdfError, extract, looks_like_pdf};
 pub use tokens::{query_tokens, tokenize, tokens};

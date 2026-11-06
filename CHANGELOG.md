@@ -9,6 +9,37 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.51] — The evidence a run is mathematics, pinned character by character
+
+The first line of code under `docs/design/mathematics.md`, and deliberately the smallest one that can be
+wrong: `stkcraft_agent_knowledge::math` decides whether a run of glyphs is mathematics at all, before
+anything is segmented, stored or classified.
+
+Three kinds of evidence, in the order a reader uses them:
+
+- **the characters** — `∫ ∑ ∂ √ ≤ ≠` and the Greek block. One operator is enough, because no sentence
+  contains a contour integral by accident; **one** Greek letter is not, because that is how a paper
+  writes a variable in prose, and half the value of a separate store is that prose stays out of it;
+- **the face** — `CMMI10`, `MathematicalPi`, `CambriaMath`, `STIXTwoMath`, `Symbol`; the font name
+  travels with the glyph, so this is evidence a text layer can give and a scan cannot;
+- **the baseline** — three distinct baselines in one run is `x² + y²`, which has no operator and no Greek
+  and is still a formula.
+
+`Evidence::why()` returns the reason a citation can print, and the tests pin the boundaries rather than
+the behaviour: the Unicode block ranges are asserted at their published endpoints, `Cmr10` matches while
+`Helvetica` does not, and `the answer = 4` is prose — a digit and an equals sign are not evidence, and
+treating them as evidence is how a formula store fills with sentences.
+
+### Added
+
+- **`crates/agent/knowledge/src/math.rs`** — `BLOCKS`, `Evidence`, `is_math_font`, five tests.
+
+### Not built yet
+
+- **Segmentation**: turning evidence into regions with boxes. Then storage, the transcription table,
+  OCR and the formula model, the Mathlib index and classifier, and `verify-formulas` — in the order
+  `docs/design/mathematics.md` sets.
+
 ## [0.1.50] — A formula you can trace, or it is not worth storing
 
 The point of a formula store is that a person can check it. So the design now builds provenance into the
