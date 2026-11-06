@@ -62,6 +62,7 @@ fn main() -> ExitCode {
         Some("math-regions") => task_math_regions(args.get(1..).unwrap_or_default()),
         Some("formulas") => task_formulas(args.get(1..).unwrap_or_default()),
         Some("mathlib") => task_mathlib(args.get(1..).unwrap_or_default()),
+        Some("verify-formulas") => task_verify_formulas(),
         Some("standards" | "fetch-standards") => {
             task_fetch_standards(args.get(1..).unwrap_or_default())
         }
@@ -133,10 +134,12 @@ Tasks:
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
+  verify-formulas  re-extract every recorded formula, re-classify, fail on drift
   standards download every CCSDS publication, verified (the set we align to)
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
+  verify-formulas  re-extract every recorded formula, re-classify, fail on drift
   fetch-data  download the ephemeris kernels and tables, verified
   lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
@@ -891,6 +894,149 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
 ///
 /// A row is `name<TAB>kind<TAB>domain<TAB>module<TAB>digest<TAB>statement<TAB>docstring`, and the file goes
 /// to `data/mathlib/declarations.tsv` unless a directory is named.
+/// Re-extract every recorded formula, re-classify it, and fail on drift.
+///
+/// This is the command `docs/design/mathematics.md` names as what makes provenance re-verifiable rather
+/// than a snapshot of an afternoon: the boxes in `share/math/transcriptions.tsv` are read again from the
+/// corpus, the classifier runs again over the stored lexicon, and any difference is reported. It also
+/// records the classification it found — `data/mathlib/classifications.tsv` — so "this formula is about
+/// `Real.sqrt`, with score 1.0" has a file that a later run can contradict.
+fn task_verify_formulas() -> Result<(), String> {
+    let root = workspace_root();
+    let table = fs::read_to_string(root.join("share/math/transcriptions.tsv"))
+        .map_err(|error| format!("could not read the transcription table: {error}"))?;
+    let corpus = root.join("data/standards");
+    let lexicon = read_lexicon(&root);
+    let mut checked = 0_usize;
+    let mut failures: Vec<String> = Vec::new();
+    let mut classified: Vec<Classification> = Vec::new();
+    for line in table.lines() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [document, page, x0, y0, x1, y1, expect, note] = fields[..] else {
+            failures.push(format!("malformed row: {line}"));
+            continue;
+        };
+        let page: usize = page.parse().map_err(|_| "bad page".to_owned())?;
+        let number = |text: &str| {
+            text.parse::<f64>()
+                .map_err(|_| format!("`{text}` is not a number"))
+        };
+        let (x0, y0, x1, y1) = (number(x0)?, number(y0)?, number(x1)?, number(y1)?);
+        let bytes = fs::read(corpus.join(document)).map_err(|error| {
+            format!("could not read {document} (run `cargo xtask standards`): {error}")
+        })?;
+        let extracted = stkcraft_agent_knowledge::extract(&bytes, 64 << 20)
+            .map_err(|error| format!("{document}: {error}"))?;
+        // The region the row names: same page, box within two points, exactly as `formulas` checks it.
+        let region = extracted.regions.iter().find(|region| {
+            region.page == page
+                && (region.x0 - x0).abs() <= 2.0
+                && (region.y0 - y0).abs() <= 2.0
+                && (region.x1 - x1).abs() <= 2.0
+                && (region.y1 - y1).abs() <= 2.0
+        });
+        checked += 1;
+        match (expect, region) {
+            ("formula", Some(region)) => {
+                let matched = lexicon.as_ref().and_then(|declarations| {
+                    stkcraft_agent_knowledge::mathlib::classify(&region.unicode, declarations)
+                });
+                classified.push(Classification {
+                    document: document.to_owned(),
+                    page: u32::try_from(page).unwrap_or(0),
+                    name: matched.as_ref().map(|found| found.name.clone()),
+                    score: matched.as_ref().map(|found| found.score),
+                    domain: matched.as_ref().map(|found| found.domain.clone()),
+                });
+            }
+            ("formula", None) => failures.push(format!(
+                "{document}:page {page}: DRIFT, the formula is gone ({note})"
+            )),
+            ("not-formula", Some(_)) => failures.push(format!(
+                "{document}:page {page}: DRIFT, a refused region is back ({note})"
+            )),
+            _ => {}
+        }
+    }
+    let directory = root.join("data/mathlib");
+    if fs::create_dir_all(&directory).is_ok() {
+        {
+            let mut text =
+                String::from("document\tpage\tmathlib_name\tmathlib_score\tmathlib_domain\n");
+            for row in &classified {
+                let _ = std::fmt::Write::write_fmt(
+                    &mut text,
+                    format_args!(
+                        "{}\t{}\t{}\t{}\t{}\n",
+                        row.document,
+                        row.page,
+                        row.name.as_deref().unwrap_or("-"),
+                        row.score
+                            .map_or("-".to_owned(), |score| format!("{score:.2}")),
+                        row.domain.as_deref().unwrap_or("-")
+                    ),
+                );
+            }
+            let path = directory.join("classifications.tsv");
+            fs::write(&path, text)
+                .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+        }
+    }
+    for failure in &failures {
+        eprintln!("verify-formulas: {failure}");
+    }
+    let unclassified = classified.iter().filter(|row| row.name.is_none()).count();
+    println!(
+        "verify-formulas: {checked} row(s) re-read, {} formula(s) re-classified, {unclassified} with no match, {} drifted",
+        classified.len(),
+        failures.len()
+    );
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} recorded formula(s) drifted", failures.len()))
+    }
+}
+
+/// One formula's classification, as `verify-formulas` records it.
+struct Classification {
+    /// The document the formula was read from.
+    document: String,
+    /// The page.
+    page: u32,
+    /// The Mathlib declaration it matched, when it matched one.
+    name: Option<String>,
+    /// How strongly.
+    score: Option<f64>,
+    /// The taxonomy the match implies.
+    domain: Option<String>,
+}
+
+/// The lexicon, when `data/mathlib/declarations.tsv` is present.
+fn read_lexicon(root: &Path) -> Option<Vec<stkcraft_agent_knowledge::mathlib::Declaration>> {
+    let text = fs::read_to_string(root.join("data/mathlib/declarations.tsv")).ok()?;
+    let mut declarations = Vec::new();
+    for line in text.lines().skip(1) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [name, kind, domain, module, digest, statement, docstring] = fields[..] else {
+            continue;
+        };
+        declarations.push(stkcraft_agent_knowledge::mathlib::Declaration {
+            name: name.to_owned(),
+            kind: kind.to_owned(),
+            module: module.to_owned(),
+            domain: domain.to_owned(),
+            statement: statement.to_owned(),
+            docstring: docstring.to_owned(),
+            digest: digest.to_owned(),
+        });
+    }
+    (!declarations.is_empty()).then_some(declarations)
+}
+
 fn task_mathlib(args: &[String]) -> Result<(), String> {
     let root = workspace_root();
     let checkout = args

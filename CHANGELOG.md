@@ -9,6 +9,41 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.68] — Drift is now a command, and the classification says what it cannot know
+
+`cargo xtask verify-formulas` closes step 3: it re-reads every recorded box from the corpus, re-runs the
+classifier over the stored lexicon, and fails when a region has moved, vanished, or come back after being
+refused. It also writes what it found to `data/mathlib/classifications.tsv`, so a claim like "this formula
+is about `Real.sqrt`, score 1.0" has a file a later run can contradict.
+
+```
+$ cargo xtask verify-formulas
+verify-formulas: 9 row(s) re-read, 3 formula(s) re-classified, 3 with no match, 0 drifted
+```
+
+### The zeros are the finding
+
+All three recorded equations classify as **no match**, and the reason is worth stating rather than hiding:
+they are polynomials — `F(x) = x⁸+x⁷+x²+x+1` — and the operator table built for the classifiers of 0.1.67
+covers `√ ∑ ∏ ∫ ∂ ∇ ∞ ≤ ≥ ≠ ≈ \frac`, **not `+` and `^`**. So a formula whose only operators are arithmetic
+finds nothing to match, and the classifier returns `None` rather than the nearest declaration.
+
+That is the rule working as designed (*a classification this project cannot justify is one it does not
+make*), and it also marks the next piece of real work: the operator table needs the arithmetic that
+polynomial formulas are made of, and the lexicon needs a great many more declarations than the 23 read from
+one file before a match means anything.
+
+### Added
+
+- **`cargo xtask verify-formulas`** — re-extract, re-classify, fail on drift, and record.
+- **`data/mathlib/classifications.tsv`** — the classification of every recorded formula, written by the run.
+
+### Not built yet
+
+- **The operator table is too narrow** for polynomial formulas, and no `+`/`^` declaration was in the
+  lexicon that was read. Both need widening before a match is evidence.
+- The linked-OCR feature with its CI leg; then F3 and F5.
+
 ## [0.1.67] — A classifier that refuses, and says why it matched
 
 The second half of step 2: `mathlib::classify` scores a formula against the declaration lexicon, and
