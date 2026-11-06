@@ -117,6 +117,12 @@ COMMANDS
     version     Print the version
     help        Print this text
 
+WINDOW OPTIONS
+    --control <PORT>               Serve the control channel from the window, so a launcher can
+                                   drive it and photograph it (also STKCRAFT_CONTROL_PORT).
+                                   `stkcraft control --port <PORT>` serves the same protocol
+                                   with no window at all.
+
 PASSES OPTIONS
     --tle <LINE1> <LINE2>          A two-line element set. Required.
     --lat <DEGREES>                Station geodetic latitude, positive north. Default 0.
@@ -724,13 +730,28 @@ fn parse_control<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocat
 /// The token is written where a client looks (`$XDG_RUNTIME_DIR/stkcraft/control-<port>.token`) and
 /// printed nowhere else: a token on standard output ends up in a terminal scrollback and a log.
 fn control(request: &ControlRequest) -> Result<(), String> {
-    let server = stkcraft_agent_mcp::Server::new(
+    let session = stkcraft_agent_control::Control::new(
+        control_session()?,
+        stkcraft_agent_control::new_token(),
+    );
+    stkcraft_agent_control::serve(request.port, session)
+}
+
+/// The session a control channel serves: the engine's commands, the skills, and the person's
+/// documents.
+///
+/// Shared by the CLI's headless channel and by the window's, so the two answer `engine.commands` and
+/// `knowledge.*` identically — the difference between them is only the window-owned half.
+///
+/// # Errors
+///
+/// A message when the demo scenario or the knowledge base cannot be opened.
+pub(crate) fn control_session() -> Result<stkcraft_agent_mcp::Server, String> {
+    Ok(stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
-    .with_knowledge(knowledge_library()?);
-    let session = stkcraft_agent_control::Control::new(server, stkcraft_agent_control::new_token());
-    stkcraft_agent_control::serve(request.port, session)
+    .with_knowledge(knowledge_library()?))
 }
 
 /// Print what this installation has computed, newest first.

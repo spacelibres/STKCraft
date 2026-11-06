@@ -804,7 +804,7 @@ fn assert_occlusion(scene: &SceneData, camera: &Camera, rgb: &[u8]) -> Result<()
 /// IEND. The zlib stream uses **stored** (uncompressed) deflate blocks: legal, trivial to emit,
 /// and it needs no dependency. The file is larger, which does not matter for a verification image
 /// that is never shipped as an asset.
-fn write_png<W: std::io::Write>(
+pub(crate) fn write_png<W: std::io::Write>(
     writer: &mut W,
     width: u32,
     height: u32,

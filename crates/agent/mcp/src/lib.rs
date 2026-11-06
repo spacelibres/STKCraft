@@ -37,10 +37,9 @@ use std::path::Path;
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
-use stkcraft_astro_engine::commands::{Arg, Args, Parameter, ParameterKind, Registry};
+use stkcraft_astro_engine::commands::{Parameter, ParameterKind, Registry};
 use stkcraft_astro_engine::scenario::Scenario;
 use stkcraft_astro_engine::{PlanetPass, SatelliteAccess};
-use stkcraft_framework_core::Angle;
 use stkcraft_framework_time::{Epoch, julian_to_utc_naive};
 
 /// The MCP revision this server implements.
@@ -498,13 +497,9 @@ impl Server {
         let Some(command) = self.registry.get(name) else {
             return Err(format!("no such tool `{name}`; call tools/list"));
         };
-        let mut args = Args::none();
-        for parameter in command.descriptor.parameters {
-            let Some(value) = arguments.get(parameter.name) else {
-                continue;
-            };
-            args = args.with(parameter.name, argument_from_json(parameter, value));
-        }
+        // The conversion lives in the engine so every transport makes it identically: the kind a
+        // parameter declares is what decides the typed value a command receives.
+        let args = stkcraft_astro_engine::args_from(&command.descriptor, arguments);
         let outcome = self
             .registry
             .run(name, &mut self.scenario, &args)
@@ -786,35 +781,6 @@ fn seconds_text(seconds: f64) -> String {
 /// a latitude arrives as `51.5` and becomes a typed `Angle`, and a body name arrives as `"Mars"` and
 /// becomes text. Getting this wrong is not cosmetic — an angle the command never receives is a
 /// command that answers "expected an angle" to a caller who sent exactly the right number.
-fn argument_from_json(parameter: &Parameter, value: &Value) -> Arg {
-    match parameter.kind {
-        ParameterKind::Text => Arg::Text(match value {
-            Value::String(text) => text.clone(),
-            other => other.to_string(),
-        }),
-        ParameterKind::Number => match number_from_json(value) {
-            Some(number) => Arg::Number(number),
-            None => Arg::Text(value.to_string()),
-        },
-        ParameterKind::Degrees => match number_from_json(value) {
-            Some(degrees) => Arg::Angle(Angle::from_deg(degrees)),
-            None => Arg::Text(value.to_string()),
-        },
-    }
-}
-
-/// A number from a JSON number or from a string that holds one.
-///
-/// A model occasionally sends `"51.5"`; accepting it is not laxity, it is accepting the value the
-/// schema asked for in the encoding the model chose, and every command validates the range anyway.
-fn number_from_json(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(number) => number.as_f64(),
-        Value::String(text) => text.parse::<f64>().ok(),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 #[allow(clippy::indexing_slicing)]

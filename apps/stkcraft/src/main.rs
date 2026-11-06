@@ -32,6 +32,7 @@ mod catalogs {
 }
 mod assistant;
 mod cli;
+mod control;
 mod extensions;
 mod fonts;
 mod frame_builder;
@@ -45,7 +46,19 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     // Peek before consuming: `cli::run` takes the iterator by value.
     if std::env::args_os().len() <= 1 {
-        return run_window();
+        return run_window(None);
+    }
+    // `--control <port>` is a window option, not a subcommand: the family's launcher passes it to the
+    // application, which then serves its own scenario and its own picture.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(port) = control_port(&arguments) {
+        return match port {
+            Ok(port) => run_window(Some(port)),
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        };
     }
 
     match cli::run(std::env::args().skip(1)) {
@@ -55,6 +68,37 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The port `--control` asked for, when the arguments are the window's rather than a subcommand's.
+///
+/// `Some(Err(..))` means the flag was there and its value was not a port, which is a mistake worth
+/// reporting rather than falling back to the CLI's "unknown subcommand" message.
+fn control_port(arguments: &[String]) -> Option<Result<u16, String>> {
+    let mut port = None;
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        let value = match argument.as_str() {
+            "--control" => {
+                index += 1;
+                match arguments.get(index) {
+                    Some(value) => Some(value.clone()),
+                    None => return Some(Err("`--control` needs a port".to_owned())),
+                }
+            }
+            other => other
+                .strip_prefix("--control=")
+                .map(std::borrow::ToOwned::to_owned),
+        };
+        if let Some(value) = value {
+            match value.parse::<u16>() {
+                Ok(number) => port = Some(number),
+                Err(_) => return Some(Err(format!("`{value}` is not a port number"))),
+            }
+        }
+        index += 1;
+    }
+    port.map(Ok)
 }
 
 /// Render the first frame through `egui`'s paint-callback path, and exit.
@@ -138,12 +182,19 @@ fn run_screenshot(path: &str) -> ExitCode {
     }
 }
 
+/// A port from the environment, for a launcher that prefers the environment to the command line.
+fn control_port_from_environment() -> Option<u16> {
+    std::env::var("STKCRAFT_CONTROL_PORT")
+        .ok()
+        .and_then(|port| port.parse::<u16>().ok())
+}
+
 /// Open the desktop window, reporting a failure to start rather than panicking.
 ///
 /// A machine with no display, no GPU adapter or no window system is a normal place to run a
 /// binary — in CI, over SSH, inside a container — so the message says what to do instead of
 /// printing a backtrace.
-fn run_window() -> ExitCode {
+fn run_window(control: Option<u16>) -> ExitCode {
     if let Ok(path) = std::env::var("STKCRAFT_SCREENSHOT") {
         return run_screenshot(&path);
     }
@@ -161,7 +212,25 @@ fn run_window() -> ExitCode {
         }
     };
 
-    let application = app::App::new(scenario, 30.0);
+    let mut application = app::App::new(scenario, 30.0);
+    if let Some(port) = control.or_else(control_port_from_environment) {
+        // The channel's stateless half runs on its own thread with its own session; the window
+        // answers the half that reads it. A port already in use is reported by that thread.
+        let server = match cli::control_session() {
+            Ok(server) => server,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::FAILURE;
+            }
+        };
+        match control::start(port, server) {
+            Ok(bridge) => application.serve_control(bridge),
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     match app::run(app::native_options(), application) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {

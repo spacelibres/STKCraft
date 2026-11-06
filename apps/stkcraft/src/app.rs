@@ -79,6 +79,10 @@ pub struct App {
     /// The language the font stack was built for; a change to the language rebuilds it, because the
     /// Han faces are ordered by language.
     fonts_for: Option<String>,
+    /// The control channel, when this window serves one: a launcher drives *this* scenario.
+    control: Option<crate::control::Bridge>,
+    /// How many frames this window has drawn, so `ui.state` can say whether it is painting.
+    frames: u64,
 }
 
 impl App {
@@ -125,7 +129,151 @@ impl App {
             translation: None,
             translation_status: None,
             fonts_for: None,
+            control: None,
+            frames: 0,
         }
+    }
+
+    /// Serve the control channel from this window.
+    ///
+    /// The stateless methods are answered on the socket thread by the session it was given; the ones
+    /// that read or change this window arrive here and are answered once a frame, because the
+    /// scenario a launcher drives has to be the scenario a person is looking at.
+    pub fn serve_control(&mut self, bridge: crate::control::Bridge) {
+        self.control = Some(bridge);
+    }
+
+    /// The drain, for a test that has no window to draw.
+    #[cfg(test)]
+    fn serve_requests_for_test(&mut self, ctx: &egui::Context) {
+        self.serve_requests(ctx);
+    }
+
+    /// Answer whatever the control channel asked for, and report the frame.
+    ///
+    /// Called once a frame, before drawing: a request that changes the scenario is answered and then
+    /// drawn, which is what makes "rename the scenario, then look at it" one round trip rather than
+    /// two frames of lag.
+    fn serve_requests(&mut self, ctx: &egui::Context) {
+        self.frames += 1;
+        let Some(bridge) = &self.control else {
+            return;
+        };
+        let requests = bridge.pending();
+        for request in requests {
+            let method = request.method.clone();
+            match method.as_str() {
+                "ui.state" => request.answer(Ok(self.state())),
+                "scenario.read" => request.answer(
+                    serde_json::to_value(&self.scenario)
+                        .map_err(|error| format!("could not read the scenario: {error}")),
+                ),
+                "engine.execute" => {
+                    let answer = self.execute_from_control(&request.params);
+                    request.answer(answer);
+                }
+                "ui.screenshot" => Self::capture(ctx, request),
+                other => request.answer(Err(format!(
+                    "this window does not answer `{other}`; it answers {}",
+                    stkcraft_agent_control::WINDOW_METHODS.join(", ")
+                ))),
+            }
+        }
+    }
+
+    /// What the window is doing, as leaf fields rather than a dump of the application.
+    ///
+    /// A launcher polls this to know whether the thing it is driving is the thing it thinks it is:
+    /// the scenario's name, what is in it, where the clock is, how many frames have been drawn, and
+    /// whether the last command worked.
+    fn state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "scenario": self.scenario.name,
+            "satellites": self.scenario.satellites.len(),
+            "stations": self.scenario.stations.len(),
+            "epoch": self.scenario.epoch.to_string(),
+            "now": self.now.to_string(),
+            "rate": self.rate,
+            "frames": self.frames,
+            "access_rows": self.accesses.len(),
+            "assistant_open": self.assistant.open,
+            "language": self.language,
+            "status": self.status.as_ref().map(|(ok, text)| serde_json::json!({"ok": ok, "text": text})),
+        })
+    }
+
+    /// Run one command against this window's scenario, for the control channel.
+    fn execute_from_control(
+        &mut self,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let id = params
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("engine.execute needs a `command`")?;
+        let values = params
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let registry = stkcraft_astro_engine::Registry::builtin();
+        let command = registry
+            .get(id)
+            .ok_or_else(|| format!("no command `{id}`; call `engine.commands`"))?;
+        let args = stkcraft_astro_engine::args_from(&command.descriptor, &values);
+        let outcome = registry
+            .run(id, &mut self.scenario, &args)
+            .map_err(|error| format!("{id}: {error}"))?;
+        // The window redraws from the scenario, so a command that changed it must invalidate the
+        // frame and the table rather than wait for the next tick.
+        self.refresh();
+        if outcome.access.is_some() {
+            self.accesses = outcome.access.clone().unwrap_or_default();
+        }
+        self.status = Some((true, outcome.summary.clone()));
+        Ok(serde_json::json!({"summary": outcome.summary}))
+    }
+
+    /// Answer `ui.screenshot` with the frame the window paints next.
+    ///
+    /// `egui` hands the pixels to a callback after the frame is rendered, so the answer is sent from
+    /// there rather than from this function — and a window that never paints sends nothing, which the
+    /// client reports as a timeout rather than as an empty image.
+    fn capture(ctx: &egui::Context, request: crate::control::Request) {
+        let directory = stkcraft_framework_storage::Paths::for_user().map_or_else(
+            |_| std::env::temp_dir().join("stkcraft-screenshots"),
+            |paths| paths.root().join("screenshots"),
+        );
+        ctx.request_screenshot(move |image| {
+            let answer = (|| -> Result<serde_json::Value, String> {
+                let capture = crate::control::Capture::of(&image);
+                let png = capture.png()?;
+                std::fs::create_dir_all(&directory).map_err(|error| {
+                    format!("could not create {}: {error}", directory.display())
+                })?;
+                // Named by the frame's own time, so two captures of one session do not overwrite
+                // each other and a person can find the one a report refers to.
+                let name = format!(
+                    "window-{}.png",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |since| since.as_millis())
+                );
+                let path = directory.join(name);
+                std::fs::write(&path, &png)
+                    .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+                Ok(serde_json::json!({
+                    "path": path.to_string_lossy(),
+                    "bytes": png.len(),
+                    "width": capture.width,
+                    "height": capture.height,
+                    "base64": crate::control::base64(&png),
+                }))
+            })();
+            request.answer(answer);
+        });
+        // A window that is not painting has to be asked to: a launcher screenshotting a minimised
+        // window would otherwise wait for a frame nobody is drawing.
+        ctx.request_repaint();
     }
 
     /// Install the family font stack for the current language, if it is not already installed.
@@ -583,6 +731,8 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // Before anything is drawn: a label in a script no installed face covers is tofu.
         self.install_fonts(ui.ctx());
+        // Then whatever a launcher asked for, so this frame already shows the answer.
+        self.serve_requests(ui.ctx());
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_update).as_secs_f64();
         self.last_update = now;
@@ -741,8 +891,151 @@ pub fn native_options() -> eframe::NativeOptions {
 
 #[cfg(test)]
 #[expect(clippy::expect_used)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    /// A window with a bridge attached, and the sender that plays the socket thread's part.
+    fn window_with_control() -> (
+        App,
+        std::sync::mpsc::Sender<crate::control::Request>,
+        egui::Context,
+    ) {
+        let scenario = demo_scenario().expect("the demo scenario");
+        let mut application = App::new(scenario, 30.0);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        application.serve_control(crate::control::Bridge { requests: receiver });
+        (application, sender, egui::Context::default())
+    }
+
+    /// Ask the window one method and return its answer.
+    fn ask(
+        application: &mut App,
+        sender: &std::sync::mpsc::Sender<crate::control::Request>,
+        ctx: &egui::Context,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let (reply, answer) = std::sync::mpsc::channel();
+        sender
+            .send(crate::control::Request {
+                method: method.to_owned(),
+                params,
+                reply,
+            })
+            .expect("the bridge is open");
+        application.serve_requests_for_test(ctx);
+        answer.try_recv().expect("the window answered")
+    }
+
+    #[test]
+    fn a_launcher_drives_the_scenario_the_window_is_showing() {
+        // The property the whole channel exists for: a command run through the bridge changes *this*
+        // window's scenario — the one a person is looking at — and not a copy on another thread.
+        let (mut application, sender, ctx) = window_with_control();
+        let before = application.scenario.name.clone();
+        let answer = ask(
+            &mut application,
+            &sender,
+            &ctx,
+            "engine.execute",
+            serde_json::json!({"command": "scenario.rename", "params": {"name": "Gemini"}}),
+        )
+        .expect("the command ran");
+        assert!(
+            answer
+                .get("summary")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|summary| summary.contains("Gemini")),
+            "{answer}"
+        );
+        assert_eq!(application.scenario.name, "Gemini");
+        assert_ne!(application.scenario.name, before);
+
+        // And the state it reports is the state it has, not a description of what it used to be.
+        let state = ask(
+            &mut application,
+            &sender,
+            &ctx,
+            "ui.state",
+            serde_json::json!({}),
+        )
+        .expect("state");
+        assert_eq!(state["scenario"], serde_json::json!("Gemini"));
+        assert_eq!(
+            state["satellites"].as_u64(),
+            Some(application.scenario.satellites.len() as u64)
+        );
+
+        // `scenario.read` is the same document the MCP resource serves.
+        let document = ask(
+            &mut application,
+            &sender,
+            &ctx,
+            "scenario.read",
+            serde_json::json!({}),
+        )
+        .expect("the document");
+        assert_eq!(document["name"], serde_json::json!("Gemini"));
+    }
+
+    #[test]
+    fn a_request_from_another_thread_reaches_the_window_and_comes_back() {
+        // The handoff the socket thread actually performs: send, block on a reply, and let the window
+        // answer on the frame it draws next. The two run on different threads here, as they do in the
+        // application, so a channel that dropped the answer or a lock that deadlocked would show.
+        let (mut application, sender, ctx) = window_with_control();
+        let host = crate::control::forward(sender);
+        let client = std::thread::spawn(move || host.request("ui.state", &serde_json::json!({})));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !client.is_finished() && std::time::Instant::now() < deadline {
+            application.serve_requests_for_test(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let answer = client
+            .join()
+            .expect("the client thread")
+            .expect("an answer");
+        assert_eq!(
+            answer["scenario"],
+            serde_json::json!(application.scenario.name)
+        );
+    }
+
+    #[test]
+    fn a_command_the_registry_does_not_have_is_refused_with_a_way_out() {
+        let (mut application, sender, ctx) = window_with_control();
+        let error = ask(
+            &mut application,
+            &sender,
+            &ctx,
+            "engine.execute",
+            serde_json::json!({"command": "scenario.explode"}),
+        )
+        .expect_err("an unknown command");
+        assert!(error.contains("engine.commands"), "{error}");
+    }
+
+    #[test]
+    fn a_screenshot_is_handed_to_the_painter_rather_than_answered_with_a_fake_image() {
+        // A capture can only be answered after a frame is painted, so the request must not be
+        // answered here: a launcher told "ok" with an image nobody drew is worse than one that waits
+        // and is told the window never painted.
+        let (mut application, sender, ctx) = window_with_control();
+        let (reply, answer) = std::sync::mpsc::channel();
+        sender
+            .send(crate::control::Request {
+                method: "ui.screenshot".to_owned(),
+                params: serde_json::json!({}),
+                reply,
+            })
+            .expect("the bridge is open");
+        application.serve_requests_for_test(&ctx);
+        assert!(
+            answer.try_recv().is_err(),
+            "the screenshot was answered without a painted frame"
+        );
+    }
 
     #[test]
     fn the_demo_scenario_builds_and_propagates() {

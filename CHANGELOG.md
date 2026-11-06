@@ -9,6 +9,70 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.43] — The window answers the launcher, and hands over the picture
+
+Since 0.1.36 the control channel existed, but only a CLI process could open it. The process that owns
+the scenario a person is looking at is the *window*, and a launcher could drive a copy of the engine
+that nobody was watching — or, more usefully, nothing at all. This release makes the window serve the
+channel, which is what the family's other apps do and what `AGENTS.md` had been promising.
+
+The protocol splits in two, and the split is the design:
+
+- **the stateless half** — `version`, `engine.commands`, `knowledge.search`, `knowledge.documents` —
+  is answered on the socket thread, which has its own session: a command list is a command list, and
+  the person's documents are files on disk.
+- **the half that reads or changes the window** — `engine.execute`, `scenario.read`, `ui.state`,
+  `ui.screenshot` — is forwarded to the thread that owns it, once a frame. A launcher that renames the
+  scenario and a person watching the screen are then looking at one scenario instead of two copies
+  that drift apart.
+
+`ui.state` answers with leaf fields — the scenario's name, what is in it, where the clock is, how many
+frames have been painted, the interface language, the last status — so a launcher can ask "is the
+thing I am driving the thing I think it is" and get an answer rather than a guess.
+
+`ui.screenshot` asks egui for the frame it paints next, writes it to `screenshots/` under the data
+directory, and returns the path, the size and the bytes in base64. **A capture that did not happen is
+an error with the reason in it** — no painted frame, a window that is minimised — because a launcher
+told "ok" with an image nobody drew is worse than one told why it waited. The request carries a
+deadline for the same reason: a client has to be able to tell a slow window from a hung one.
+
+### Added
+
+- **`crates/agent/control::UiHost`** — the trait a window implements, and `WINDOW_METHODS`, the four
+  names that are forwarded. `Control::with_ui` wires it in; without it (the CLI's `control`
+  subcommand) the same methods are answered by the process's own session, so both paths stay working.
+- **`apps/stkcraft/src/control.rs`** — the bridge: a channel of requests, each with its own reply
+  sender, drained once a frame; a PNG encoder for an egui frame; and a hand-written base64 (§10 vectors
+  in the tests) rather than a crate for forty lines of table lookup.
+- **`stkcraft --control <port>`** — and `STKCRAFT_CONTROL_PORT` — opens the window and serves the
+  channel. `stkcraft control --port <port>` still serves it with no window at all.
+- **`stkcraft_astro_engine::args_from`** — the JSON-to-arguments conversion the MCP server had privately,
+  now in the engine so every transport makes it identically: the kind a parameter declares decides the
+  typed value a command receives.
+
+### Verified
+
+Against a live window on this machine, over a real socket:
+
+```text
+auth              → {"ok": true, "version": "0.1.43"}
+ui.state          → scenario "Demo", 1 satellite, 1 station, 526 frames, language zh
+engine.execute    → scenario renamed to `Gemini`
+ui.state          → scenario "Gemini"          # the window's own scenario, not a copy
+ui.screenshot     → /…/screenshots/window-….png, 1280×800, 3 073 098 bytes
+engine.commands   → 10 tools
+```
+
+The captured PNG was decoded and inspected rather than trusted: 1280×800, 8-bit RGB, and a colour
+histogram whose most common value is `#04060c` — the space background the viewport paints — with the
+orbit and track colours present. A blank image would have had one colour.
+
+### Not built yet
+
+- **The screenshot is the whole window**, not a chosen region or a single panel: a launcher that wants
+  the viewport alone will need a rectangle in the request.
+- The roadmap's next step is **sensors and targets** — the access the product exists for.
+
 ## [0.1.42] — The platform is named like everything else, because a rule with a carve-out is not a rule
 
 0.1.37 gave the workspace one naming convention and one exception: `crates/<group>/<leaf>` became

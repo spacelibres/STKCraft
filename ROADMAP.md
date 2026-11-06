@@ -36,24 +36,20 @@ Shipped, in the order it landed:
 | Crate names repeat their directory | done, enforced by the gate | 0.1.37 |
 | PDF reading with page-level citations | done, measured on real papers | 0.1.38 |
 | Paper corpus fetcher, checksummed | done | 0.1.39 |
+| Crate names repeat their directory, all groups | done, enforced by the gate | 0.1.42 |
+| The window serves the control channel, with `ui.state` and `ui.screenshot` | done | 0.1.43 |
 
 The engine speaks eight commands today: `scenario.rename`, `scenario.set-duration`, `satellite.add`,
 `satellite.remove`, `station.add`, `station.remove`, `access.compute`, `planet.access`.
 
 ## Next
 
-### 1. The window serves what the CLI serves
+### 1. ~~The window serves what the CLI serves~~ — shipped in 0.1.43
 
-**Why now.** The platform's claim is that anything a person can do, a launcher or a model can do
-through the same registry. The control channel exists, but only a CLI process can open it: the window
-— which is the thing a launcher is supposed to drive and photograph — does not serve it, and
-`ui.screenshot` is not a method. Every sibling app in the family exposes exactly this, and
-`AGENTS.md`'s display section already promises the recipe.
-
-**Done when** a running window answers `version`, `engine.commands`, `engine.execute`, and a new
-`ui.screenshot` that returns the frame it is showing, with the same token authentication the CLI path
-uses; and a test proves the round trip without a display, using the offscreen path the screenshot
-modes already provide.
+The window answers `--control <port>`: `ui.state`, `ui.screenshot`, `engine.execute` and
+`scenario.read` are answered by the thread that owns the scenario, the stateless half by the socket
+thread, and a capture the window could not take is an error with the reason in it rather than an empty
+image. The tests drive it across a thread boundary without a display.
 
 ### 2. Sensors and targets, and what they can see
 

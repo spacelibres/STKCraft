@@ -199,12 +199,19 @@ fixed from the start rather than retrofitted.
   stack.
 - **Fonts, bulk data and corpora stay outside the repository**: `craft-fonts`, the NASA kernels via
   `cargo xtask fetch-data`, and the user's own documents in their configuration directory.
-- **The control channel exists**: `stkcraft control --port 7979` writes a token to
-  `$XDG_RUNTIME_DIR/stkcraft/control-<port>.token` (mode `0600`), requires `auth` as the first request,
-  and answers `engine.commands`, `engine.execute`, `scenario.read` and the knowledge tools — the same
-  registry, driven over loopback. **Not built:** the *window* does not open the channel yet (the CLI
-  session does), and `ui.screenshot`, so a launcher can drive the engine but not photograph the
-  window.
+- **The control channel is built, and the window serves it**: `stkcraft --control 7979` (or
+  `STKCRAFT_CONTROL_PORT`) makes the window answer it, and `stkcraft control --port 7979` serves the
+  same protocol with no window. A token goes to `$XDG_RUNTIME_DIR/stkcraft/control-<port>.token` (mode
+  `0600`), `auth` is required as the first request, and the methods are `version`,
+  `engine.commands`, `engine.execute`, `scenario.read`, `knowledge.search`, `knowledge.documents`,
+  `ui.state` and `ui.screenshot` — the same registry, driven over loopback.
+- **The scenario a launcher drives is the scenario a person sees.** The window owns
+  `engine.execute`, `scenario.read`, `ui.state` and `ui.screenshot`, and the socket thread forwards
+  them, so there is no second copy of the scenario to drift. Everything else is stateless and answered
+  where it lands.
+- **A capture that did not happen is an error, not a blank image.** `ui.screenshot` answers with the
+  reason — no painted frame, a window that never repainted — because a launcher must be able to tell a
+  picture from the absence of one.
 
 ## 7. Crate taxonomy
 

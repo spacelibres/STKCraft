@@ -41,7 +41,7 @@ pub mod scenario;
 
 pub use analysis::{SatelliteAccess, compute_access, compute_all_access};
 pub use central::PlanetOrbit;
-pub use commands::{Arg, Args, Command, CommandOutcome, Parameter, Registry};
+pub use commands::{Arg, Args, Command, CommandOutcome, Parameter, Registry, args_from};
 pub use planet_access::{PlanetPass, find_passes};
 pub use propagate::Propagator;
 pub use scenario::{Satellite, SatelliteId, Scenario, Station, StationId};

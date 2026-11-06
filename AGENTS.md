@@ -264,8 +264,27 @@ On Wayland, `eframe` picks an X11 client through XWayland and there is no portab
 tool: the GNOME screenshot portal prompts for permission and the X11 root window shows nothing.
 That is why the offscreen path above exists.
 
-Once the control channel lands, this section gains the `--control <port>` recipe the siblings
-use.
+### Driving the window
+
+The window serves the family's control channel, so a launcher can drive it and photograph it:
+
+```sh
+cargo run --release -p stkcraft -- --control 7979      # or STKCRAFT_CONTROL_PORT=7979
+# control: listening on 127.0.0.1:7979, token in /run/user/1000/stkcraft/control-7979.token
+```
+
+`auth` with the token from that file, then `ui.state` (what the window is showing), `ui.screenshot`
+(the frame it paints next, written to `screenshots/` under the data directory and returned as PNG
+bytes in base64), `engine.execute`, `scenario.read`, and the stateless half — `version`,
+`engine.commands`, `knowledge.*` — which is answered by the socket thread's own session.
+
+The split is the design: `engine.execute` through the window changes the scenario a person is looking
+at, not a copy. A window-only method that cannot be answered — a capture with no painted frame, a
+window that is minimised — returns the reason rather than an empty image, because a launcher told
+"ok" with a picture nobody drew is worse than one told why it waited.
+
+`stkcraft control --port 7979` still serves the same protocol with no window at all, which is what a
+build machine and a test use.
 
 ## Licensing
 

@@ -277,6 +277,51 @@ impl Registry {
     }
 }
 
+/// Build a command's arguments from a JSON object, through the parameter kinds it declares.
+///
+/// Every transport calls this — the MCP server, the control channel, and the window's own socket —
+/// so the schema a caller reads and the typed value a command receives cannot disagree. The kind is
+/// the authority: a `Degrees` parameter becomes an [`Angle`] here, before any command sees it, which
+/// is what stops a latitude arriving as a bare number and a command rejecting the right value.
+///
+/// A parameter the caller did not send is absent rather than zero, so a command's own default
+/// applies. A number may arrive as a JSON number or as a string holding one: a caller occasionally
+/// quotes it, and every command validates its range anyway.
+#[must_use]
+pub fn args_from(descriptor: &CommandDescriptor, values: &serde_json::Value) -> Args {
+    let mut args = Args::none();
+    for parameter in descriptor.parameters {
+        let Some(value) = values.get(parameter.name) else {
+            continue;
+        };
+        let argument = match parameter.kind {
+            ParameterKind::Text => Arg::Text(match value {
+                serde_json::Value::String(text) => text.clone(),
+                other => other.to_string(),
+            }),
+            ParameterKind::Number => match number_from(value) {
+                Some(number) => Arg::Number(number),
+                None => Arg::Text(value.to_string()),
+            },
+            ParameterKind::Degrees => match number_from(value) {
+                Some(degrees) => Arg::Angle(Angle::from_deg(degrees)),
+                None => Arg::Text(value.to_string()),
+            },
+        };
+        args = args.with(parameter.name, argument);
+    }
+    args
+}
+
+/// A number from a JSON number or from a string that holds one.
+fn number_from(value: &serde_json::Value) -> Option<f64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
 /// One built-in command: its description, its `enabled` predicate and its implementation.
 type Builtin = (
     CommandDescriptor,

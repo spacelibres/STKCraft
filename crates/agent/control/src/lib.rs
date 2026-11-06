@@ -50,7 +50,7 @@ use serde_json::{Value, json};
 use stkcraft_agent_mcp::Server;
 
 /// The methods this channel answers, for the error that names them.
-pub const METHODS: [&str; 7] = [
+pub const METHODS: [&str; 9] = [
     "auth",
     "version",
     "engine.commands",
@@ -58,13 +58,46 @@ pub const METHODS: [&str; 7] = [
     "scenario.read",
     "knowledge.search",
     "knowledge.documents",
+    "ui.state",
+    "ui.screenshot",
 ];
+
+/// The methods only a running window can answer, because the state they read is the window's.
+///
+/// A process that serves the channel *without* a window (the CLI's `control` subcommand) has its own
+/// session and answers these itself. A window cannot: a launcher that renames the scenario and a
+/// person looking at the screen must be looking at the same scenario, so the request goes to the
+/// thread that owns it.
+pub const WINDOW_METHODS: [&str; 4] = [
+    "engine.execute",
+    "scenario.read",
+    "ui.state",
+    "ui.screenshot",
+];
+
+/// A running window, for the methods only it can answer.
+///
+/// Called on the socket thread, so an implementation hands the request to the thread that owns the
+/// window and waits for the answer — which is why [`Self::request`] returns the result rather than
+/// taking a callback. The caller's timeout is its own business: a window that is not painting has to
+/// answer with an error rather than hang the socket for ever.
+pub trait UiHost: Send + Sync {
+    /// Answer one window method.
+    ///
+    /// # Errors
+    ///
+    /// A message when the window cannot answer: no paint yet, the capture failed, or the person
+    /// closed the window while the request was in flight.
+    fn request(&self, method: &str, params: &Value) -> Result<Value, String>;
+}
 
 /// The session a connection drives: the engine's tools and the person's documents.
 pub struct Control {
     server: Server,
     token: String,
     authenticated: bool,
+    /// The window, when this channel is served by one.
+    ui: Option<std::sync::Arc<dyn UiHost>>,
 }
 
 impl Control {
@@ -75,7 +108,15 @@ impl Control {
             server,
             token: token.into(),
             authenticated: false,
+            ui: None,
         }
+    }
+
+    /// The same channel, but with the window answering the methods that read its state.
+    #[must_use]
+    pub fn with_ui(mut self, ui: std::sync::Arc<dyn UiHost>) -> Self {
+        self.ui = Some(ui);
+        self
     }
 
     /// The session, for a caller that wants to read the scenario afterwards.
@@ -118,6 +159,13 @@ impl Control {
         }
         if !self.authenticated {
             return Err("auth first: send `auth` with the token from the token file".to_owned());
+        }
+        // A window owns its scenario, so the methods that read or change it go there rather than to
+        // this process's copy — otherwise a launcher would drive a scenario nobody is looking at.
+        if let Some(ui) = &self.ui
+            && WINDOW_METHODS.contains(&method)
+        {
+            return ui.request(method, params);
         }
         match method {
             "version" => Ok(json!({"version": env!("CARGO_PKG_VERSION")})),
@@ -368,6 +416,90 @@ mod tests {
         );
         assert!(answer.get("error").is_none(), "{answer}");
         control
+    }
+
+    /// A stand-in for a window: it answers the walk of the protocol and records what it was asked.
+    #[derive(Default)]
+    struct FakeWindow {
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl UiHost for FakeWindow {
+        fn request(&self, method: &str, params: &Value) -> Result<Value, String> {
+            if let Ok(mut asked) = self.asked.lock() {
+                asked.push(format!("{method} {params}"));
+            }
+            match method {
+                "ui.state" => Ok(json!({"scenario": "window's own", "satellites": 1})),
+                "ui.screenshot" => Err("the window has not painted a frame yet".to_owned()),
+                "engine.execute" => Ok(json!({"summary": "renamed by the window"})),
+                other => Err(format!("the window does not answer `{other}`")),
+            }
+        }
+    }
+
+    #[test]
+    fn a_window_answers_the_methods_that_read_its_state() {
+        // The reason this exists: `engine.execute` from a launcher must change the scenario the
+        // person is looking at, not a copy the socket thread happens to own.
+        let window = std::sync::Arc::new(FakeWindow::default());
+        let mut control = control().with_ui(window.clone());
+        let answer = call(
+            &mut control,
+            "auth",
+            &json!({"token": "0f1e2d3c4b5a69788796a5b4c3d2e1f0"}),
+        );
+        assert!(answer.get("error").is_none(), "{answer}");
+
+        let state = call(&mut control, "ui.state", &json!({}));
+        assert_eq!(
+            state.get("result").and_then(|r| r.get("scenario")),
+            Some(&json!("window's own"))
+        );
+        let executed = call(
+            &mut control,
+            "engine.execute",
+            &json!({"command": "scenario.rename", "params": {"name": "Gemini"}}),
+        );
+        assert_eq!(
+            executed
+                .get("result")
+                .and_then(|r| r.get("summary"))
+                .and_then(Value::as_str),
+            Some("renamed by the window")
+        );
+        // A capture that could not happen is an error with the reason in it, not a silent empty
+        // image: a launcher that saves a blank PNG and reports success is worse than one told no.
+        let shot = call(&mut control, "ui.screenshot", &json!({}));
+        assert_eq!(
+            shot.get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(Value::as_str),
+            Some("the window has not painted a frame yet")
+        );
+        assert_eq!(
+            window.asked.lock().map_or(0, |asked| asked.len()),
+            3,
+            "not every window method reached the window"
+        );
+    }
+
+    #[test]
+    fn a_process_without_a_window_answers_its_own_scenario() {
+        // The control case: the CLI's `control` subcommand has no window, so the same methods must
+        // still work — against its own session.
+        let mut control = authenticated();
+        let executed = call(
+            &mut control,
+            "engine.execute",
+            &json!({"command": "scenario.rename", "params": {"name": "Gemini"}}),
+        );
+        assert!(executed.get("error").is_none(), "{executed}");
+        let read = call(&mut control, "scenario.read", &json!({}));
+        assert!(read.get("error").is_none(), "{read}");
+        // A method only a window can answer is refused rather than guessed at.
+        let state = call(&mut control, "ui.state", &json!({}));
+        assert!(state.get("error").is_some(), "{state}");
     }
 
     #[test]
