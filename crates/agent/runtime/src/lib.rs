@@ -53,6 +53,16 @@ pub mod translate;
 /// better reported than paid for indefinitely.
 pub const MAX_TURNS: usize = 12;
 
+/// The rule a compaction summary follows.
+///
+/// It asks for facts and not for prose because the summary is the only record of the turns it
+/// replaces: a later question can depend on a number that was in them, and a fluent paragraph that
+/// dropped the number has lost the conversation.
+pub const COMPACTION_PROMPT: &str = "You are compacting a transcript so it fits a context window. \
+Write the summary a careful colleague would need to continue the work: every fact, number, name, \
+decision and result that appears, the questions that were asked and what was answered or left open. \
+No commentary, no headings, no apologies. Prose in the language the conversation used.";
+
 /// How many messages a conversation keeps before the oldest turn is dropped, system prompt aside.
 ///
 /// A conversation that grows without bound is a conversation that eventually fails on a context
@@ -110,12 +120,20 @@ pub fn command_id(function: &str) -> String {
 
 /// One message in the conversation the model sees.
 ///
+/// [`Message::Summary`] is what a compaction leaves behind: a *model-written* account of the turns
+/// that were dropped, kept where the system prompt was so the model reads it first. It travels to the
+/// provider as a second system message, which is the only slot the protocol has for "this is context,
+/// not conversation", and it is stored in the transcript so a resumed session starts with the same
+/// memory a live one has.
+///
 /// The same values are what a [`session::Session`] writes to disk, so a conversation survives the
 /// process: the transcript is this enum, one JSON object per line.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     /// The instruction the model starts from.
     System(String),
+    /// A summary of turns that were compacted away, written by the model itself.
+    Summary(String),
     /// What the person asked.
     User(String),
     /// What the model said.
@@ -263,6 +281,12 @@ impl Provider {
         for message in messages {
             converted.push(match message {
                 Message::System(text) => json!({"role": "system", "content": text}),
+                // A summary is context, not conversation: it goes in the system slot, phrased so the
+                // model cannot mistake it for something the user said.
+                Message::Summary(text) => json!({
+                    "role": "system",
+                    "content": format!("Earlier in this conversation, in summary:\n{text}"),
+                }),
                 Message::User(text) => json!({"role": "user", "content": text}),
                 Message::Assistant { text, calls } => {
                     if calls.is_empty() {
@@ -662,16 +686,98 @@ impl<M: ChatModel> Agent<M> {
     /// session inside a context window: the recent turns stay exact, the old ones stop being sent,
     /// and the record says so rather than pretending the conversation began yesterday.
     fn compact_session(&mut self) {
-        let Some(session) = &mut self.session else {
-            return;
-        };
-        let dropped = session.compact();
-        if dropped == 0 {
+        // The budget is measured on what the model would actually receive: the messages plus the tool
+        // schemas, which for the engine's ten tools is a real part of the request.
+        if self.context_characters() <= session::CONTEXT_BUDGET_CHARS {
             return;
         }
-        let note = session.compaction_note();
-        session.messages.clone_into(&mut self.messages);
-        let _ = session.note(&note);
+        let Some(session) = &self.session else {
+            return;
+        };
+        let Some(span) = session.plan_compaction() else {
+            return;
+        };
+        // The summary is written by the model, about the transcript, before the transcript changes:
+        // a summary asked for afterwards would describe text nobody kept.
+        let summary = self.summarize(&span);
+        if let Some(session) = &mut self.session {
+            session.apply_compaction(&span, summary.as_deref());
+            session.messages.clone_into(&mut self.messages);
+        }
+    }
+
+    /// Ask the model to summarise the span a compaction is about to drop.
+    ///
+    /// The prompt is a rule, not a request for prose: the summary has to keep the *facts* a later
+    /// question could depend on — numbers, names, decisions, what was computed — because it is the
+    /// only record of them. A model that cannot answer leaves `None`, and the compaction falls back to
+    /// a note that says so rather than inventing a summary.
+    fn summarize(&self, span: &[Message]) -> Option<String> {
+        let mut transcript = String::new();
+        for message in span {
+            let line = match message {
+                Message::System(text) | Message::Summary(text) => format!("[context] {text}"),
+                Message::User(text) => format!("[user] {text}"),
+                Message::Assistant { text, calls } => {
+                    let mut line = format!("[assistant] {text}");
+                    for call in calls {
+                        let _ = std::fmt::Write::write_fmt(
+                            &mut line,
+                            format_args!(
+                                "\n  called {}({})",
+                                command_id(&call.name),
+                                call.arguments
+                            ),
+                        );
+                    }
+                    line
+                }
+                Message::Tool { content, .. } => format!("[tool] {content}"),
+            };
+            transcript.push_str(&line);
+            transcript.push('\n');
+        }
+        let messages = [
+            Message::System(COMPACTION_PROMPT.to_owned()),
+            Message::User(transcript),
+        ];
+        match self.model.complete(&messages, &[]) {
+            Ok(turn) => {
+                let text = turn.text.trim().to_owned();
+                (!text.is_empty()).then_some(text)
+            }
+            // A model that cannot summarise must not lose the conversation: the drop still happens,
+            // with a note that says the summary is missing.
+            Err(_) => None,
+        }
+    }
+
+    /// The characters the next request would carry: messages and tool schemas.
+    #[must_use]
+    pub fn context_characters(&self) -> usize {
+        let messages: usize = self
+            .messages
+            .iter()
+            .map(|message| match message {
+                Message::System(text) | Message::Summary(text) | Message::User(text) => {
+                    text.chars().count()
+                }
+                Message::Assistant { text, calls } => {
+                    text.chars().count()
+                        + calls
+                            .iter()
+                            .map(|call| call.name.len() + call.arguments.to_string().len())
+                            .sum::<usize>()
+                }
+                Message::Tool { content, .. } => content.chars().count(),
+            })
+            .sum();
+        let tools: usize = self
+            .tools_with_skill_reader()
+            .iter()
+            .map(|tool| tool.to_string().chars().count())
+            .sum();
+        messages + tools
     }
 
     /// Forget the conversation, keeping the system prompt.
@@ -1014,7 +1120,7 @@ mod tests {
         let roles: Vec<&str> = follow_up
             .iter()
             .map(|message| match message {
-                Message::System(_) => "system",
+                Message::System(_) | Message::Summary(_) => "system",
                 Message::User(_) => "user",
                 Message::Assistant { .. } => "assistant",
                 Message::Tool { .. } => "tool",

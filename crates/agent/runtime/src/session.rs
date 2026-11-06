@@ -63,8 +63,34 @@ enum Stored {
         /// Its output.
         content: String,
     },
+    /// A summary the model wrote of turns that were compacted away.
+    Summary(String),
     /// A note the harness wrote: compaction, so the reader knows the transcript has a past.
     Note(String),
+    /// What this session is about, rewritten on every record so the last one wins.
+    Meta {
+        /// When it started.
+        created: String,
+        /// When it was last used.
+        updated: String,
+        /// A title, taken from the first question.
+        title: Option<String>,
+        /// The scenario it was about, when the caller said.
+        scenario: Option<String>,
+    },
+}
+
+/// What a session says about itself, for a list a person reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Meta {
+    /// When it started.
+    pub created: String,
+    /// When it was last used.
+    pub updated: String,
+    /// A title, taken from the first question.
+    pub title: Option<String>,
+    /// The scenario it was about, when the caller said.
+    pub scenario: Option<String>,
 }
 
 /// One tool call as it is stored.
@@ -82,6 +108,7 @@ impl From<&Message> for Stored {
     fn from(message: &Message) -> Self {
         match message {
             Message::System(text) => Self::System(text.clone()),
+            Message::Summary(text) => Self::Summary(text.clone()),
             Message::User(text) => Self::User(text.clone()),
             Message::Assistant { text, calls } => Self::Assistant {
                 text: text.clone(),
@@ -107,6 +134,7 @@ impl Stored {
     fn into_message(self) -> Option<Message> {
         match self {
             Self::System(text) => Some(Message::System(text)),
+            Self::Summary(text) => Some(Message::Summary(text)),
             Self::User(text) => Some(Message::User(text)),
             Self::Assistant { text, calls } => Some(Message::Assistant {
                 text,
@@ -122,7 +150,7 @@ impl Stored {
             Self::Tool { call_id, content } => Some(Message::Tool { call_id, content }),
             // A note is written for a reader, not for the model: the transcript should show that
             // turns were dropped without the model re-reading the fact as a rule.
-            Self::Note(_) => None,
+            Self::Note(_) | Self::Meta { .. } => None,
         }
     }
 }
@@ -138,6 +166,8 @@ pub struct Session {
     pub messages: Vec<Message>,
     /// How many turns were dropped by the last compaction.
     pub compacted: usize,
+    /// What this session says about itself: when it started, when it was last used, its title.
+    pub meta: Meta,
 }
 
 impl Session {
@@ -151,11 +181,18 @@ impl Session {
         let path = directory.join(format!("{id}.jsonl"));
         std::fs::create_dir_all(directory)
             .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+        let now = session_id();
         Ok(Self {
             id,
             path,
             messages: Vec::new(),
             compacted: 0,
+            meta: Meta {
+                created: now.clone(),
+                updated: now,
+                title: None,
+                scenario: None,
+            },
         })
     }
 
@@ -172,6 +209,7 @@ impl Session {
         let text = std::fs::read_to_string(&path)
             .map_err(|error| format!("could not read {}: {error}", path.display()))?;
         let mut messages = Vec::new();
+        let mut meta = Meta::default();
         for line in text.lines() {
             if line.trim().is_empty() {
                 continue;
@@ -179,6 +217,22 @@ impl Session {
             let Ok(stored) = serde_json::from_str::<Stored>(line) else {
                 continue;
             };
+            // The last `Meta` line wins: the file is a log, and the newest statement about the
+            // session is the one that describes it.
+            if let Stored::Meta {
+                created,
+                updated,
+                title,
+                scenario,
+            } = &stored
+            {
+                meta = Meta {
+                    created: created.clone(),
+                    updated: updated.clone(),
+                    title: title.clone(),
+                    scenario: scenario.clone(),
+                };
+            }
             if let Some(message) = stored.into_message() {
                 messages.push(message);
             }
@@ -188,6 +242,7 @@ impl Session {
             path,
             messages,
             compacted: 0,
+            meta,
         })
     }
 
@@ -218,6 +273,15 @@ impl Session {
     /// way — a failed write costs the resume, not the answer.
     pub fn record(&mut self, message: Message) -> Result<(), String> {
         use std::io::Write as _;
+        // The title is the first thing the person asked: a session list of timestamps tells nobody
+        // which conversation is which.
+        if self.meta.title.is_none()
+            && let Message::User(text) = &message
+        {
+            let title: String = text.chars().take(60).collect();
+            self.meta.title = Some(title.replace('\n', " "));
+        }
+        self.meta.updated = session_id();
         let line = serde_json::to_string(&Stored::from(&message))
             .map_err(|error| format!("could not serialise a message: {error}"))?;
         let mut file = std::fs::OpenOptions::new()
@@ -227,6 +291,14 @@ impl Session {
             .map_err(|error| format!("could not open {}: {error}", self.path.display()))?;
         writeln!(file, "{line}")
             .map_err(|error| format!("could not write {}: {error}", self.path.display()))?;
+        if let Ok(meta) = serde_json::to_string(&Stored::Meta {
+            created: self.meta.created.clone(),
+            updated: self.meta.updated.clone(),
+            title: self.meta.title.clone(),
+            scenario: self.meta.scenario.clone(),
+        }) {
+            let _ = writeln!(file, "{meta}");
+        }
         self.messages.push(message);
         Ok(())
     }
@@ -237,9 +309,14 @@ impl Session {
     ///
     /// As [`Self::record`].
     pub fn note(&mut self, text: &str) -> Result<(), String> {
+        self.write_stored(&Stored::Note(text.to_owned()))
+    }
+
+    /// Append one stored line to the transcript.
+    fn write_stored(&mut self, stored: &Stored) -> Result<(), String> {
         use std::io::Write as _;
-        let line = serde_json::to_string(&Stored::Note(text.to_owned()))
-            .map_err(|error| format!("could not serialise a note: {error}"))?;
+        let line = serde_json::to_string(stored)
+            .map_err(|error| format!("could not serialise a transcript line: {error}"))?;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -256,7 +333,9 @@ impl Session {
         self.messages
             .iter()
             .map(|message| match message {
-                Message::System(text) | Message::User(text) => text.chars().count(),
+                Message::System(text) | Message::Summary(text) | Message::User(text) => {
+                    text.chars().count()
+                }
                 Message::Assistant { text, calls } => {
                     text.chars().count()
                         + calls
@@ -274,15 +353,21 @@ impl Session {
     /// The system prompt stays, the last [`KEEP_TURNS`] turns stay, and the drop happens at a *user*
     /// message so a tool result never loses the call it answers. Returns how many messages went.
     pub fn compact(&mut self) -> usize {
-        if self.characters() <= CONTEXT_BUDGET_CHARS {
+        let Some(dropped) = self.plan_compaction() else {
             return 0;
+        };
+        self.apply_compaction(&dropped, None)
+    }
+
+    /// The messages a compaction would drop, or `None` when the conversation fits.
+    ///
+    /// This is the span the model is asked to summarise, so it has to be decided before anything is
+    /// removed: a summary written after the drop would describe a transcript nobody kept.
+    #[must_use]
+    pub fn plan_compaction(&self) -> Option<Vec<Message>> {
+        if self.characters() <= CONTEXT_BUDGET_CHARS {
+            return None;
         }
-        let system = self
-            .messages
-            .first()
-            .filter(|message| matches!(message, Message::System(_)))
-            .cloned();
-        // The start of the oldest turn (a user message) and of the one after it.
         let starts: Vec<usize> = self
             .messages
             .iter()
@@ -294,16 +379,57 @@ impl Session {
             .get(starts.len().saturating_sub(KEEP_TURNS))
             .copied()
             .unwrap_or(0);
-        if keep_from == 0 {
-            return 0;
-        }
-        let dropped = keep_from;
-        let tail: Vec<Message> = self.messages.split_off(keep_from);
-        self.messages = system.into_iter().chain(tail).collect();
-        self.compacted += dropped;
-        dropped
+        // The pinned prefix — the system prompt and any earlier summary — is never part of the span.
+        let pinned = self
+            .messages
+            .iter()
+            .take_while(|message| matches!(message, Message::System(_) | Message::Summary(_)))
+            .count();
+        (keep_from > pinned).then(|| {
+            self.messages
+                .iter()
+                .skip(pinned)
+                .take(keep_from - pinned)
+                .cloned()
+                .collect()
+        })
     }
 
+    /// Replace the planned span with a summary, and return how many messages went.
+    ///
+    /// `summary` is the model's own account of the span; `None` keeps a note that says a span was
+    /// dropped, which is the honest fallback when the summary request failed.
+    pub fn apply_compaction(&mut self, dropped: &[Message], summary: Option<&str>) -> usize {
+        let pinned = self
+            .messages
+            .iter()
+            .take_while(|message| matches!(message, Message::System(_) | Message::Summary(_)))
+            .cloned()
+            .collect::<Vec<_>>();
+        let remaining = dropped.len();
+        if remaining == 0 {
+            return 0;
+        }
+        let tail = self.messages.split_off(pinned.len() + remaining);
+        let replacement = match summary.map(str::trim).filter(|text| !text.is_empty()) {
+            Some(text) => vec![Message::Summary(text.to_owned())],
+            None => vec![Message::Summary(format!(
+                "{remaining} earlier message(s) of this conversation were condensed to fit the \
+                 context window, and the summary of them is not available."
+            ))],
+        };
+        // The summary is part of the transcript, not just of the conversation in memory: a resumed
+        // session has to start with the same memory a live one has, or the second session is amnesiac
+        // about everything the first one compacted.
+        for message in &replacement {
+            if let Message::Summary(text) = message {
+                let _ = self.write_stored(&Stored::Summary(text.clone()));
+            }
+        }
+        self.messages = pinned.into_iter().chain(replacement).chain(tail).collect();
+        self.compacted += remaining;
+        remaining
+    }
     /// The note that tells the model its transcript has a past.
     #[must_use]
     pub fn compaction_note(&self) -> String {
@@ -401,10 +527,13 @@ mod tests {
             .record(Message::System("be careful".to_owned()))
             .expect("recorded");
         exchange(&mut session, "What is the angle?");
-        // The file is the conversation, line by line.
+        // The file is the conversation, line by line, with a `meta` line after each message so a
+        // session list can say what the conversation was about.
         let text = std::fs::read_to_string(&session.path).expect("a transcript");
-        assert_eq!(text.lines().count(), 5);
+        assert_eq!(text.lines().count(), 10);
         assert!(text.contains("\"system\""), "{text}");
+        assert!(text.contains("\"meta\""), "{text}");
+        assert!(text.contains("What is the angle?"), "{text}");
 
         let reopened = Session::open(&directory, &session.id).expect("opened");
         assert_eq!(reopened.messages, session.messages);
@@ -471,9 +600,14 @@ mod tests {
             session.messages.last(),
             Some(Message::Assistant { text, .. }) if text.contains("answer 9")
         ));
-        // The drop is at a user message, so no tool result lost its call.
+        // The dropped span is replaced by a summary, and the conversation after it resumes at a
+        // question — so no tool result lost the call it answers.
         assert!(
-            matches!(session.messages.get(1), Some(Message::User(_))),
+            matches!(session.messages.get(1), Some(Message::Summary(_))),
+            "the dropped span left no summary"
+        );
+        assert!(
+            matches!(session.messages.get(2), Some(Message::User(_))),
             "the conversation does not resume at a question"
         );
         assert!(session.compaction_note().contains("condensed"));
@@ -500,5 +634,58 @@ mod tests {
             id.as_str() > other || id.as_str() < other,
             "ids compare as text"
         );
+    }
+
+    #[test]
+    fn the_summary_replaces_the_span_and_keeps_the_facts_the_model_chose() {
+        // The whole point of compaction: what was dropped is *described*, not erased. A summary the
+        // model wrote is the only record of the span, so it has to survive as a message the model
+        // reads on the next request — and the span it replaces has to be decided before it is written.
+        let directory = scratch("stkcraft-session-summary");
+        let mut session = Session::create(&directory).expect("created");
+        session
+            .record(Message::System("be careful".to_owned()))
+            .expect("recorded");
+        let filler = "y".repeat(CONTEXT_BUDGET_CHARS / 4);
+        // More turns than `KEEP_TURNS`, so there is a span older than the ones that survive.
+        for index in 0..(KEEP_TURNS + 4) {
+            session
+                .record(Message::User(format!("question {index} {filler}")))
+                .expect("recorded");
+            session
+                .record(Message::Assistant {
+                    text: format!("answer {index}"),
+                    calls: Vec::new(),
+                })
+                .expect("recorded");
+        }
+        let span = session.plan_compaction().expect("a span to drop");
+        assert_ne!(span.len(), 0, "an empty span was planned");
+        // Nothing is removed until the summary exists: the span is a plan, not a deletion.
+        let before = session.messages.len();
+        let dropped = session.apply_compaction(&span, Some("the sensor swath is 1200 km"));
+        assert_eq!(dropped, span.len());
+        assert!(session.messages.len() < before);
+        assert!(matches!(session.messages.first(), Some(Message::System(_))));
+        assert!(
+            matches!(
+                session.messages.get(1),
+                Some(Message::Summary(text)) if text.contains("1200 km")
+            ),
+            "the summary did not survive: {:?}",
+            session.messages.get(1)
+        );
+        // A resumed session reads the same summary back from the transcript.
+        session
+            .record(Message::User("and the swath?".to_owned()))
+            .expect("recorded");
+        let reopened = Session::open(&directory, &session.id).expect("opened");
+        assert!(
+            reopened.messages.iter().any(
+                |message| matches!(message, Message::Summary(text) if text.contains("1200 km"))
+            ),
+            "the summary was not in the transcript"
+        );
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

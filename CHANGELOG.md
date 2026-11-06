@@ -9,6 +9,58 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.46] — Compaction that remembers, because the model writes down what it loses
+
+F2 of the foundation. A long conversation used to be trimmed by dropping the oldest turns and leaving
+a fixed sentence: *"N earlier messages were condensed"*. That is not memory, it is forgetting with a
+comment — and a person who asked about a number ten turns ago got an assistant that no longer knew it
+had ever been told.
+
+Three changes, and the third is the one you notice:
+
+- **The trigger is the request, not a count.** `Agent::context_characters` measures what the next call
+  would carry — the messages *and* the tool schemas — against the budget. A conversation of forty tiny
+  exchanges is not compacted; a conversation of four huge ones is.
+- **The span is decided before it is removed.** `Session::plan_compaction` returns the messages a
+  compaction would drop, so the summary is written about text that still exists. A summary asked for
+  after the drop would describe a transcript nobody kept.
+- **The model writes the summary.** `Message::Summary` is a new kind of message: it travels to the
+  provider as a `system` message ("earlier in this conversation, in summary: …"), so it is context and
+  cannot be mistaken for something the person said; it sits where the system prompt is and is **never
+  cut**; and it is written into the transcript, so a resumed session starts with the same memory a
+  live one has. If the summarising call fails, the compaction still happens and the replacement says
+  the summary is not available — an honest gap, never an invented one.
+
+The prompt asks for facts, numbers, names and decisions, not prose: the summary is the only record of
+the turns it replaces, and a fluent paragraph that drops the number has lost the conversation.
+
+### Added
+
+- **Session metadata** — `created`, `updated`, `title` (the first question, truncated) and an optional
+  scenario, written as a `meta` line after every message so the last one wins. `chat --sessions` can
+  now show what a conversation was about instead of a timestamp.
+- **`Session::plan_compaction` / `Session::apply_compaction`** — the span, the replacement, and the
+  count, separately, because they are three decisions.
+
+### Changed
+
+- **A summary is pinned with the system prompt.** Compaction keeps `System` and `Summary` messages and
+  drops only conversation, so a second compaction summarises the turns, not the memory of the first.
+
+### Verified
+
+`the_summary_replaces_the_span_and_keeps_the_facts_the_model_chose` builds a conversation larger than
+the budget, plans the span, applies a summary containing a fact from it, and then **reopens the session
+from disk** and finds the fact still there. The old behaviour would have failed that last step: the
+fact was gone and the note did not contain it.
+
+### Not built yet
+
+- **The window still lists no sessions** (`chat --sessions` does): that is F4, with the rest of the
+  agent surface.
+- **A token-accurate budget** — characters are a good proxy and a poor measurement; the exact count
+  wants a tokenizer per model.
+
 ## [0.1.45] — The order of work is the foundation, and the roadmap says so
 
 0.1.40 wrote the roadmap and put sensors and targets at the top of it. That was the wrong order and
