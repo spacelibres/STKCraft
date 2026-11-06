@@ -9,6 +9,49 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.26] — The API reference is generated, and it can be read in your language
+
+`docs/api/en/index.md` is now built from the code — the command registry, the crate manifests and
+each crate's module documentation — and `cargo xtask api-docs translate --language <code>` produces
+the same document in another language with `DeepSeek` and the reader's own key. One English reference
+is maintained; every other language is generated from it and says which English revision it came
+from, so a page that lags behind the code is visible rather than trusted.
+
+### Added
+
+- **`cargo xtask api-docs`** — generates the reference: every command with its id, label, menu path
+  and typed parameters (`number`, `text`, `degrees`, and whether it is required), every crate with
+  its layer and description, and each crate's module documentation as prose.
+- **`cargo xtask api-docs check`**, a step of `cargo xtask ci` — fails when the committed reference
+  is stale. The gate checks and never writes: a check that rewrites the file it validates passes on
+  its first run and hides a stale reference for ever after.
+- **`cargo xtask api-docs translate --language <code>`** — translates the prose of the reference
+  (headings, paragraphs, labels, menu names) and leaves ids, numbers and code alone; refuses a
+  translation whose placeholders do not match; remembers what it translated in
+  `docs/api/<code>/strings.tsv` so the second run only sends what changed, and names the English
+  version it was made from.
+- **`xtask/src/translate.rs`** — the one model call both translation tasks use. Moving it out of the
+  interface-catalog task was the point: two copies of a request would drift, and a translation
+  pipeline that behaves differently for documentation than for the interface is a second thing to
+  debug.
+
+### Changed
+
+- **A command's parameters render as documentation, not as a broken code span.** The cell holds ids
+  and prose together, so wrapping it in backticks produced `` `name` (text): … ``` — a Markdown
+  reader sees an empty code block. It is now pre-formatted Markdown that is neither wrapped nor
+  translated.
+
+### Not built yet
+
+- **The reference lists the command surface, the crates and their module documentation**; it does not
+  yet document every public item's signature.
+- **Command parameter descriptions stay English in the reference.** The same text is translated in
+  the interface, where the catalogs carry it; the reference will use that translation once the
+  registry exposes parameter text as catalog keys.
+- **§3 of the rule book, extensions and plug-ins, is still rules without an implementation** — the
+  package manifest, trust tiers and the third-party feature gate remain the next arc.
+
 ## [0.1.25] — One English interface, every language a catalog
 
 The interface is now translatable, in the ArtCraft family's format: `context <TAB> English <TAB>

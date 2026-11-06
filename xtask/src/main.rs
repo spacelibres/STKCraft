@@ -23,8 +23,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod api_docs;
 mod i18n;
 mod layers;
+mod translate;
 
 use layers::{CrateSpec, LAYOUT};
 
@@ -57,6 +59,7 @@ fn main() -> ExitCode {
         Some("release") => tag_release(&workspace_root()),
         Some("fetch-data") => task_fetch_data(args.get(1..).unwrap_or_default()),
         Some("i18n") => task_i18n(args.get(1..).unwrap_or_default()),
+        Some("api-docs") => task_api_docs(args.get(1..).unwrap_or_default()),
         Some("help" | "-h" | "--help") | None => {
             print_help();
             Ok(())
@@ -90,6 +93,8 @@ Tasks:
   wasm      cargo check --target wasm32-unknown-unknown for the portable crates
   i18n      interface catalogs: check them, report coverage, translate
             (`i18n`, `i18n report`, `i18n translate --language de`)
+  api-docs  generate the API reference from the code; `check` verifies the committed copy
+            (`api-docs translate --language de` translates it)
   version   print or set the workspace version (`version set 0.2.0`)
 "
     );
@@ -116,7 +121,7 @@ fn run_program(program: &str, args: &[&str]) -> Result<(), String> {
 type CiStep = (&'static str, fn() -> Result<(), String>);
 
 fn task_ci() -> Result<(), String> {
-    let steps: [CiStep; 8] = [
+    let steps: [CiStep; 9] = [
         ("fmt", || run_cargo(&["fmt", "--all", "--", "--check"])),
         ("clippy", || {
             run_cargo(&[
@@ -131,6 +136,7 @@ fn task_ci() -> Result<(), String> {
         ("test", || run_cargo(&["test", "--workspace"])),
         ("assets", task_assets),
         ("i18n", task_i18n_check),
+        ("api-docs", task_api_docs_check),
         ("layers", task_layers),
         ("wasm", task_wasm),
         ("version", task_version_check),
@@ -152,6 +158,17 @@ fn task_ci() -> Result<(), String> {
 fn task_i18n(args: &[String]) -> Result<(), String> {
     let options = i18n::parse_options(args)?;
     i18n::run(&workspace_root(), &options)
+}
+
+/// The gate's step: the committed API reference matches the code it claims to describe.
+fn task_api_docs_check() -> Result<(), String> {
+    api_docs::run(&workspace_root(), &api_docs::Action::Check)
+}
+
+/// `cargo xtask api-docs [generate|translate --language <code>]`.
+fn task_api_docs(args: &[String]) -> Result<(), String> {
+    let action = api_docs::parse_options(args)?;
+    api_docs::run(&workspace_root(), &action)
 }
 
 /// The gate's step: every catalog is well-formed and names its language.

@@ -104,6 +104,14 @@ build with no `locales/` directory is a valid English-only build.
    missing one shows English and the wrong one is believed.
 5. `cargo xtask i18n` must pass.
 
+## The API reference
+
+The generated reference (`docs/api/`) is translated by the same pipeline:
+`cargo xtask api-docs translate --language <code>` writes `docs/api/<code>/index.md` from the English
+page, translating headings, paragraphs, labels and menu names while leaving ids, numbers and code
+alone. Its translation memory is `docs/api/<code>/strings.tsv`, so a second run only sends what
+changed. `docs/standards.md` §4 has the rules; the English page is authoritative.
+
 ## What is not done yet
 
 - **No number or date localization.** A pass time prints as `2024-01-01 09:12:04` in every language.

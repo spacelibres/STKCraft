@@ -10,6 +10,7 @@ publish = false
 
 [dependencies]
 serde_json.workspace = true
+stkcraft-engine.workspace = true
 stkcraft-i18n.workspace = true
 toml = "0.8"
 

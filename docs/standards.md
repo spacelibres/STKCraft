@@ -14,7 +14,7 @@ here.
 | Interface translations | `storytold/craft-i18n` catalog format | `cargo xtask i18n` | built |
 | Agent + skills + MCP | `storytold/craft-ai-integrations`, `craft-skills` | `cargo xtask ci`, `cargo xtask layers` | built, see §2 |
 | Extensions and plug-ins | `storytold/craft-extensions` package contract | `cargo xtask ci` (feature check) | partial, see §3 |
-| API documentation | this document, §4 | `cargo xtask api-docs` | partial, see §4 |
+| API documentation | this document, §4 | `cargo xtask api-docs check` | built, see §4 |
 | Layering | `AGENTS.md`, `xtask/src/layers.rs` | `cargo xtask layers` | built |
 | Version and release | `AGENTS.md` | `cargo xtask version`, `cargo xtask release` | built |
 
@@ -103,6 +103,15 @@ a shared on-disk store, themes carrying no code, and plug-ins whose v1 permissio
   revision it came from, so a stale translation is visible rather than trusted.
 - **A number in documentation that the code computes is marked as an example**, because prose does
   not re-run when the code changes.
+- **The gate checks, it does not write.** `cargo xtask ci` fails when `docs/api/en/index.md` is
+  stale; `cargo xtask api-docs` rewrites it. A gate that rewrites the file it checks passes on its
+  first run and hides a stale reference for ever after.
+- **A translated reference names its English revision**, so a page that lags behind the code says so
+  rather than being trusted. The translation memory (`docs/api/<locale>/strings.tsv`) is what makes a
+  second run cheap and a review possible.
+- **Not built:** the reference covers the command surface, the crates and their module documentation.
+  It does not yet document every public item's signature, and command parameter *descriptions* stay
+  English in the reference — they are translated in the interface, where the catalogs carry them.
 
 ## 5. What every rule here has in common
 
