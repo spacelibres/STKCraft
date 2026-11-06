@@ -20,6 +20,12 @@ jobs:
     # Tracks @main so suite-wide CI fixes reach every app without a PR in each repository.
     uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
     with:
+      # `fonts-noto-cjk` is not a build dependency: it is the face the `zh` catalog needs.
+      # `apps/stkcraft/src/fonts.rs` asserts that every shipped catalog can be drawn by the stack
+      # the app installs — installed fonts included, which is how a CJK interface renders at all —
+      # and a bare runner has no CJK font, so the assertion was red on every run from 0.1.30 to
+      # 0.1.40. Installing the font makes the check mean what it says instead of weakening it.
       packages: >-
         pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
         libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
+        fonts-noto-cjk
