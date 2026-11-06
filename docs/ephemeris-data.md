@@ -1,8 +1,9 @@
-# Ephemeris data
+# Bulk data
 
-This repository does not contain the ephemeris kernels it reads, and will not: they are large
-binaries published by NAIF, they are not source, and a copy in the repository would age silently
-against the file every deployment actually uses. The rule in `AGENTS.md` is that bulk data lives
+This repository does not contain the bulk data it reads, and will not: ephemeris kernels, Earth
+orientation parameters, leap-second tables, planetary constants and star catalogues are large
+published files rather than source, and a copy in the repository would age silently against the file
+every deployment actually uses. The rule in `AGENTS.md` is that bulk data lives
 outside the repository; this page is how that rule is kept for ephemerides.
 
 ## What is fetched, and from where
@@ -10,6 +11,10 @@ outside the repository; this page is how that rule is kept for ephemerides.
 | File | Source | SHA-256 | Used for |
 |---|---|---|---|
 | `de440s.bsp` | `https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp` | `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2` | Planet and Moon barycentres, 1849–2150 |
+
+Earth orientation (`finals2000A.all`, IERS Bulletin A), the leap-second kernel
+(`naif0012.tls`), the planetary constants and mass kernels (`pck00011.tpc`, `gm_de440.tpc`) and the
+HYG star catalogue are fetched and verified the same way.
 
 The satellite-system kernels come from
 `https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/` and carry the planets

@@ -34,4 +34,7 @@ Thumbs.db
 *.bpc
 *.tpc
 *.tf
+*.tls
+*.all
+*.csv.gz
 /data/

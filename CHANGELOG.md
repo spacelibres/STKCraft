@@ -9,6 +9,23 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.17] — All the bulk data, fetched in the background
+
+`cargo xtask fetch-data` now knows every bulk file this project will need, not only the ephemerides:
+Earth orientation, the leap-second kernel, the planetary constants and the star catalogue join the
+seven SPK kernels, and all twelve are fetched and verified by one command. The local `data/`
+directory holds 6.2 GB of it, so working on the code never waits for a download.
+
+### Added
+
+- **Five more rows in the fetch table**, each with the SHA-256 of a file that was downloaded and
+  hashed here: `finals2000A.all` (IERS Bulletin A, 3.8 MB), `naif0012.tls` (leap seconds, 5 KB),
+  `pck00011.tpc` (IAU 2015 constants, 131 KB), `gm_de440.tpc` (DE440 masses, 12 KB) and
+  `hygdata_v40.csv.gz` (HYG star catalogue, 13.6 MB). The `pck00011.tpc` checksum matches the one
+  already recorded in the body crate's generated header, which is a useful cross-check on both.
+- **`.gitignore` covers the new shapes**: `*.tls`, `*.all` and `*.csv.gz` in addition to the kernel
+  patterns, so a fetched file cannot be committed by accident.
+
 ## [0.1.16] — Downloads in parallel
 
 `cargo xtask fetch-data` now fetches large kernels as parallel byte ranges: `curl` processes on

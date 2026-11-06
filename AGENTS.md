@@ -74,11 +74,12 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 - **Bulk data lives outside this repository.** Star catalogues, Earth orientation
   parameters, gravity models, atmospheric tables and ephemeris files are fetched pinned and
   checksum-verified, or bundled as small generated tables with a source comment. Never
-  commit a large binary fixture. `cargo xtask fetch-data` downloads the ephemeris kernels into
-  `data/`, which is `.gitignore`d, and verifies each against the SHA-256 recorded in
-  `docs/ephemeris-data.md`; a deployment fetches the same files from the same URLs. A kernel is
-  never committed, and a row is added to that table only with the checksum of a file that was
-  actually verified.
+  commit a large binary fixture. `cargo xtask fetch-data` downloads all of it — ephemeris kernels,
+  IERS Earth orientation, the leap-second kernel, planetary constants and the star catalogue — into
+  `data/`, which is `.gitignore`d, as parallel ranged downloads (eight at a time, `--jobs` to
+  change it), and verifies each against the SHA-256 recorded in `docs/ephemeris-data.md`; a
+  deployment fetches the same files from the same URLs. Nothing is committed, and a row is added to
+  that table only with the checksum of a file that was actually verified.
 - **Everything is a command.** User-visible behaviour = a command in the engine
   (`id`, label, menu path, shortcut, parameter documentation, `enabled`, `run`) plus tests.
   The menus, shortcuts, CLI, control channel and MCP server all dispatch commands by id, so

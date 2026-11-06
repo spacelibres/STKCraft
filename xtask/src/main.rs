@@ -641,7 +641,7 @@ fn tag_release(root: &Path) -> Result<(), String> {
 /// The checksums are what makes the fetch trustworthy: a kernel is a large binary that taints every
 /// number computed from it, so a silently truncated download (which this repository has already
 /// seen once) must fail loudly rather than produce a plausible ephemeris.
-const DATA_FILES: [(&str, &str, &str); 7] = [
+const DATA_FILES: [(&str, &str, &str); 12] = [
     (
         "de440s.bsp",
         "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
@@ -676,6 +676,31 @@ const DATA_FILES: [(&str, &str, &str); 7] = [
         "nep097xl-801.bsp",
         "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/nep097xl-801.bsp",
         "3b4ec5b6f23a3b10da9574bc8fb35cfd93ebf9d7951bdcba0c7e26309304bfb1",
+    ),
+    (
+        "finals2000A.all",
+        "https://datacenter.iers.org/data/9/finals2000A.all",
+        "4c2308a3a782f561a84f549ab0e074e745aa950facd9dff56e2e60a7eac8f042",
+    ),
+    (
+        "naif0012.tls",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls",
+        "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b",
+    ),
+    (
+        "pck00011.tpc",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc",
+        "3dff7b1dbeceaa01f25467767d3fa25816051c85d162d1edf04acb310ee28bb1",
+    ),
+    (
+        "gm_de440.tpc",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc",
+        "924ddf4fb9ead9fe8a1aa55780bcabde40b09d00065d58226e24b68d8092f140",
+    ),
+    (
+        "hygdata_v40.csv.gz",
+        "https://raw.githubusercontent.com/astronexus/HYG-Database/main/hyg/CURRENT/hygdata_v40.csv.gz",
+        "8e3ff9e67445e558a759b117910850cff1b1d4d492f45f715c2ee2db3d869bac",
     ),
 ];
 
