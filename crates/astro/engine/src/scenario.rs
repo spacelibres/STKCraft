@@ -245,6 +245,18 @@ impl Scenario {
 
     /// Find a station by id.
     #[must_use]
+    /// The station's sensor, to change what it can see.
+    ///
+    /// A sensor is a property of the station, not of the analysis: narrowing a cone and recomputing is one
+    /// decision, and the command that does it says so.
+    pub fn station_sensor_mut(&mut self, id: StationId) -> Option<&mut Sensor> {
+        self.stations
+            .iter_mut()
+            .find(|station| station.id == id)
+            .map(|station| &mut station.sensor)
+    }
+
+    /// One station by id, when the scenario has it.
     pub fn station(&self, id: StationId) -> Option<&Station> {
         self.stations.iter().find(|s| s.id == id)
     }

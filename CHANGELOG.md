@@ -9,6 +9,40 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.73] — A sensor is part of the analysis, and a cone that sees nothing proves it
+
+F5's first slice. The access crate has modelled a sensor — a field-of-view cone about a boresight, a minimum
+elevation, a maximum slant range — since 0.1.11, and a station has carried one; what was missing is that
+**a person or an agent could not change it**. `access.compute` therefore always ran with the whole sky.
+
+`station.sensor` sets it: `id`, `half-angle`, and optionally `max-range-km`, `azimuth` and `elevation` (the
+boresight, defaulting to the zenith). A half-angle of 0 or more than 180 degrees is **refused** rather than
+stored — a sensor that cannot exist would fail later as a missing window, which is the wrong place to learn.
+
+### The hand-computable acceptance test
+
+`narrowing_a_stations_cone_removes_the_windows_it_cannot_see` runs the same orbit and the same station
+twice over one day, at a 30-second step:
+
+1. with the sky-wide sensor, the station sees the satellite — `windows > 0`;
+2. with a cone **0.01° wide about the zenith**, the satellite cannot be inside it, and the windows number
+   **0**.
+
+A sensor that were wired in but ignored would leave the windows in place, which is exactly the failure the
+test exists to catch. It also asserts that 0° and 200° are refused.
+
+### Added
+
+- **`station.sensor`** — the fifth station command, with the boresight and the range as optional parameters.
+- **`Scenario::station_sensor_mut`**, so a command changes what a station can see without replacing it.
+
+### Not built yet
+
+- **Targets**: access is still satellite-to-station. A point or polygon target, and a window that is the
+  union of its vertices' windows, is the next slice of F5.
+- The window's menu does not offer `station.sensor` yet; the MCP tool list does, because it is generated
+  from the registry.
+
 ## [0.1.72] — An extension's command is a tool, and it runs through the registry
 
 F3's second half. 0.1.71 made a package load and reported what it contributes; the aliases it brings were

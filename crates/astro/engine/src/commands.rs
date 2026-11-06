@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 
 use stkcraft_astro_access::Sensor;
 use stkcraft_astro_sgp4::TwoLineElement;
-use stkcraft_framework_core::{Angle, Duration, Error, Result};
+use stkcraft_framework_core::{Angle, Distance, Duration, Error, Result};
 
 use crate::analysis::{SatelliteAccess, compute_all_access};
 use crate::central::PlanetOrbit;
@@ -331,7 +331,7 @@ type Builtin = (
 
 const ALWAYS: fn(&Scenario) -> bool = |_| true;
 
-const BUILTIN: [Builtin; 8] = [
+const BUILTIN: [Builtin; 9] = [
     (
         CommandDescriptor {
             id: "scenario.rename",
@@ -521,6 +521,96 @@ const BUILTIN: [Builtin; 8] = [
                     what: format!("station {id:?}"),
                 })
             }
+        },
+    ),
+    (
+        CommandDescriptor {
+            id: "station.sensor",
+            label: "Set Station Sensor",
+            menu_path: "Station",
+            shortcut: None,
+            parameters: &[
+                Parameter {
+                    name: "id",
+                    kind: ParameterKind::Number,
+                    description: "The numeric id of the station.",
+                    required: true,
+                },
+                Parameter {
+                    name: "half-angle",
+                    kind: ParameterKind::Degrees,
+                    description: "Half-angle of the field-of-view cone about the boresight, \
+                                  in degrees. 180 is the whole upper hemisphere.",
+                    required: true,
+                },
+                Parameter {
+                    name: "max-range-km",
+                    kind: ParameterKind::Number,
+                    description: "Maximum slant range in kilometres; omit for unlimited.",
+                    required: false,
+                },
+                Parameter {
+                    name: "azimuth",
+                    kind: ParameterKind::Degrees,
+                    description: "Boresight azimuth, clockwise from north. Default 0.",
+                    required: false,
+                },
+                Parameter {
+                    name: "elevation",
+                    kind: ParameterKind::Degrees,
+                    description: "Boresight elevation above the horizon. Default 90 (zenith).",
+                    required: false,
+                },
+            ],
+        },
+        ALWAYS,
+        |scenario, args| {
+            let id = args.required("id")?.as_number("id")?;
+            let id = StationId(
+                u32::try_from(id as i64).map_err(|_| Error::invalid("id", "out of range"))?,
+            );
+            let half_angle = args.required("half-angle")?.as_angle("half-angle")?;
+            if half_angle.as_deg() <= 0.0 || half_angle.as_deg() > 180.0 {
+                return Err(Error::invalid(
+                    "half-angle",
+                    "a field-of-view half-angle is greater than 0 and at most 180 degrees",
+                ));
+            }
+            let azimuth = args
+                .get("azimuth")
+                .map(|argument| argument.as_angle("azimuth"))
+                .transpose()?
+                .unwrap_or(Angle::ZERO);
+            let elevation = args
+                .get("elevation")
+                .map(|argument| argument.as_angle("elevation"))
+                .transpose()?
+                .unwrap_or(Angle::from_deg(90.0));
+            let boresight = (azimuth, elevation);
+            let maximum_range = args
+                .get("max-range-km")
+                .map(|argument| argument.as_number("max-range-km"))
+                .transpose()?
+                .map(Distance::from_km);
+            let sensor = scenario
+                .station_sensor_mut(id)
+                .ok_or_else(|| Error::NotFound {
+                    what: format!("station {id:?}"),
+                })?;
+            *sensor = Sensor {
+                minimum_elevation: sensor.minimum_elevation,
+                half_angle,
+                boresight,
+                maximum_range,
+            };
+            Ok(CommandOutcome::new(format!(
+                "Station {id:?} now has a {} degree cone{}",
+                half_angle.as_deg(),
+                maximum_range.map_or_else(String::new, |range| format!(
+                    ", maximum range {} km",
+                    range.as_km()
+                ))
+            )))
         },
     ),
     (
@@ -989,5 +1079,96 @@ mod tests {
             )
             .expect_err("Vulcan is not a body");
         assert!(error.to_string().contains("Vulcan"), "{error}");
+    }
+
+    /// A near-equatorial orbit whose ascending node sits on the epoch's prime meridian, so the satellite is
+    /// overhead of `(0°, 0°)` at the epoch: the station below it must see it, and a cone narrow enough
+    /// cannot contain it.
+    const OVERHEAD_L1: &str =
+        "1 90000U 24001A   24001.50000000  .00000000  00000-0  00000-0 0  9000";
+    const OVERHEAD_L2: &str =
+        "2 90000   0.0100   0.0000 0001000   0.0000   0.0000 15.50000000 00004";
+
+    #[test]
+    fn narrowing_a_stations_cone_removes_the_windows_it_cannot_see() {
+        // The hand-computable case F5 asks for: the same orbit and the same station, with a sensor that sees
+        // the whole sky and then with a cone a hundredth of a degree wide. The satellite passes over the
+        // station and cannot be inside a 0.01-degree cone, so the windows must vanish — a sensor that is
+        // wired in but ignored would leave them.
+        let registry = Registry::builtin();
+        let mut scenario = Scenario::empty("sensor");
+        scenario.epoch = TwoLineElement::parse(OVERHEAD_L1, OVERHEAD_L2)
+            .expect("valid TLE")
+            .epoch;
+        // A day: a low Earth orbit crosses the equator several times, which is what gives the wide sensor
+        // something to see before the cone is narrowed.
+        scenario.duration_seconds = 86_400.0;
+        registry
+            .run(
+                "satellite.add",
+                &mut scenario,
+                &Args::none()
+                    .with("name", Arg::Text("Overhead".to_owned()))
+                    .with("line1", Arg::Text(OVERHEAD_L1.to_owned()))
+                    .with("line2", Arg::Text(OVERHEAD_L2.to_owned())),
+            )
+            .expect("adds satellite");
+        registry
+            .run(
+                "station.add",
+                &mut scenario,
+                &Args::none()
+                    .with("name", Arg::Text("Equator".to_owned()))
+                    .with("latitude", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("longitude", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("minimum-elevation", Arg::Angle(Angle::from_deg(0.0))),
+            )
+            .expect("adds station");
+        let station = scenario.stations.first().expect("the station was added").id;
+        let compute = |scenario: &mut Scenario| {
+            registry
+                .run(
+                    "access.compute",
+                    scenario,
+                    &Args::none().with("step-seconds", Arg::Number(30.0)),
+                )
+                .expect("computes")
+                .access
+                .unwrap_or_default()
+                .iter()
+                .map(|entry| entry.windows.len())
+                .sum::<usize>()
+        };
+        let wide = compute(&mut scenario);
+        assert!(
+            wide > 0,
+            "the station directly under the satellite saw nothing"
+        );
+
+        // A cone 0.01 degrees wide about the zenith: nothing can be inside it by accident.
+        registry
+            .run(
+                "station.sensor",
+                &mut scenario,
+                &Args::none()
+                    .with("id", Arg::Number(f64::from(station.0)))
+                    .with("half-angle", Arg::Angle(Angle::from_deg(0.01))),
+            )
+            .expect("sets the cone");
+        let narrow = compute(&mut scenario);
+        assert_eq!(narrow, 0, "{narrow} window(s) survived a 0.01 degree cone");
+
+        // And a cone that is invalid is refused rather than stored: a half-angle of 0 or 200 degrees is not
+        // a sensor, and a command that accepted it would fail later as a missing window.
+        for bad in [0.0, 200.0] {
+            let answer = registry.run(
+                "station.sensor",
+                &mut scenario,
+                &Args::none()
+                    .with("id", Arg::Number(f64::from(station.0)))
+                    .with("half-angle", Arg::Angle(Angle::from_deg(bad))),
+            );
+            assert!(answer.is_err(), "{bad} degrees was accepted");
+        }
     }
 }
