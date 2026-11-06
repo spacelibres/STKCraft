@@ -84,6 +84,15 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   (`id`, label, menu path, shortcut, parameter documentation, `enabled`, `run`) plus tests.
   The menus, shortcuts, CLI, control channel and MCP server all dispatch commands by id, so
   an agent can do anything a user can.
+- **A parameter declares its kind** (`Number`, `Text`, `Degrees`), not just its name and prose.
+  Every transport converts a caller's value through that declaration, so the schema a model
+  reads and the typed value the command receives cannot disagree — the alternative, inferring
+  the type from the parameter's name, sent a latitude to a command as a plain number and the
+  command answered "expected an angle" to a caller who had sent exactly the right value.
+- **A tool returns the answer, not a count.** A command that computes times returns them: the
+  text a model reads lists the pass instants, and the same list is in `structuredContent` for a
+  program. "4 passes" is a summary, not an analysis, and anything the caller has to recompute is
+  work the tool was supposed to have done.
 - **Programmatic calls never open dialogs.** A command run through the control channel or
   MCP uses defaults; only a menu click starts an interactive sequence.
 - **The model stays outside the kernel.** `stkcraft-engine` makes no network call and links no

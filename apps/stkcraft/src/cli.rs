@@ -352,17 +352,45 @@ fn planet(request: &PlanetRequest) -> Result<(), String> {
             &Args::none()
                 .with("body", Arg::Text(request.body.clone()))
                 .with("radius-km", Arg::Number(request.radius_km))
-                .with("inclination-deg", Arg::Number(request.inclination_deg))
-                .with("latitude-deg", Arg::Number(request.latitude_deg))
-                .with("longitude-deg", Arg::Number(request.longitude_deg))
-                .with("mask-deg", Arg::Number(request.mask_deg))
+                // Angles go in as angles: the command declares them as degrees, and the typed
+                // value is what stops a radians/degrees mix-up reaching the geometry.
+                .with(
+                    "inclination-deg",
+                    Arg::Angle(Angle::from_deg(request.inclination_deg)),
+                )
+                .with(
+                    "latitude-deg",
+                    Arg::Angle(Angle::from_deg(request.latitude_deg)),
+                )
+                .with(
+                    "longitude-deg",
+                    Arg::Angle(Angle::from_deg(request.longitude_deg)),
+                )
+                .with("mask-deg", Arg::Angle(Angle::from_deg(request.mask_deg)))
                 .with("hours", Arg::Number(request.hours))
                 .with("step-seconds", Arg::Number(request.step_seconds)),
         )
         .map_err(|error| format!("{error}"))?;
     println!("STKCraft {}", env!("CARGO_PKG_VERSION"));
     println!("{}", outcome.summary);
+    // The passes themselves, not only how many: the times are the answer, and a summary that
+    // counts them leaves the reader to compute what they asked for.
+    for pass in outcome.passes.iter().flatten() {
+        let start = instant_at(scenario.epoch, pass.start_seconds);
+        let end = instant_at(scenario.epoch, pass.end_seconds);
+        println!(
+            "  {} → {} UTC   {}",
+            crate::render::format_epoch(start),
+            crate::render::format_epoch(end),
+            crate::render::format_duration(pass.duration_seconds())
+        );
+    }
     Ok(())
+}
+
+/// An absolute instant from a scenario epoch and an offset.
+fn instant_at(epoch: stkcraft_time::Epoch, offset_seconds: f64) -> stkcraft_time::Epoch {
+    stkcraft_time::Epoch::from_julian(epoch.julian().plus_seconds(offset_seconds), epoch.scale())
 }
 
 /// Serve the engine's commands over the Model Context Protocol on stdin/stdout.

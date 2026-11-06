@@ -37,8 +37,11 @@ use std::path::Path;
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
-use stkcraft_engine::commands::{Arg, Args, Parameter, Registry};
+use stkcraft_core::Angle;
+use stkcraft_engine::commands::{Arg, Args, Parameter, ParameterKind, Registry};
 use stkcraft_engine::scenario::Scenario;
+use stkcraft_engine::{PlanetPass, SatelliteAccess};
+use stkcraft_time::{Epoch, julian_to_utc_naive};
 
 /// The MCP revision this server implements.
 ///
@@ -194,7 +197,21 @@ impl Server {
                     .ok_or((-32602, "tools/call needs a name".to_owned()))?;
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
                 self.call_tool(name, &arguments)
-                    .map(|text| json!({"content": [{"type": "text", "text": text}], "isError": false}))
+                    .map(|(text, structured)| {
+                        let mut result = json!({
+                            "content": [{"type": "text", "text": text}],
+                            "isError": false,
+                        });
+                        // `structuredContent` is the machine-readable half: a client that only
+                        // shows the summary loses the pass times, and a model that has to parse
+                        // prose to find a number will eventually find the wrong one.
+                        if let Some(structured) = structured
+                            && let Some(object) = result.as_object_mut()
+                        {
+                            object.insert("structuredContent".to_owned(), structured);
+                        }
+                        result
+                    })
                     .map_err(|message| (-32000, message))
             }
             "resources/list" => Ok(json!({"resources": self.resources()})),
@@ -234,25 +251,30 @@ impl Server {
                 let parameters = command.descriptor.parameters;
                 let mut properties = serde_json::Map::new();
                 let mut required = Vec::new();
-                for Parameter {
-                    name,
-                    description,
-                    required: needed,
-                } in parameters
-                {
-                    properties.insert(
-                        (*name).to_owned(),
-                        json!({"type": "number", "description": description}),
-                    );
+                for parameter in parameters {
+                    let Parameter {
+                        name,
+                        description,
+                        required: needed,
+                        kind,
+                    } = parameter;
+                    // The type comes from the parameter's own declaration, so the schema a model
+                    // reads and the conversion its argument goes through cannot disagree.
+                    let schema = match kind {
+                        ParameterKind::Text => {
+                            json!({"type": "string", "description": description})
+                        }
+                        ParameterKind::Number => {
+                            json!({"type": "number", "description": description})
+                        }
+                        ParameterKind::Degrees => json!({
+                            "type": "number",
+                            "description": description,
+                        }),
+                    };
+                    properties.insert((*name).to_owned(), schema);
                     if *needed {
                         required.push(Value::String((*name).to_owned()));
-                    }
-                }
-                // Some parameters are text by nature (a body name, a scenario title); the schema
-                // says string for those so a model does not send a number the command will refuse.
-                for name in TEXT_PARAMETERS {
-                    if let Some(property) = properties.get_mut(name) {
-                        *property = json!({"type": "string"});
                     }
                 }
                 json!({
@@ -277,7 +299,11 @@ impl Server {
     }
 
     /// Run one command by id.
-    fn call_tool(&mut self, name: &str, arguments: &Value) -> Result<String, String> {
+    fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: &Value,
+    ) -> Result<(String, Option<Value>), String> {
         let Some(command) = self.registry.get(name) else {
             return Err(format!("no such tool `{name}`; call tools/list"));
         };
@@ -286,13 +312,14 @@ impl Server {
             let Some(value) = arguments.get(parameter.name) else {
                 continue;
             };
-            args = args.with(parameter.name, argument_from_json(parameter.name, value));
+            args = args.with(parameter.name, argument_from_json(parameter, value));
         }
         let outcome = self
             .registry
             .run(name, &mut self.scenario, &args)
             .map_err(|error| format!("{name}: {error}"))?;
         let mut text = outcome.summary;
+        let mut structured = None;
         if let Some(access) = outcome.access {
             let windows: usize = access.iter().map(|entry| entry.windows.len()).sum();
             let _ = write!(
@@ -300,8 +327,118 @@ impl Server {
                 "\n{windows} window(s) over {} pair(s); read `stkcraft://scenario` for the document.",
                 access.len()
             );
+            let pairs = self.pairs_json(&access, &mut text);
+            structured = Some(json!({"kind": "access", "pairs": pairs}));
         }
-        Ok(text)
+        if let Some(passes) = outcome.passes {
+            let epoch = self.scenario.epoch;
+            let _ = writeln!(text);
+            let listed = Self::passes_json(&passes, epoch, &mut text);
+            structured = Some(json!({
+                "kind": "planet-passes",
+                "epoch": self.scenario.epoch,
+                "passes": listed,
+            }));
+        }
+        Ok((text, structured))
+    }
+
+    /// The access windows, as JSON, appending a readable line per window to `text`.
+    ///
+    /// Readable *and* structured on purpose: the text is what a language model reads and what a
+    /// person sees in a client, and the JSON is what a program can trust. The times are given in
+    /// UTC and in seconds from the scenario epoch, because a solver reproduces the first and a
+    /// spreadsheet wants the second.
+    fn pairs_json(&self, access: &[SatelliteAccess], text: &mut String) -> Vec<Value> {
+        /// How many windows of one pair the text lists before it summarises the rest.
+        const LISTED: usize = 20;
+        let epoch = self.scenario.epoch;
+        access
+            .iter()
+            .map(|entry| {
+                let satellite = self
+                    .scenario
+                    .satellite(entry.satellite)
+                    .map_or("?", |satellite| satellite.name.as_str());
+                let station = self
+                    .scenario
+                    .station(entry.station)
+                    .map_or("?", |station| station.name.as_str());
+                let _ = write!(
+                    text,
+                    "\n{satellite} over {station}: {} pass(es), {} in view",
+                    entry.windows.len(),
+                    seconds_text(entry.total.as_seconds())
+                );
+                let mut windows = Vec::with_capacity(entry.windows.len());
+                for (index, window) in entry.windows.iter().enumerate() {
+                    let start = instant(epoch, window.start.as_seconds());
+                    let end = instant(epoch, window.end.as_seconds());
+                    windows.push(json!({
+                        "start_utc": start,
+                        "end_utc": end,
+                        "start_seconds": window.start.as_seconds(),
+                        "duration_seconds": window.duration().as_seconds(),
+                    }));
+                    if index < LISTED {
+                        let _ = write!(
+                            text,
+                            "\n  {} → {} UTC ({})",
+                            start,
+                            end,
+                            seconds_text(window.duration().as_seconds())
+                        );
+                    }
+                }
+                if entry.windows.len() > LISTED {
+                    let _ = write!(
+                        text,
+                        "\n  … and {} more (all of them are in the structured content)",
+                        entry.windows.len() - LISTED
+                    );
+                }
+                json!({
+                    "satellite": satellite,
+                    "station": station,
+                    "total_seconds": entry.total.as_seconds(),
+                    "windows": windows,
+                })
+            })
+            .collect()
+    }
+
+    /// The passes over a station on another body, as JSON, with a readable line in `text`.
+    fn passes_json(passes: &[PlanetPass], epoch: Epoch, text: &mut String) -> Vec<Value> {
+        /// How many passes the text lists before it summarises the rest.
+        const LISTED: usize = 20;
+        let mut listed = Vec::with_capacity(passes.len());
+        for (index, pass) in passes.iter().enumerate() {
+            let start = instant(epoch, pass.start_seconds);
+            let end = instant(epoch, pass.end_seconds);
+            listed.push(json!({
+                "start_utc": start,
+                "end_utc": end,
+                "start_seconds": pass.start_seconds,
+                "duration_seconds": pass.duration_seconds(),
+            }));
+            if index < LISTED {
+                let _ = write!(
+                    text,
+                    "\n  {} → {} UTC ({})",
+                    start,
+                    end,
+                    seconds_text(pass.duration_seconds())
+                );
+            }
+        }
+        if passes.len() > LISTED {
+            let _ = write!(
+                text,
+                "\n  … and {} more (all of them are in the structured content)",
+                passes.len() - LISTED
+            );
+        }
+        listed
     }
 
     /// What a client can read: the scenario, the command catalogue and every skill.
@@ -420,32 +557,70 @@ impl Server {
     }
 }
 
-/// Parameters that are text rather than numbers.
+/// An instant as `YYYY-MM-DD HH:MM:SS`, in UTC.
 ///
-/// The command registry describes parameters by name and prose, not by type, because a menu does
-/// not need types. A model does: it will send `"Mars"` for a body and `1.5` for a latitude, and the
-/// schema has to say which is which. This list is the bridge, and it is short on purpose.
-const TEXT_PARAMETERS: [&str; 6] = ["body", "name", "line1", "line2", "station", "satellite"];
+/// Falls back to the Julian date rather than to a placeholder: an epoch outside the leap-second
+/// table is a fact about the request, and a number a caller can look up beats an empty string.
+fn instant(epoch: Epoch, offset_seconds: f64) -> String {
+    let shifted = Epoch::from_julian(epoch.julian().plus_seconds(offset_seconds), epoch.scale());
+    match shifted
+        .to_utc()
+        .ok()
+        .and_then(|utc| julian_to_utc_naive(utc.julian()))
+    {
+        Some(datetime) => datetime.format("%Y-%m-%d %H:%M:%S").to_string(),
+        None => format!("JD {:.6}", shifted.julian().sum()),
+    }
+}
 
-/// Turn a JSON argument into the engine's [`Arg`].
+/// A duration as `6m 12s`, rounded to the second.
+fn seconds_text(seconds: f64) -> String {
+    if !seconds.is_finite() {
+        return "n/a".to_owned();
+    }
+    let total = seconds.round().max(0.0) as u64;
+    let hours = total / 3_600;
+    let minutes = (total % 3_600) / 60;
+    let remainder = total % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes:02}m {remainder:02}s")
+    } else {
+        format!("{minutes}m {remainder:02}s")
+    }
+}
+
+/// Turn a JSON argument into the engine's [`Arg`], in the type the parameter declares.
 ///
-/// A number stays a number; anything else becomes text, which is what a command with a text
-/// parameter expects and what a wrong type deserves — the command's own validation rejects it with
-/// a message that names the parameter.
-fn argument_from_json(name: &str, value: &Value) -> Arg {
-    if TEXT_PARAMETERS.contains(&name) {
-        return Arg::Text(match value {
+/// The parameter's [`ParameterKind`] decides, not its name and not what the caller happened to send:
+/// a latitude arrives as `51.5` and becomes a typed `Angle`, and a body name arrives as `"Mars"` and
+/// becomes text. Getting this wrong is not cosmetic — an angle the command never receives is a
+/// command that answers "expected an angle" to a caller who sent exactly the right number.
+fn argument_from_json(parameter: &Parameter, value: &Value) -> Arg {
+    match parameter.kind {
+        ParameterKind::Text => Arg::Text(match value {
             Value::String(text) => text.clone(),
             other => other.to_string(),
-        });
-    }
-    match value {
-        Value::Number(number) => Arg::Number(number.as_f64().unwrap_or(f64::NAN)),
-        Value::String(text) => match text.parse::<f64>() {
-            Ok(number) => Arg::Number(number),
-            Err(_) => Arg::Text(text.clone()),
+        }),
+        ParameterKind::Number => match number_from_json(value) {
+            Some(number) => Arg::Number(number),
+            None => Arg::Text(value.to_string()),
         },
-        other => Arg::Text(other.to_string()),
+        ParameterKind::Degrees => match number_from_json(value) {
+            Some(degrees) => Arg::Angle(Angle::from_deg(degrees)),
+            None => Arg::Text(value.to_string()),
+        },
+    }
+}
+
+/// A number from a JSON number or from a string that holds one.
+///
+/// A model occasionally sends `"51.5"`; accepting it is not laxity, it is accepting the value the
+/// schema asked for in the encoding the model chose, and every command validates the range anyway.
+fn number_from_json(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
     }
 }
 
@@ -455,6 +630,10 @@ fn argument_from_json(name: &str, value: &Value) -> Arg {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// One real element set, so a test computes a real orbit rather than an error path.
+    const LEO_L1: &str = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009";
+    const LEO_L2: &str = "2 25544  51.6400 208.9163 0006317  69.9862  25.2906 15.49569600 12343";
 
     fn server() -> Server {
         let skills = vec![
@@ -524,6 +703,78 @@ mod tests {
             .as_str()
             .expect("text");
         assert!(text.contains("Mars mission"), "{text}");
+    }
+
+    #[test]
+    fn an_access_call_answers_with_the_windows_and_not_only_a_count() {
+        // The failure this pins: a tool that says "3 windows" leaves the caller to recompute the
+        // times, which is the whole job of a tool call. Every window in the structured content must
+        // also be in the text, because the text is what a model reads.
+        let mut server = server();
+        for call in [
+            json!({"name": "satellite.add", "arguments": {
+                "name": "ISS", "line1": LEO_L1, "line2": LEO_L2}}),
+            json!({"name": "station.add", "arguments": {
+                "name": "London", "latitude": 51.5, "longitude": -0.13,
+                "minimum-elevation": 0.0}}),
+        ] {
+            let answer = ask(&mut server, "tools/call", &call);
+            assert!(answer.get("error").is_none(), "{answer}");
+        }
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "access.compute", "arguments": {"step-seconds": 30.0}}),
+        );
+        assert!(answer.get("error").is_none(), "{answer}");
+        let text = answer["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        let pairs = answer["result"]["structuredContent"]["pairs"]
+            .as_array()
+            .expect("pairs");
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0]["satellite"], "ISS");
+        assert_eq!(pairs[0]["station"], "London");
+        let windows = pairs[0]["windows"].as_array().expect("windows");
+        assert!(
+            !windows.is_empty(),
+            "no passes in 24 h of a 92-minute orbit"
+        );
+        let first = windows[0]["start_utc"].as_str().expect("a start time");
+        // A calendar instant, not a bare offset: a caller cannot place "372.5 s" on a timeline.
+        assert!(first.contains(':') && first.contains('-'), "{first}");
+        assert!(text.contains(first), "{text}");
+        let duration = windows[0]["duration_seconds"].as_f64().expect("a duration");
+        assert!(duration > 0.0, "{duration}");
+    }
+
+    #[test]
+    fn a_planet_call_answers_with_its_pass_times() {
+        let mut server = server();
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "planet.access", "arguments": {
+                "body": "Titan", "radius-km": 3000.0, "inclination-deg": 0.0,
+                "latitude-deg": 10.0, "longitude-deg": 0.0, "mask-deg": 10.0, "hours": 12.0}}),
+        );
+        assert!(answer.get("error").is_none(), "{answer}");
+        let structured = &answer["result"]["structuredContent"];
+        assert_eq!(structured["kind"], "planet-passes");
+        let passes = structured["passes"].as_array().expect("passes");
+        assert!(!passes.is_empty(), "no passes in 12 h over Titan");
+        let text = answer["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        let first = passes[0]["start_utc"].as_str().expect("a start time");
+        assert!(text.contains(first), "{text}");
+        // The passes are in time order and do not overlap, which is what makes the list usable.
+        assert!(
+            passes[0]["start_seconds"].as_f64().expect("a number")
+                <= passes[0]["duration_seconds"].as_f64().expect("a number"),
+            "the first pass starts before the search window"
+        );
     }
 
     #[test]

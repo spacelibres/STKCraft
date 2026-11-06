@@ -23,7 +23,7 @@ use stkcraft_sgp4::TwoLineElement;
 
 use crate::analysis::{SatelliteAccess, compute_all_access};
 use crate::central::PlanetOrbit;
-use crate::planet_access::find_passes;
+use crate::planet_access::{PlanetPass, find_passes};
 use crate::scenario::{Scenario, StationId};
 
 /// One documented parameter of a command.
@@ -35,6 +35,24 @@ pub struct Parameter {
     pub description: &'static str,
     /// Whether the command refuses to run without it.
     pub required: bool,
+    /// What kind of value it takes.
+    ///
+    /// Declared rather than inferred, because a transport has to turn whatever a caller sent into
+    /// the typed value a command expects. Inferring it from the parameter's name worked until the
+    /// day a model sent `latitude: 51.5` and the command answered "expected an angle": a name is
+    /// not a type, and the schema a model reads has to say which parameters are degrees.
+    pub kind: ParameterKind,
+}
+
+/// The kind of value a parameter takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterKind {
+    /// A plain number in the unit its description names.
+    Number,
+    /// Text.
+    Text,
+    /// An angle in degrees, converted to the typed [`Angle`] before the command sees it.
+    Degrees,
 }
 
 /// The static description of a command.
@@ -142,6 +160,13 @@ pub struct CommandOutcome {
     pub summary: String,
     /// Access results, when the command computed any.
     pub access: Option<Vec<SatelliteAccess>>,
+    /// Passes over a station on another body, when the command computed any.
+    ///
+    /// Separate from [`Self::access`] because the two answer different questions: `access` is
+    /// per satellite/station pair on Earth with the window list a mission analyst expects, and
+    /// this is one orbit about one body over one site. A summary that said only "4 passes" left
+    /// the caller to recompute the times, which is exactly the work a tool call exists to do.
+    pub passes: Option<Vec<PlanetPass>>,
 }
 
 impl CommandOutcome {
@@ -151,7 +176,15 @@ impl CommandOutcome {
         Self {
             summary: summary.into(),
             access: None,
+            passes: None,
         }
+    }
+
+    /// The same outcome with passes attached.
+    #[must_use]
+    pub fn with_passes(mut self, passes: Vec<PlanetPass>) -> Self {
+        self.passes = Some(passes);
+        self
     }
 }
 
@@ -262,6 +295,7 @@ const BUILTIN: [Builtin; 8] = [
             shortcut: None,
             parameters: &[Parameter {
                 name: "name",
+                kind: ParameterKind::Text,
                 description: "The new scenario name.",
                 required: true,
             }],
@@ -281,6 +315,7 @@ const BUILTIN: [Builtin; 8] = [
             shortcut: None,
             parameters: &[Parameter {
                 name: "seconds",
+                kind: ParameterKind::Number,
                 description: "How long the timeline runs, in seconds. Must be positive.",
                 required: true,
             }],
@@ -308,16 +343,19 @@ const BUILTIN: [Builtin; 8] = [
             parameters: &[
                 Parameter {
                     name: "name",
+                    kind: ParameterKind::Text,
                     description: "A display name; need not be unique.",
                     required: true,
                 },
                 Parameter {
                     name: "line1",
+                    kind: ParameterKind::Text,
                     description: "The first line of the two-line element set.",
                     required: true,
                 },
                 Parameter {
                     name: "line2",
+                    kind: ParameterKind::Text,
                     description: "The second line of the two-line element set.",
                     required: true,
                 },
@@ -343,6 +381,7 @@ const BUILTIN: [Builtin; 8] = [
             shortcut: None,
             parameters: &[Parameter {
                 name: "id",
+                kind: ParameterKind::Number,
                 description: "The numeric id of the satellite to remove.",
                 required: true,
             }],
@@ -371,21 +410,25 @@ const BUILTIN: [Builtin; 8] = [
             parameters: &[
                 Parameter {
                     name: "name",
+                    kind: ParameterKind::Text,
                     description: "A display name; need not be unique.",
                     required: true,
                 },
                 Parameter {
                     name: "latitude",
+                    kind: ParameterKind::Degrees,
                     description: "Geodetic latitude, positive north.",
                     required: true,
                 },
                 Parameter {
                     name: "longitude",
+                    kind: ParameterKind::Degrees,
                     description: "Longitude, positive east.",
                     required: true,
                 },
                 Parameter {
                     name: "minimum-elevation",
+                    kind: ParameterKind::Degrees,
                     description: "The horizon mask; nothing below it is visible.",
                     required: true,
                 },
@@ -415,6 +458,7 @@ const BUILTIN: [Builtin; 8] = [
             shortcut: None,
             parameters: &[Parameter {
                 name: "id",
+                kind: ParameterKind::Number,
                 description: "The numeric id of the station to remove.",
                 required: true,
             }],
@@ -442,6 +486,7 @@ const BUILTIN: [Builtin; 8] = [
             shortcut: Some("Ctrl+Shift+A"),
             parameters: &[Parameter {
                 name: "step-seconds",
+                kind: ParameterKind::Number,
                 description: "Search step. Shorter is more thorough and slower.",
                 required: false,
             }],
@@ -468,6 +513,7 @@ const BUILTIN: [Builtin; 8] = [
                     results.len()
                 ),
                 access: Some(results),
+                passes: None,
             })
         },
     ),
@@ -480,41 +526,49 @@ const BUILTIN: [Builtin; 8] = [
             parameters: &[
                 Parameter {
                     name: "body",
+                    kind: ParameterKind::Text,
                     description: "The body the station stands on and the orbit is about, by IAU name (e.g. Mars, Titan).",
                     required: true,
                 },
                 Parameter {
                     name: "radius-km",
+                    kind: ParameterKind::Number,
                     description: "Circular orbit radius from the body's centre, km.",
                     required: true,
                 },
                 Parameter {
                     name: "inclination-deg",
+                    kind: ParameterKind::Degrees,
                     description: "Orbit inclination from the body's ICRF equator, degrees.",
                     required: true,
                 },
                 Parameter {
                     name: "latitude-deg",
+                    kind: ParameterKind::Degrees,
                     description: "Station planetodetic latitude on that body, degrees.",
                     required: true,
                 },
                 Parameter {
                     name: "longitude-deg",
+                    kind: ParameterKind::Degrees,
                     description: "Station longitude east of the body's prime meridian, degrees.",
                     required: true,
                 },
                 Parameter {
                     name: "mask-deg",
+                    kind: ParameterKind::Degrees,
                     description: "Sensor horizon mask, degrees above the local horizon.",
                     required: false,
                 },
                 Parameter {
                     name: "hours",
+                    kind: ParameterKind::Number,
                     description: "How long to search, hours.",
                     required: false,
                 },
                 Parameter {
                     name: "step-seconds",
+                    kind: ParameterKind::Number,
                     description: "Search step: shorter is more thorough and slower.",
                     required: false,
                 },
@@ -536,24 +590,21 @@ const BUILTIN: [Builtin; 8] = [
                 .get("radius-km")
                 .ok_or_else(|| Error::invalid("radius-km", "required"))?
                 .as_number("radius-km")?;
-            let inclination = Angle::from_deg(
-                args.get("inclination-deg")
-                    .ok_or_else(|| Error::invalid("inclination-deg", "required"))?
-                    .as_number("inclination-deg")?,
-            );
-            let latitude = Angle::from_deg(
-                args.get("latitude-deg")
-                    .ok_or_else(|| Error::invalid("latitude-deg", "required"))?
-                    .as_number("latitude-deg")?,
-            );
-            let longitude = Angle::from_deg(
-                args.get("longitude-deg")
-                    .ok_or_else(|| Error::invalid("longitude-deg", "required"))?
-                    .as_number("longitude-deg")?,
-            );
-            let mask_deg = match args.get("mask-deg") {
-                Some(argument) => argument.as_number("mask-deg")?,
-                None => 0.0,
+            let inclination = args
+                .get("inclination-deg")
+                .ok_or_else(|| Error::invalid("inclination-deg", "required"))?
+                .as_angle("inclination-deg")?;
+            let latitude = args
+                .get("latitude-deg")
+                .ok_or_else(|| Error::invalid("latitude-deg", "required"))?
+                .as_angle("latitude-deg")?;
+            let longitude = args
+                .get("longitude-deg")
+                .ok_or_else(|| Error::invalid("longitude-deg", "required"))?
+                .as_angle("longitude-deg")?;
+            let mask = match args.get("mask-deg") {
+                Some(argument) => argument.as_angle("mask-deg")?,
+                None => Angle::ZERO,
             };
             let hours = match args.get("hours") {
                 Some(argument) => argument.as_number("hours")?,
@@ -573,7 +624,7 @@ const BUILTIN: [Builtin; 8] = [
             let access = stkcraft_access::PlanetAccess {
                 body,
                 site: stkcraft_access::GroundSite::new(latitude, longitude, 0.0)?,
-                sensor: Sensor::above_horizon(Angle::from_deg(mask_deg)),
+                sensor: Sensor::above_horizon(mask),
             };
             let passes = find_passes(&orbit, &access, epoch_tdb, hours, step_seconds)?;
             let total: f64 = passes
@@ -584,7 +635,8 @@ const BUILTIN: [Builtin; 8] = [
                 "{body}: {} pass(es) in {hours:.1} h, {} min in view",
                 passes.len(),
                 (total / 60.0).round() as i64
-            )))
+            ))
+            .with_passes(passes))
         },
     ),
 ];
@@ -857,10 +909,12 @@ mod tests {
                 &Args::none()
                     .with("body", Arg::Text("Mars".to_owned()))
                     .with("radius-km", Arg::Number(4_000.0))
-                    .with("inclination-deg", Arg::Number(0.0))
-                    .with("latitude-deg", Arg::Number(0.0))
-                    .with("longitude-deg", Arg::Number(0.0))
-                    .with("mask-deg", Arg::Number(10.0))
+                    // Angles are typed: a plain number here is the mix-up the type exists to
+                    // prevent, and the command refuses it rather than guessing the unit.
+                    .with("inclination-deg", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("latitude-deg", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("longitude-deg", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("mask-deg", Arg::Angle(Angle::from_deg(10.0)))
                     .with("hours", Arg::Number(6.0))
                     .with("step-seconds", Arg::Number(10.0)),
             )
@@ -884,9 +938,9 @@ mod tests {
                 &Args::none()
                     .with("body", Arg::Text("Vulcan".to_owned()))
                     .with("radius-km", Arg::Number(4_000.0))
-                    .with("inclination-deg", Arg::Number(0.0))
-                    .with("latitude-deg", Arg::Number(0.0))
-                    .with("longitude-deg", Arg::Number(0.0)),
+                    .with("inclination-deg", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("latitude-deg", Arg::Angle(Angle::from_deg(0.0)))
+                    .with("longitude-deg", Arg::Angle(Angle::from_deg(0.0))),
             )
             .expect_err("Vulcan is not a body");
         assert!(error.to_string().contains("Vulcan"), "{error}");

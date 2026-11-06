@@ -9,6 +9,47 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.22] — A tool returns the answer, not a count
+
+`access.compute` used to answer "20 window(s) over 4 pair(s)" and stop. The times — the thing the
+question was about — stayed inside the process, so every caller had to recompute them or go without,
+and a model could only paraphrase a count. Now a command that computes times returns them: as lines a
+model reads, and as the same list in `structuredContent` for a program.
+
+### Added
+
+- **Pass instants in tool results.** `access.compute` lists each window as
+  `2024-01-01 09:12:04 → 2024-01-01 09:18:16 UTC (6m 12s)`, and `planet.access` lists each pass the
+  same way. Both are also in `structuredContent` — `start_utc`, `end_utc`, `start_seconds` from the
+  scenario epoch, and `duration_seconds` — so a client can plot them without parsing prose. Long
+  lists are summarised after twenty lines rather than truncated silently.
+- **`stkcraft planet` prints the passes**, not only the summary, because the times are the answer.
+- **`ParameterKind`** on every command parameter: `Number`, `Text` or `Degrees`. The MCP schema and
+  the conversion of a caller's argument both come from it, and `tools/list` now says which
+  parameters are text instead of guessing from their names.
+
+### Fixed
+
+- **`station.add` through MCP could not work at all.** The transport turned every JSON number into a
+  plain number, but the command expects typed angles, so a model that asked to put a station at
+  `{"latitude": 51.5}` was told "expected an angle" — with the right number in the right unit. The
+  parameter kind is now declared by the command and applied by the transport, which is the only
+  arrangement where the schema a model reads and the value the command receives agree.
+- **The `compute-passes` skill named parameters that do not exist** (`latitude-deg`, `longitude-deg`,
+  `mask-deg` on `station.add`, which takes `latitude`, `longitude`, `minimum-elevation`). A skill that
+  sends a model into an error loop is worse than no skill: the procedure now names what the command
+  actually takes, and says what the answer looks like.
+
+### Changed
+
+- **`planet.access` takes typed angles** rather than numbers in degrees, which is what the rest of
+  the engine and the `AGENTS.md` rule about units already required.
+
+### Not built yet
+
+- **No conversation history** in the agent or the panel, and no streaming of the model's prose.
+- **`resources/updated` notifications and dynamic third-party plugins** are unchanged.
+
 ## [0.1.21] — The assistant panel, and a screenshot that proves panels draw
 
 The model reaches the window. A checkbox opens an **Assistant** panel: type a question, and the
