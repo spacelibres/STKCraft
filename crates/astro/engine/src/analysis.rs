@@ -110,6 +110,123 @@ pub fn compute_access(
     })
 }
 
+/// One satellite's access to a target: a region, not a point.
+///
+/// A target is a set of vertices — a point is one, a polygon is its corners — and access to the region holds
+/// while **any** vertex is visible. So the target's windows are the **union** of its vertices' windows, which
+/// is the hand-computable fact this type exists to make testable: a region is visible whenever some part of
+/// it is, and two vertices whose windows overlap produce one window rather than two.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetAccess {
+    /// The satellite.
+    pub satellite: SatelliteId,
+    /// The target's display name, so a report can name it without the scenario.
+    pub target: String,
+    /// How many vertices the target has.
+    pub vertices: usize,
+    /// The windows the region is visible, merged and in time order.
+    pub windows: Vec<AccessWindow>,
+    /// The total time any vertex is visible.
+    pub total: Duration,
+}
+
+/// Compute one satellite's access to a target made of `vertices`.
+///
+/// # Errors
+///
+/// As [`compute_access`], plus [`Error::Invalid`] for a target with no vertices: a region with no points is
+/// not a region, and reporting "no windows" for it would hide the mistake.
+pub fn compute_target_access(
+    scenario: &Scenario,
+    satellite: SatelliteId,
+    target: &str,
+    vertices: &[stkcraft_astro_access::GroundSite],
+    sensor: &stkcraft_astro_access::Sensor,
+    step: Duration,
+) -> Result<TargetAccess> {
+    if vertices.is_empty() {
+        return Err(Error::invalid(
+            "vertices",
+            "a target needs at least one vertex",
+        ));
+    }
+    let satellite_entry = scenario
+        .satellite(satellite)
+        .ok_or_else(|| Error::NotFound {
+            what: format!("satellite {satellite:?}"),
+        })?;
+    let start = EpochOffset::from_seconds(0.0);
+    let end = EpochOffset::from_seconds(scenario.duration_seconds);
+    let propagator = std::cell::RefCell::new(Propagator::new(&satellite_entry.element_set)?);
+    let cache: std::cell::RefCell<std::collections::BTreeMap<i64, Option<[f64; 3]>>> =
+        std::cell::RefCell::new(std::collections::BTreeMap::new());
+
+    // One propagator for every vertex: the satellite's positions do not depend on which corner is asking,
+    // and propagating them again per vertex would double the cost of a polygon for nothing.
+    let mut per_vertex: Vec<Vec<AccessWindow>> = Vec::with_capacity(vertices.len());
+    for site in vertices {
+        let problem = AccessProblem {
+            site: *site,
+            sensor: *sensor,
+            ellipsoid: EARTH,
+        };
+        problem.validate()?;
+        let windows = problem.windows(start, end, step, |offset| {
+            let key = (offset.as_seconds() * 1e6).round() as i64;
+            if let Some(cached) = cache.borrow().get(&key) {
+                return *cached;
+            }
+            let at = Epoch::from_julian(
+                scenario.epoch.julian().plus_seconds(offset.as_seconds()),
+                scenario.epoch.scale(),
+            );
+            let position = propagator.borrow_mut().itrf(at).ok();
+            cache.borrow_mut().insert(key, position);
+            position
+        })?;
+        per_vertex.push(windows);
+    }
+    let windows = union(&per_vertex);
+    let total: f64 = windows
+        .iter()
+        .map(|window| window.duration().as_seconds())
+        .sum();
+    Ok(TargetAccess {
+        satellite,
+        target: target.to_owned(),
+        vertices: vertices.len(),
+        windows,
+        total: Duration::from_seconds(total),
+    })
+}
+
+/// The union of several window lists: what remains when overlapping and touching intervals merge.
+///
+/// Two windows that meet at a boundary are one window, because "visible, then not, then visible at the same
+/// instant" is not a thing a reader can act on. The result is sorted and disjoint.
+#[must_use]
+pub fn union(lists: &[Vec<AccessWindow>]) -> Vec<AccessWindow> {
+    let mut all: Vec<AccessWindow> = lists.iter().flatten().copied().collect();
+    all.sort_by(|a, b| {
+        a.start
+            .as_seconds()
+            .partial_cmp(&b.start.as_seconds())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut merged: Vec<AccessWindow> = Vec::with_capacity(all.len());
+    for window in all {
+        match merged.last_mut() {
+            Some(current) if window.start.as_seconds() <= current.end.as_seconds() => {
+                if window.end.as_seconds() > current.end.as_seconds() {
+                    current.end = window.end;
+                }
+            }
+            _ => merged.push(window),
+        }
+    }
+    merged
+}
+
 /// Compute every satellite-to-station pair in the scenario.
 ///
 /// Pairs are visited in scenario order, so the result is deterministic.
@@ -325,5 +442,75 @@ mod tests {
         let scenario = Scenario::empty("empty");
         let results = compute_all_access(&scenario, Duration::from_seconds(60.0)).expect("valid");
         assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn a_region_is_visible_while_any_corner_is_and_overlapping_windows_merge() {
+        // The hand-computable fact a target rests on: the region's windows are the union of its corners'.
+        // Two windows that overlap become one; two that meet at a boundary become one; two that are apart
+        // stay two; and a window inside another does not lengthen it.
+        let window = |start: f64, end: f64| AccessWindow {
+            start: EpochOffset::from_seconds(start),
+            end: EpochOffset::from_seconds(end),
+        };
+        let merged = union(&[vec![window(10.0, 20.0), window(30.0, 40.0)]]);
+        assert_eq!(merged.len(), 2, "{merged:?}");
+        // Overlapping across two vertices.
+        let merged = union(&[vec![window(10.0, 20.0)], vec![window(15.0, 30.0)]]);
+        assert_eq!(merged.len(), 1, "{merged:?}");
+        let only = merged.first().expect("one window");
+        assert!((only.start.as_seconds() - 10.0).abs() < f64::EPSILON);
+        assert!((only.end.as_seconds() - 30.0).abs() < f64::EPSILON);
+        // Touching at a boundary.
+        let merged = union(&[vec![window(10.0, 20.0)], vec![window(20.0, 25.0)]]);
+        assert_eq!(merged.len(), 1, "{merged:?}");
+        // One inside the other does not lengthen the union.
+        let merged = union(&[vec![window(10.0, 40.0)], vec![window(15.0, 20.0)]]);
+        assert_eq!(merged.len(), 1, "{merged:?}");
+        assert!((merged.first().expect("one window").end.as_seconds() - 40.0).abs() < f64::EPSILON);
+        // Nothing at all is no windows, not an error.
+        assert_eq!(union(&[Vec::new(), Vec::new()]), Vec::new());
+    }
+
+    #[test]
+    fn a_target_with_no_vertices_is_refused_rather_than_reported_as_invisible() {
+        // "No windows" for a region with no points would hide the mistake: an empty target is not a target.
+        let scenario = scenario_with(LEO_L1, LEO_L2, 0.0);
+        let satellite = scenario.satellites.first().expect("one").id;
+        let sensor = stkcraft_astro_access::Sensor::above_horizon(Angle::from_deg(0.0));
+        let answer = compute_target_access(
+            &scenario,
+            satellite,
+            "empty",
+            &[],
+            &sensor,
+            Duration::from_seconds(30.0),
+        );
+        assert!(answer.is_err(), "an empty target was accepted");
+    }
+
+    #[test]
+    fn a_polygon_sees_what_its_corners_see_and_a_point_target_is_one_window_list() {
+        // A one-vertex target is a point, and its windows must be exactly the station's: the code path for a
+        // region has to degenerate to the point case rather than approximating it.
+        let scenario = scenario_with(LEO_L1, LEO_L2, 0.0);
+        let satellite = scenario.satellites.first().expect("one").id;
+        let station = scenario.stations.first().expect("one").id;
+        let point = compute_access(&scenario, satellite, station, Duration::from_seconds(30.0))
+            .expect("computes");
+        let site = scenario.stations.first().expect("one").site;
+        let sensor = stkcraft_astro_access::Sensor::above_horizon(Angle::from_deg(0.0));
+        let target = compute_target_access(
+            &scenario,
+            satellite,
+            "point",
+            &[site],
+            &sensor,
+            Duration::from_seconds(30.0),
+        )
+        .expect("computes");
+        assert_eq!(target.vertices, 1);
+        assert_eq!(target.windows.len(), point.windows.len(), "{target:?}");
+        assert!((target.total.as_seconds() - point.total.as_seconds()).abs() < 1e-6);
     }
 }

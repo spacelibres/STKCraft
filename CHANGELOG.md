@@ -9,6 +9,37 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.74] — A region is visible while any part of it is, and the union is what a test can pin
+
+F5's second slice: the geometry a target rests on. `TargetAccess` and `compute_target_access` compute one
+satellite's access to a region made of vertices — a point is one vertex, a polygon is its corners — and the
+region's windows are the **union** of its vertices' windows, merged by `analysis::union`.
+
+One propagator serves every vertex: the satellite's positions do not depend on which corner is asking, so a
+polygon costs its corners' evaluations and not fifty times a point.
+
+### What is verified, because it can be computed by hand
+
+- **Overlapping windows merge into one**, and so do windows that *touch* at a boundary — "visible, then not,
+  then visible at the same instant" is not a thing a reader can act on.
+- **A window inside another does not lengthen the union.**
+- **Two disjoint windows stay two.**
+- **No vertices is an error**, not an empty result: reporting "no windows" for a region with no points would
+  hide the mistake.
+- **A one-vertex target degenerates exactly to the point case** — same window count, same total, to a
+  microsecond — so the region path cannot quietly diverge from the station path.
+
+### Added
+
+- **`analysis::{TargetAccess, compute_target_access, union}`** and three tests over them.
+
+### Not built yet
+
+- **Targets are not in the scenario document yet**, so no command can create one: `target.add` and
+  `access.targets` are the next slice, and they are what will make this reachable from the CLI, the MCP tools
+  and the menu.
+- The window still offers neither `station.sensor` nor any target work.
+
 ## [0.1.73] — A sensor is part of the analysis, and a cone that sees nothing proves it
 
 F5's first slice. The access crate has modelled a sensor — a field-of-view cone about a boresight, a minimum
