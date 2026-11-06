@@ -76,12 +76,15 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 - **Bulk data lives outside this repository.** Star catalogues, Earth orientation
   parameters, gravity models, atmospheric tables and ephemeris files are fetched pinned and
   checksum-verified, or bundled as small generated tables with a source comment. Never
-  commit a large binary fixture. `cargo xtask fetch-data` downloads all of it — ephemeris kernels,
-  IERS Earth orientation, the leap-second kernel, planetary constants and the star catalogue — into
-  `data/`, which is `.gitignore`d, as parallel ranged downloads (eight at a time, `--jobs` to
-  change it), and verifies each against the SHA-256 recorded in `docs/guides/ephemeris-data.md`; a
-  deployment fetches the same files from the same URLs. Nothing is committed, and a row is added to
-  that table only with the checksum of a file that was actually verified.
+  commit a large binary fixture. `cargo xtask fetch-data` downloads the ephemeris data — ephemeris
+  kernels, IERS Earth orientation, the leap-second kernel, planetary constants and the star
+  catalogue — into `data/`, which is `.gitignore`d, as parallel ranged downloads (eight at a time,
+  `--jobs` to change it), and verifies each against the SHA-256 recorded in
+  `docs/guides/ephemeris-data.md`; a deployment fetches the same files from the same URLs.
+- **The documents the knowledge base is measured on are fetched too.** `cargo xtask papers` puts the
+  PDF corpus in `data/papers/` the same way, verified against `docs/guides/paper-corpus.md`. Nothing
+  is committed, and a row is added to either table only with the checksum of a file that was actually
+  downloaded and verified.
 - **Everything is a command.** User-visible behaviour = a command in the engine
   (`id`, label, menu path, shortcut, parameter documentation, `enabled`, `run`) plus tests.
   The menus, shortcuts, CLI, control channel and MCP server all dispatch commands by id, so
@@ -172,6 +175,7 @@ cargo xtask version                            # print the workspace version
 cargo xtask version bump                       # bump it, smallest component
 cargo xtask release                            # tag the version and push the tag
 cargo xtask fetch-data                         # download the kernels, verified
+cargo xtask papers                             # download the paper corpus, verified
 cargo xtask i18n                               # check the interface catalogs
 cargo xtask i18n report                        # what each language still lacks
 cargo xtask i18n translate --language de       # fill German from the English source

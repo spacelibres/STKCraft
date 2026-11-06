@@ -9,6 +9,54 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.39] — A corpus to measure the reader on, and to search when nothing else is at hand
+
+0.1.38 taught the knowledge base to read PDFs. It had nothing but hand-built fixtures to prove it
+with — PDFs this repository wrote, which is a test of the assembly and not of the parser. Real
+papers bring what fixtures cannot: two-column layouts, embedded fonts, Type 3 glyphs, tables and
+running headers. So this release adds the documents, and the command that fetches them.
+
+Six files, 8.8 MB, 580 pages:
+
+- the four **CCSDS blue books** whose formats this project parses and emits — *Orbit Data Messages*
+  (502.0-B-3), *Tracking Data Message* (503.0-B-2), *Attitude Data Messages* (504.0-B-2) and
+  *Conjunction Data Messages* (508.0-B-1) — so a search over the corpus is a search over the
+  documentation a person would actually consult;
+- two openly licensed papers (**CC BY 4.0**) on the subjects the engine is built around: closing the
+  gap between SGP4 and high-precision propagation, and how long a Starlink TLE can be trusted.
+
+### Added
+
+- **`cargo xtask papers`** — fetches the corpus into `data/papers/` (which `.gitignore` excludes),
+  verifies each file against a recorded SHA-256, and prints the command that points a session at it.
+  The same code as `cargo xtask fetch-data`: a document that is not the document the release
+  documented is a citation nobody can check.
+- **`docs/guides/paper-corpus.md`** — what each file is, where it comes from, its hash, its licence,
+  and how to add one. Every hash was taken from a file that was downloaded, extracted and searched;
+  none was guessed.
+- **The arXiv entries pin a version** (`v5`, `v1`): a revised paper is a new row, not an edit,
+  because an updated document would turn the recorded hash into a lie.
+
+### Changed
+
+- **`fetch_verified` is shared** by the two fetches instead of living inside the ephemeris task, so
+  the checksum rule is the same code for both rather than two copies that can drift.
+
+### Measured
+
+On the corpus, with a cold cache: 580 pages extracted, 4 854 passages, and a search for `SGP4 mean
+elements propagation accuracy` returning `ccsds-502.0-b-3-odm.pdf:page 65, lines 34-35` and a page of
+the differentiable-propagation paper. A second open is **0.29 s** — the index comes from the
+key-value cache, and no PDF is parsed at all.
+
+### Not built yet
+
+- **OCR.** The corpus contains no scanned document, because nothing here could read one.
+- **A regression table over the corpus** — asserting that a known phrase lands on a known page of
+  each file — is the natural next test, and it needs the fetched files, so it belongs to a run that
+  has run `cargo xtask papers` rather than to `cargo xtask ci`.
+- **The window does not open the control channel**, and `ui.screenshot` is not a method yet.
+
 ## [0.1.38] — The knowledge base reads papers, and cites the page
 
 A paper is a PDF. Until now the library read text and nothing else, so the one kind of document a

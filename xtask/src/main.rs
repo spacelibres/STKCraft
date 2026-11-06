@@ -58,6 +58,7 @@ fn main() -> ExitCode {
         Some("version") => task_version(args.get(1..).unwrap_or_default()),
         Some("release") => tag_release(&workspace_root()),
         Some("fetch-data") => task_fetch_data(args.get(1..).unwrap_or_default()),
+        Some("papers" | "fetch-papers") => task_fetch_papers(args.get(1..).unwrap_or_default()),
         Some("i18n") => task_i18n(args.get(1..).unwrap_or_default()),
         Some("api-docs") => task_api_docs(args.get(1..).unwrap_or_default()),
         Some("lockfile") => task_lockfile_check(),
@@ -121,6 +122,8 @@ Tasks:
   wasm      cargo check --target wasm32-unknown-unknown for the portable crates
   i18n      interface catalogs: check them, report coverage, translate
             (`i18n`, `i18n report`, `i18n translate --language de`)
+  papers    download the paper corpus the knowledge base is tested against, verified
+  fetch-data  download the ephemeris kernels and tables, verified
   lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
             (`api-docs translate --language de` translates it)
@@ -839,17 +842,88 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
     }
     fs::create_dir_all(&directory)
         .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+    let (fetched, verified, bytes) = fetch_verified(&DATA_FILES, &directory, jobs, force)?;
+    // A summary is what makes "did it actually run?" a question the output answers: a run that
+    // found everything already in place says so, in numbers.
+    println!(
+        "data: {} file(s), {fetched} fetched, {verified} already present, {} on disk",
+        DATA_FILES.len(),
+        human_size(bytes)
+    );
+    Ok(())
+}
+
+fn task_fetch_papers(args: &[String]) -> Result<(), String> {
+    let root = workspace_root();
+    // `cargo xtask papers [dir] [--jobs N] [--force]`, exactly as `fetch-data`.
+    let mut directory = root.join("data").join("papers");
+    let mut jobs = DOWNLOAD_JOBS;
+    let mut force = false;
+    let mut positional = 0_usize;
+    let mut arguments = args.iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--force" || argument == "-f" {
+            force = true;
+            continue;
+        }
+        if argument == "--jobs" || argument == "-j" {
+            let value = arguments
+                .next()
+                .ok_or_else(|| "`--jobs` needs a number".to_owned())?;
+            jobs = value
+                .parse::<usize>()
+                .map_err(|_| format!("`{value}` is not a job count"))?
+                .clamp(1, MAX_DOWNLOAD_JOBS);
+            continue;
+        }
+        if argument.starts_with('-') {
+            return Err(format!("unknown option `{argument}`"));
+        }
+        positional += 1;
+        if positional > 1 {
+            return Err("fetch-papers takes one directory".to_owned());
+        }
+        directory = root.join(argument);
+    }
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+    let (fetched, verified, bytes) = fetch_verified(&PAPER_FILES, &directory, jobs, force)?;
+    println!(
+        "papers: {} file(s), {fetched} fetched, {verified} already present, {} on disk",
+        PAPER_FILES.len(),
+        human_size(bytes)
+    );
+    // The point of the corpus is that a person can use it, so the command that uses it is printed
+    // rather than left to the documentation.
+    println!(
+        "next: STKCRAFT_KNOWLEDGE={} cargo run --release -p stkcraft -- knowledge \"<query>\"",
+        directory.display()
+    );
+    Ok(())
+}
+
+/// Download, verify or confirm one table of files, and report what each one cost.
+///
+/// Shared by the two fetches — the ephemeris data and the paper corpus — because the rule is the
+/// same for both: a file from outside this repository is only usable once its checksum matches the
+/// one recorded in the documentation, and a mismatch is an error rather than a warning.
+fn fetch_verified(
+    entries: &[(&str, &str, &str)],
+    directory: &Path,
+    jobs: usize,
+    force: bool,
+) -> Result<(usize, usize, u64), String> {
     let mut fetched = 0_usize;
     let mut verified = 0_usize;
     let mut bytes = 0_u64;
-    for (name, url, expected) in DATA_FILES {
+    for (name, url, expected) in entries {
         let path = directory.join(name);
         if path.exists() && force {
             fs::remove_file(&path).map_err(|error| format!("{name}: {error}"))?;
         }
         if path.exists() {
             let actual = sha256_of(&path)?;
-            if actual == expected {
+            if actual == *expected {
                 println!("{name}: present and verified");
                 verified += 1;
                 bytes += fs::metadata(&path).map_or(0, |meta| meta.len());
@@ -864,22 +938,54 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
         let actual = sha256_of(&path)?;
         fetched += 1;
         bytes += fs::metadata(&path).map_or(0, |meta| meta.len());
-        if actual != expected {
+        if actual != *expected {
             return Err(format!(
                 "{name}: downloaded file hashes {actual}, expected {expected}"
             ));
         }
         println!("{name}: fetched and verified");
     }
-    // A summary is what makes "did it actually run?" a question the output answers: a run that
-    // found everything already in place says so, in numbers.
-    println!(
-        "data: {} file(s), {fetched} fetched, {verified} already present, {} on disk",
-        DATA_FILES.len(),
-        human_size(bytes)
-    );
-    Ok(())
+    Ok((fetched, verified, bytes))
 }
+
+/// The paper corpus: the documents a test of the knowledge base reads, and a real library to search.
+///
+/// This is not data the engine computes from — a wrong paper cannot corrupt an orbit — it is the
+/// corpus the PDF reader and the search are measured against, and the one a person can point
+/// `STKCRAFT_KNOWLEDGE` at to see the feature work. The checksums still matter: a citation into a
+/// document that is not the document the release documented is a citation nobody can check.
+const PAPER_FILES: [(&str, &str, &str); 6] = [
+    (
+        "ccsds-502.0-b-3-odm.pdf",
+        "https://public.ccsds.org/Pubs/502x0b3e1.pdf",
+        "97d1687b4a461ffdf965b9b65923820cc6aa9d1d1c4d4df77a598a53d4a49d81",
+    ),
+    (
+        "ccsds-503.0-b-2-tdm.pdf",
+        "https://public.ccsds.org/Pubs/503x0b2c1.pdf",
+        "6bbe6169eccb3c6b744ba002f02785e1861f8531d3cd4dcf6fa9056efe515677",
+    ),
+    (
+        "ccsds-504.0-b-2-adm.pdf",
+        "https://public.ccsds.org/Pubs/504x0b2.pdf",
+        "0869187cb326dbf009e6f17a1fd6e920b7b4a4f8f6446706b314e2d9a6121214",
+    ),
+    (
+        "ccsds-508.0-b-1-cdm.pdf",
+        "https://public.ccsds.org/Pubs/508x0b1e2c2.pdf",
+        "6afd6dad4b5f6c2ce17c3b310fdbda62bbfa6f248c32decea7de6f9116276978",
+    ),
+    (
+        "arxiv-2402.04830-differentiable-sgp4.pdf",
+        "https://arxiv.org/pdf/2402.04830v5",
+        "391fbf4e8cc97e510c86a113e2d171c83992a67e4da422068bf752d3eb1b9dcb",
+    ),
+    (
+        "arxiv-2605.19850-starlink-tle-trust.pdf",
+        "https://arxiv.org/pdf/2605.19850v1",
+        "610d3caab852ce224eb41c1b1b3a25574271006414990ddacf51453f8de26420",
+    ),
+];
 
 /// How many ranges a large file is split into by default.
 ///
