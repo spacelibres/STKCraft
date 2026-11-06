@@ -62,6 +62,17 @@ pub const MAX_HISTORY: usize = 40;
 /// The tool the model calls to read a skill in full.
 pub const SKILL_TOOL: &str = "skill.read";
 
+/// The tool the model calls to search the user's own documents.
+///
+/// The order matters more than anything else in this crate: a platform whose answer can be traced to
+/// a line of the person's own specification is worth trusting with a mission timeline, and one whose
+/// answer came from a model's memory is not. This tool is named in the system prompt as the first
+/// thing to do.
+pub const KNOWLEDGE_SEARCH: &str = "knowledge.search";
+
+/// The tool the model calls to list the documents it can search.
+pub const KNOWLEDGE_DOCUMENTS: &str = "knowledge.documents";
+
 /// The tool the model calls to read the scenario document.
 ///
 /// Without it the agent can change the scenario and cannot see it: asked "how many satellites are
@@ -413,8 +424,13 @@ impl<M: ChatModel> Agent<M> {
              stations and the bodies of the solar system over time.\n\
              \n\
              Rules:\n\
-             1. Every number you report must come from a tool call. Never estimate an orbit, a pass \
-             time or a distance yourself.\n\
+             1. **Read the user's own documents first.** Before answering any factual or numeric \
+             question, call `knowledge.search` with the words the document would use. When it returns \
+             passages, quote them and cite `path:lines a-b`. When it reports that nothing matched, \
+             say so plainly, and only then may you answer from general knowledge — labelled as \
+             general knowledge, not as the library's.\n\
+             2. Every number you report must come from a tool call or a cited passage. Never \
+             estimate an orbit, a pass time or a distance yourself.\n\
              2. Call the tools in the order a mission analyst would: add the satellite and the \
              station first, then compute.\n\
              3. If a tool reports an error, correct the parameter and retry once; if it fails \
@@ -594,6 +610,18 @@ impl<M: ChatModel> Agent<M> {
                 "required": ["name"],
             },
         }));
+        // The knowledge tools are the server's own, so they are taken from it rather than written
+        // here twice: one description, one schema, two clients.
+        for tool in self.server.knowledge_tools() {
+            let mut tool = tool;
+            if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                let mapped = function_name(name);
+                if let Some(object) = tool.as_object_mut() {
+                    object.insert("name".to_owned(), Value::String(mapped));
+                }
+            }
+            tools.push(tool);
+        }
         tools.push(json!({
             "name": function_name(SCENARIO_TOOL),
             "description": "Read the current scenario document as JSON: its name, epoch, duration, \
@@ -930,6 +958,40 @@ mod tests {
             "{:?}",
             answer.trace
         );
+    }
+
+    #[test]
+    fn the_prompt_tells_the_model_to_read_the_library_first() {
+        // The ordering is the product: a number that can be traced to the person's own specification
+        // is worth trusting with a mission timeline. A prompt that mentions the library anywhere
+        // else would let a model answer from memory first and cite afterwards.
+        let agent = agent(vec![]);
+        let mut agent = agent;
+        let prompt = agent.system_prompt();
+        let knowledge = prompt
+            .find("knowledge.search")
+            .expect("the library is named");
+        let first_rule = prompt.find("1. ").expect("the rules are numbered");
+        assert!(
+            knowledge < prompt.find("2. ").expect("a second rule"),
+            "the library is not rule one: {prompt}"
+        );
+        assert!(
+            knowledge > first_rule,
+            "the library is named before the rules"
+        );
+        assert!(
+            prompt.contains("do not answer the question from memory")
+                || prompt.contains("say so plainly")
+        );
+        // The tools the model is offered include the library's, and the documents listing.
+        let tools = agent.tools_with_skill_reader();
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+            .collect();
+        assert!(names.contains(&"knowledge__search"), "{names:?}");
+        assert!(names.contains(&"knowledge__documents"), "{names:?}");
     }
 
     #[test]

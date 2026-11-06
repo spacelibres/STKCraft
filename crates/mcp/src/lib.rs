@@ -128,6 +128,8 @@ pub struct Server {
     registry: Registry,
     scenario: Scenario,
     skills: Vec<Skill>,
+    /// The user's own documents, searched before the model answers.
+    knowledge: stkcraft_knowledge::Library,
 }
 
 impl Server {
@@ -138,7 +140,25 @@ impl Server {
             registry: Registry::builtin(),
             scenario,
             skills,
+            knowledge: stkcraft_knowledge::Library::default(),
         }
+    }
+
+    /// Serve a knowledge base as well: the person's own documents, searched before a model answers.
+    ///
+    /// A separate setter rather than another constructor argument because a session without a
+    /// library is the normal case — an empty library answers every search with "nothing here", which
+    /// is the truth — and two constructors would fork a call that has one meaning.
+    #[must_use]
+    pub fn with_knowledge(mut self, knowledge: stkcraft_knowledge::Library) -> Self {
+        self.knowledge = knowledge;
+        self
+    }
+
+    /// The knowledge base this session searches.
+    #[must_use]
+    pub fn knowledge(&self) -> &stkcraft_knowledge::Library {
+        &self.knowledge
     }
 
     /// The scenario the tools act on.
@@ -199,13 +219,36 @@ impl Server {
                                  approach the common jobs.",
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({"tools": self.tools_json()})),
+            "tools/list" => {
+                let mut tools = self.tools_json();
+                tools.extend(self.knowledge_tools());
+                Ok(json!({"tools": tools}))
+            }
             "tools/call" => {
                 let name = params
                     .get("name")
                     .and_then(Value::as_str)
                     .ok_or((-32602, "tools/call needs a name".to_owned()))?;
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+                // The knowledge tools are the server's, not the registry's: a search reads the
+                // person's documents and changes nothing.
+                if name.starts_with("knowledge.") {
+                    return self
+                        .call_knowledge_tool(name, &arguments)
+                        .map(|(text, structured)| {
+                            let mut result = json!({
+                                "content": [{"type": "text", "text": text}],
+                                "isError": false,
+                            });
+                            if let (Some(structured), Some(object)) =
+                                (structured, result.as_object_mut())
+                            {
+                                object.insert("structuredContent".to_owned(), structured);
+                            }
+                            result
+                        })
+                        .map_err(|message| (-32000, message));
+                }
                 self.call_tool(name, &arguments)
                     .map(|(text, structured)| {
                         let mut result = json!({
@@ -246,6 +289,40 @@ impl Server {
             }
             other => Err((-32601, format!("unknown method `{other}`"))),
         }
+    }
+
+    /// The knowledge-base tools, which are not engine commands.
+    ///
+    /// A command changes the scenario; a search reads the person's own documents. Putting it in the
+    /// registry would make it a menu item, and it is not one.
+    #[must_use]
+    pub fn knowledge_tools(&self) -> Vec<Value> {
+        vec![
+            json!({
+                "name": "knowledge.search",
+                "description": "Search the user's own documents — their requirements, data sheets, \
+                                notes — for passages about a question. Call this BEFORE answering \
+                                anything factual or numeric, then quote what it returns and cite \
+                                `path:lines a-b`. If it reports that nothing matched, say so \
+                                plainly instead of answering from memory.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What to look for, in the \
+                                   words a document would use."},
+                        "limit": {"type": "number", "description": "How many passages to return \
+                                  at most. Default 5."},
+                    },
+                    "required": ["query"],
+                },
+            }),
+            json!({
+                "name": "knowledge.documents",
+                "description": "List the documents in the user's knowledge base, so you know what \
+                                it covers before claiming it does not.",
+                "inputSchema": {"type": "object", "properties": {}},
+            }),
+        ]
     }
 
     /// Every command as an MCP tool, with a schema built from its documented parameters.
@@ -309,6 +386,107 @@ impl Server {
     }
 
     /// Run one command by id.
+    /// Run a knowledge-base tool.
+    fn call_knowledge_tool(
+        &mut self,
+        name: &str,
+        arguments: &Value,
+    ) -> Result<(String, Option<Value>), String> {
+        match name {
+            "knowledge.documents" => {
+                let library = &self.knowledge;
+                let mut text = format!(
+                    "{} document(s), {} passage(s) in `{}`",
+                    library.documents().len(),
+                    library.passages(),
+                    library.root().display()
+                );
+                if library.is_empty() {
+                    text.push_str(
+                        "\nThe knowledge base is empty: say so rather than answering from memory.",
+                    );
+                }
+                for document in library.documents() {
+                    let _ = write!(
+                        text,
+                        "\n  {} ({} byte(s), {} passage(s))",
+                        document.path,
+                        document.bytes,
+                        document.chunks.len()
+                    );
+                }
+                let structured = json!({
+                    "documents": library
+                        .documents()
+                        .iter()
+                        .map(|document| json!({
+                            "path": document.path,
+                            "bytes": document.bytes,
+                            "passages": document.chunks.len(),
+                        }))
+                        .collect::<Vec<_>>(),
+                });
+                Ok((text, Some(structured)))
+            }
+            "knowledge.search" => {
+                let query = arguments
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .ok_or("knowledge.search needs a `query`")?;
+                let limit = arguments
+                    .get("limit")
+                    .and_then(Value::as_f64)
+                    .map_or(5, |limit| {
+                        // A model may ask for any number; the library answers with a page, not a
+                        // document dump.
+                        usize::try_from(limit.clamp(1.0, 20.0) as u64).unwrap_or(5)
+                    });
+                let search = self.knowledge.search(query, limit);
+                let mut text = if search.missed {
+                    format!(
+                        "No passage in the user's documents matches `{query}` \
+                         ({} document(s) searched). Say that the knowledge base does not cover \
+                         this; do not answer the question from memory as though it did.",
+                        search.documents
+                    )
+                } else {
+                    format!(
+                        "{} passage(s) from the user's documents, best first. Quote them and cite \
+                         `path:lines a-b`.",
+                        search.hits.len()
+                    )
+                };
+                for hit in &search.hits {
+                    let _ = write!(
+                        text,
+                        "\n\n[{}] score {:.2}\n{}",
+                        hit.cite(),
+                        hit.score,
+                        hit.text
+                    );
+                }
+                let structured = json!({
+                    "missed": search.missed,
+                    "documents": search.documents,
+                    "passages": search.passages,
+                    "hits": search
+                        .hits
+                        .iter()
+                        .map(|hit| json!({
+                            "path": hit.path,
+                            "line_start": hit.line_start,
+                            "line_end": hit.line_end,
+                            "score": hit.score,
+                            "text": hit.text,
+                        }))
+                        .collect::<Vec<_>>(),
+                });
+                Ok((text, Some(structured)))
+            }
+            other => Err(format!("no such knowledge tool `{other}`")),
+        }
+    }
+
     fn call_tool(
         &mut self,
         name: &str,
@@ -785,6 +963,99 @@ mod tests {
                 <= passes[0]["duration_seconds"].as_f64().expect("a number"),
             "the first pass starts before the search window"
         );
+    }
+
+    /// A library over two hand-written documents, so the knowledge tools are tested without files.
+    fn library() -> stkcraft_knowledge::Library {
+        stkcraft_knowledge::Library::from_documents(
+            std::path::Path::new("/knowledge"),
+            vec![
+                stkcraft_knowledge::Document {
+                    path: "sensor-spec.md".to_owned(),
+                    bytes: 80,
+                    chunks: stkcraft_knowledge::chunk(
+                        "Sensor\n\nMaximum off-nadir angle is 45 degrees.",
+                    ),
+                },
+                stkcraft_knowledge::Document {
+                    path: "thermal.txt".to_owned(),
+                    bytes: 40,
+                    chunks: stkcraft_knowledge::chunk(
+                        "Thermal\n\nRadiator area 2.4 square metres.",
+                    ),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn the_knowledge_tools_are_listed_with_the_engine_tools() {
+        let mut server = server().with_knowledge(library());
+        let answer = ask(&mut server, "tools/list", &json!({}));
+        let names: Vec<&str> = answer["result"]["tools"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(names.contains(&"knowledge.search"), "{names:?}");
+        assert!(names.contains(&"knowledge.documents"), "{names:?}");
+        // The engine's own tools are still there: the knowledge base is an addition, not a
+        // replacement.
+        assert!(names.contains(&"access.compute"), "{names:?}");
+    }
+
+    #[test]
+    fn a_search_returns_a_citable_passage() {
+        // The property the whole feature exists for: the answer names a document and a line range
+        // a person can open.
+        let mut server = server().with_knowledge(library());
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "knowledge.search", "arguments": {"query": "maximum off-nadir angle"}}),
+        );
+        let text = answer["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(text.contains("sensor-spec.md:lines"), "{text}");
+        assert!(text.contains("45 degrees"), "{text}");
+        let structured = &answer["result"]["structuredContent"];
+        assert_eq!(structured["missed"], false);
+        assert_eq!(structured["hits"][0]["path"], "sensor-spec.md");
+    }
+
+    #[test]
+    fn a_search_that_finds_nothing_says_so_instead_of_guessing() {
+        let mut server = server().with_knowledge(library());
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "knowledge.search", "arguments": {"query": "hyperspectral methane"}}),
+        );
+        let text = answer["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(text.contains("No passage"), "{text}");
+        assert!(
+            text.contains("do not answer the question from memory"),
+            "the tool has to say what a miss means: {text}"
+        );
+        assert_eq!(answer["result"]["structuredContent"]["missed"], true);
+    }
+
+    #[test]
+    fn an_empty_library_is_reported_as_empty() {
+        let mut server = server();
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "knowledge.documents", "arguments": {}}),
+        );
+        let text = answer["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(text.contains("empty"), "{text}");
     }
 
     #[test]

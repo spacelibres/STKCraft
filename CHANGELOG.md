@@ -9,6 +9,64 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.31] — The user's documents are the expert panel
+
+A model asked "what is the maximum off-nadir angle for this sensor" answers from its training data,
+which may be wrong, may be about another spacecraft, and cannot be checked. STKCraft now reads the
+person's own documents **before** the model speaks: drop requirements, data sheets and notes into one
+folder, and every factual answer quotes a passage and cites `path:lines a-b` so a reader can open the
+file and check it.
+
+That is the difference between an assistant and a source of record, and it is the rule the platform is
+built around now — not a feature beside the model but the order in which it is asked.
+
+### Added
+
+- **`stkcraft-knowledge`** — a directory of documents, chunked by paragraph with line ranges kept, and
+  BM25 search over it. Deterministic, local, no embeddings and no network: the same library and query
+  rank the same way on every machine, which is what lets a test assert that a specification value is
+  found and a guess is not.
+- **`knowledge.search` and `knowledge.documents`** — MCP tools on the server, so an MCP client and the
+  built-in agent see the same library. A search returns the passages, their citations and their
+  scores; when nothing clears the evidence floor it says so in words, and the tool result includes
+  `structuredContent` with `missed` for a program.
+- **`stkcraft knowledge [<query>]`** — list the library or search it from the terminal, printing the
+  same citations the model sees.
+- **`STKCRAFT_KNOWLEDGE`** and a default of `<config>/knowledge/`, searched by `ask`, `chat` and `mcp`
+  alike, because they build the same session.
+- **A `knowledge-base` skill** — the procedure as a document: search before answering, quote, cite,
+  say when the library is silent, and never re-derive a document's number with the engine.
+- **`docs/standards.md` §2a**: the rule, stated as a product rule rather than a feature.
+- **`LICENSE-APACHE`** — the dual licence the manifest and `NOTICE` already declared but the
+  repository did not carry. §6 of the rule book now records licensing and family interop, including
+  the one interop item not built: the siblings' control channel.
+
+### Verified against the real model
+
+```text
+> What is the maximum off-nadir angle and the swath width for our sensor? Cite the document.
+> "Maximum off-nadir angle: 45 degrees. Swath width at that angle: 1200 km."
+  — sensor-spec.md:lines 1-5
+
+> What does our knowledge base say the maximum reaction-wheel torque is?
+  knowledge.search → No passage matches … Say that the knowledge base does not cover this
+> The knowledge base does not cover this. … I won't substitute one from memory as though it were
+  theirs. If you have a spacecraft bus or AOCS data sheet, adding it to the knowledge base would let
+  me answer this properly.
+```
+
+The second answer is the one that matters: a platform that can say "my library does not cover this"
+is a platform whose numbers mean something.
+
+### Not built yet
+
+- **No PDF, DOCX or XLSX reading** — a citation into a PDF is a page, not a line. Extract the text
+  beside the file (`pdftotext spec.pdf spec.txt`) and it is indexed; `docs/knowledge.md` states it.
+- **No index cache**: a large library re-tokenizes at start.
+- **No side-by-side comparison** of a document's answer with the engine's computation — the "expert
+  panel" idea taken literally is the next step, not this one.
+- **The control channel** (`--control <port>`, token file) that the siblings expose is still missing.
+
 ## [0.1.30] — The interface is drawn by the family's stack, and Chinese looks like Chinese
 
 A translated interface was tofu boxes. `egui` ships a Latin face and nothing else, so every Chinese,

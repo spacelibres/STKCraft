@@ -126,6 +126,13 @@ pub const LAYOUT: &[CrateSpec] = &[
     },
     // The extension package contract: manifests, ids and trust tiers. Pure data and validation, so
     // it sits with the analysis layers even though only the app consumes it.
+    // The user's own documents and the search over them. Pure text processing: no network, no
+    // model, so it sits with the analysis layers and can be tested without either.
+    CrateSpec {
+        name: "stkcraft-knowledge",
+        path: "crates/knowledge",
+        layer: 3,
+    },
     CrateSpec {
         name: "stkcraft-extensions",
         path: "crates/extensions",

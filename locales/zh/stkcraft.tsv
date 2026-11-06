@@ -29,6 +29,8 @@
 	Running the engine's commands…	正在运行引擎命令…
 	Scenario	场景
 	The assistant answers by running the engine's commands, so it needs a model to choose them.	助手通过运行引擎命令来回答，因此需要一个模型来选择命令。
+	Translating with your key…	正在使用你的密钥翻译…
+	Uses DEEPSEEK_API_KEY to translate the interface into this language and stores it for this computer.	使用 DEEPSEEK_API_KEY 将界面翻译成此语言，并保存在这台电脑上。
 	View	视图
 	What it did	它做了什么
 	When can the station see the satellite?	地面站何时能看到卫星？
@@ -38,6 +40,7 @@
 	time rate	时间速率
 	version	版本
 	−1 h	−1 小时
+@plural	Translate {n} string with my key|Translate {n} strings with my key	使用我的密钥翻译 {n} 个字符串
 @plural	{n} answer in this conversation|{n} answers in this conversation	此对话中有 {n} 个回答
 @plural	{n} satellite|{n} satellites	{n} 颗卫星
 @plural	{n} station|{n} stations	{n} 个地面站

@@ -29,6 +29,8 @@ pub enum Invocation {
     Chat,
     /// List the extension packages installed for this person.
     Extensions,
+    /// List or search the person's knowledge base.
+    Knowledge(KnowledgeRequest),
 }
 
 /// The parameters of the `passes` subcommand.
@@ -76,6 +78,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Ask(question) => ask(&question),
         Invocation::Chat => chat(),
         Invocation::Extensions => crate::extensions::list(),
+        Invocation::Knowledge(request) => knowledge(&request),
     }
 }
 
@@ -100,6 +103,8 @@ COMMANDS
     ask         Ask DeepSeek a question; it answers by running the engine's commands
     chat        Ask questions in one conversation, reading them from standard input
     extensions  List the extension packages installed for this person
+    knowledge   List the documents in your knowledge base, or search them:
+                `stkcraft knowledge [<query>]`
     version     Print the version
     help        Print this text
 
@@ -156,6 +161,9 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "mcp" => Ok(Invocation::Mcp),
         "chat" => Ok(Invocation::Chat),
         "extensions" => Ok(Invocation::Extensions),
+        "knowledge" => Ok(Invocation::Knowledge(KnowledgeRequest {
+            query: arguments.next(),
+        })),
         "ask" => {
             let question = arguments.next().ok_or_else(|| {
                 "`ask` needs a question, e.g. `stkcraft ask \"when does the ISS pass over London?\"`"
@@ -411,7 +419,8 @@ fn instant_at(epoch: stkcraft_time::Epoch, offset_seconds: f64) -> stkcraft_time
 fn mcp() -> Result<(), String> {
     let skills = skills_directory();
     let mut server =
-        stkcraft_mcp::Server::new(app_demo_scenario()?, stkcraft_mcp::load_skills(&skills));
+        stkcraft_mcp::Server::new(app_demo_scenario()?, stkcraft_mcp::load_skills(&skills))
+            .with_knowledge(knowledge_library()?);
     server.serve()
 }
 
@@ -425,7 +434,8 @@ fn ask(question: &str) -> Result<(), String> {
     let server = stkcraft_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_mcp::load_skills(&skills_directory()),
-    );
+    )
+    .with_knowledge(knowledge_library()?);
     let mut agent = stkcraft_agent::Agent::new(model, server);
     // Printed as they happen rather than collected and printed at the end: a question can take a
     // minute, and a step nobody can see while it runs is a step nobody can interrupt.
@@ -455,7 +465,8 @@ fn chat() -> Result<(), String> {
     let server = stkcraft_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_mcp::load_skills(&skills_directory()),
-    );
+    )
+    .with_knowledge(knowledge_library()?);
     let mut agent = stkcraft_agent::Agent::new(model, server);
     println!(
         "STKCraft {} — ask about the scenario; `exit` ends the conversation.",
@@ -502,6 +513,92 @@ pub fn skills_directory() -> std::path::PathBuf {
         return path;
     }
     std::path::PathBuf::from("skills")
+}
+
+/// The user's knowledge base: `--knowledge <dir>`, or `STKCRAFT_KNOWLEDGE`, or the configuration
+/// directory's `knowledge/`.
+///
+/// A `--knowledge` path that does not exist is an error with the path in it: a person who pointed the
+/// platform at their documents deserves to know it read nothing, rather than getting answers that
+/// silently came from memory.
+fn knowledge_library() -> Result<stkcraft_knowledge::Library, String> {
+    let explicit = std::env::var("STKCRAFT_KNOWLEDGE")
+        .ok()
+        .map(std::path::PathBuf::from);
+    let directory = match explicit {
+        Some(directory) => directory,
+        None => crate::prefs::knowledge_dir().ok_or_else(|| {
+            "this platform has no configuration directory for a knowledge base".to_owned()
+        })?,
+    };
+    if !directory.is_dir() {
+        if std::env::var_os("STKCRAFT_KNOWLEDGE").is_some() {
+            return Err(format!(
+                "STKCRAFT_KNOWLEDGE points at {}, which is not a directory",
+                directory.display()
+            ));
+        }
+        // No library yet is the normal state of a fresh install, and it is not an error.
+        return Ok(stkcraft_knowledge::Library::default());
+    }
+    stkcraft_knowledge::Library::open(&directory)
+}
+
+/// Run the `knowledge` subcommand: list the library, or search it.
+fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
+    let library = knowledge_library()?;
+    match &request.query {
+        None => {
+            println!(
+                "STKCraft {} — knowledge base at {}",
+                env!("CARGO_PKG_VERSION"),
+                library.root().display()
+            );
+            if library.is_empty() {
+                println!("  no documents: drop text, markdown or CSV files in that directory");
+                return Ok(());
+            }
+            println!(
+                "  {} document(s), {} passage(s)",
+                library.documents().len(),
+                library.passages()
+            );
+            for document in library.documents() {
+                println!(
+                    "  {} ({} byte(s), {} passage(s))",
+                    document.path,
+                    document.bytes,
+                    document.chunks.len()
+                );
+            }
+            Ok(())
+        }
+        Some(query) => {
+            let search = library.search(query, 5);
+            if search.missed {
+                println!(
+                    "no passage in the knowledge base matches `{query}` \
+                     ({} document(s) searched)",
+                    search.documents
+                );
+                return Ok(());
+            }
+            for hit in &search.hits {
+                println!("[{}] score {:.2}", hit.cite(), hit.score);
+                for line in hit.text.lines() {
+                    println!("    {line}");
+                }
+                println!();
+            }
+            Ok(())
+        }
+    }
+}
+
+/// What the `knowledge` subcommand was asked for.
+pub struct KnowledgeRequest {
+    /// The query, or nothing to list the library.
+    query: Option<String>,
 }
 
 /// The scenario an MCP session starts with.

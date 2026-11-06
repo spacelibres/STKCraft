@@ -102,6 +102,13 @@ pub fn extensions_dir() -> Option<PathBuf> {
     Prefs::path().and_then(|path| path.parent().map(|parent| parent.join("extensions")))
 }
 
+/// The directory the knowledge base lives in: the person's own documents, which the platform reads
+/// before a model answers.
+#[must_use]
+pub fn knowledge_dir() -> Option<PathBuf> {
+    Prefs::path().and_then(|path| path.parent().map(|parent| parent.join("knowledge")))
+}
+
 /// The catalogs this person has, as `(locale, text)` pairs, from the configuration directory.
 ///
 /// A file that cannot be read is skipped rather than reported: it is one language, and the others

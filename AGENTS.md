@@ -108,6 +108,11 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   <code>` fills a language from the user's own DeepSeek key. A string built at run time cannot be
   extracted, so the macros take literals. Rules and format: `docs/standards.md` §1,
   `docs/localization.md`.
+- **The user's documents come before the model's memory.** Anything factual or numeric starts with
+  `knowledge.search` over the person's own library, and the answer cites `path:lines a-b`. A search
+  that finds nothing is reported as nothing: the model says the library does not cover the question
+  before it offers general knowledge, and never dresses memory up as a document. Rules:
+  `docs/standards.md` §2a, `docs/knowledge.md`.
 - **Skills are documents, not code.** A `skills/<name>/SKILL.md` starts with one `#` heading
   whose text is its description, then the procedure: the order of commands, what the answer
   means, and the traps. They are loaded at run time, so a new skill needs no rebuild; they are
@@ -153,6 +158,8 @@ cargo xtask i18n report                        # what each language still lacks
 cargo xtask i18n translate --language de       # fill German from the English source
 cargo xtask api-docs                           # regenerate the API reference
 cargo run --release -p stkcraft -- extensions  # what extension packages are installed
+cargo run --release -p stkcraft -- knowledge   # the documents a model answers from
+cargo run --release -p stkcraft -- knowledge "maximum off-nadir angle"
 ```
 
 ### Version control and the changelog
@@ -231,6 +238,13 @@ That is why the offscreen path above exists.
 
 Once the control channel lands, this section gains the `--control <port>` recipe the siblings
 use.
+
+## Licensing
+
+`MIT OR Apache-2.0`, as the family uses: `LICENSE-MIT` and `LICENSE-APACHE` are both present and
+`NOTICE` names them, and `Cargo.toml`'s `license.workspace` says the same. A dependency whose licence
+is incompatible with that pair does not enter the build. The ArtCraft name and marks are not covered by
+the licence. See `docs/standards.md` §6.
 
 ## CI workflows
 

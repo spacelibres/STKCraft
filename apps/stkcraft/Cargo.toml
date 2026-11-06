@@ -21,6 +21,7 @@ stkcraft-mcp.workspace = true
 # The interface strings and their catalogs. The catalogs are an optional build input: without any,
 # every lookup shows English.
 stkcraft-i18n.workspace = true
+stkcraft-knowledge.workspace = true
 # The family's shared UI library: the interface font stack (installed system fonts included, which
 # is what makes a CJK interface render), theme tokens and the widgets the Craft apps share.
 craft-ui.workspace = true
@@ -43,6 +44,7 @@ bytemuck = { workspace = true }
 # The build script extracts the interface strings with the same scanner `cargo xtask i18n` uses, so
 # a window that translates itself and a translator's catalog describe the same interface.
 stkcraft-i18n.workspace = true
+stkcraft-knowledge.workspace = true
 # The family's shared UI library: the interface font stack (installed system fonts included, which
 # is what makes a CJK interface render), theme tokens and the widgets the Craft apps share.
 craft-ui.workspace = true

@@ -13,6 +13,8 @@ here.
 |---|---|---|---|
 | Interface translations | `storytold/craft-i18n` catalog format | `cargo xtask i18n` | built |
 | Agent + skills + MCP | `storytold/craft-ai-integrations`, `craft-skills` | `cargo xtask ci`, `cargo xtask layers` | built, see §2 |
+| The user's own documents | this document, §2a | `cargo test` (ranking, citations, misses) | built |
+| Licensing | MIT OR Apache-2.0, the family's | the two licence files | built |
 | Extensions and plug-ins | `storytold/craft-extensions` package contract | `cargo test` (feature and trust tests) | partial, see §3 |
 | API documentation | this document, §4 | `cargo xtask api-docs check` | built, see §4 |
 | UI library and fonts | `storytold/craft-libs` (`craft-ui`), `storytold/egui` fork | `cargo test`, `[patch.crates-io]` | built |
@@ -72,6 +74,33 @@ here.
   thing, adopting it replaces this code rather than living beside it.
 - **Consent is the user's action.** A question typed into the assistant panel or `stkcraft chat` is a
   request to use a model; nothing else in the app calls one.
+
+## 2a. The user's documents come before the model's memory
+
+**A number is either traced to a source or it is not an answer.** The platform reads the person's own
+documents — their requirements, data sheets, notes — before a model says anything, and the ordering is
+the product.
+
+- **Every factual or numeric question starts with a search of the library.** The agent's prompt makes
+  it rule one, and the tool is named in the same prompt. A model that answers first and cites
+  afterwards has already produced the answer nobody can check.
+- **A hit is a citation, not a summary**: document path and line range, so a person opens the file and
+  reads the sentence the model used. `stkcraft knowledge "<query>"` prints the same citations the
+  model sees.
+- **"Nothing matched" is an answer.** The search reports `missed`, the tool says so in words, and the
+  prompt requires the model to say the library does not cover the question before it offers general
+  knowledge — labelled as general knowledge. A retrieval that always returns something is a retrieval
+  that always lies about its evidence.
+- **Ranking is deterministic.** Lexical (BM25) with no embedding model, because the numbers this
+  project cares about are exact tokens and because a test can only assert an order that is the same on
+  every machine.
+- **Hostile input is bounded before it is read**: file count, file size, depth, no symlinks below the
+  root, UTF-8 only. Pointing the library at `/` is slow, not fatal.
+- **The documents win ties.** Where a document disagrees with the model's general knowledge, the
+  answer follows the document and says which one.
+- **Not built:** PDF/DOCX/XLSX text extraction (extract beside them), page-level citations, an index
+  cache, and the side-by-side comparison of a document's answer with the engine's computation.
+  `docs/knowledge.md` states each limit.
 
 ## 3. Extensions and plug-ins
 
@@ -145,7 +174,34 @@ a shared on-disk store, themes carrying no code, and plug-ins whose v1 permissio
   [`storytold/craft-fonts`](https://github.com/storytold/craft-fonts) as an optional build input —
   the family rule every Craft app follows.
 
-## 6. What every rule here has in common
+## 6. Family interop and licensing
+
+**To be one of the Craft apps is to be interchangeable with them**, so the interchange points are
+fixed from the start rather than retrofitted.
+
+- **Licence: `MIT OR Apache-2.0`**, the family's choice, with **both licence texts in the repository**
+  (`LICENSE-MIT`, `LICENSE-APACHE`) and `NOTICE` naming them. The MIT text is the standard one, the
+  copyright holder is the ArtCraft Team and the contributors, and a dependency whose licence is not
+  compatible with that pair does not enter the build. Brand assets are not covered by it — the ArtCraft
+  name and marks belong to the family.
+- **Translations interchange with `storytold/craft-i18n`**: the catalog format is theirs (§1), so a
+  translation written here can be contributed there and a catalog from there works here.
+- **Extensions interchange with `storytold/craft-extensions`**: the package contract is theirs (§3),
+  so a theme or skill pack aimed at the suite can be aimed at this app.
+- **The AI layer is the family's direction**: the connection/model/consent shape of
+  `storytold/craft-ai-integrations` is what this project's agent should adopt when those crates are
+  stable; today the transport is local (`curl`), the contract is the same one (tools, resources,
+  prompts, no model in the kernel), and the gap is stated rather than hidden.
+- **The UI is the family's stack** (§5): the pinned `storytold/egui` fork, `craft-ui`, the shared font
+  stack.
+- **Fonts, bulk data and corpora stay outside the repository**: `craft-fonts`, the NASA kernels via
+  `cargo xtask fetch-data`, and the user's own documents in their configuration directory.
+- **Not built: the control channel.** The siblings expose `--control <port>` with a token file so a
+  launcher or another app can drive them; STKCraft has a CLI and an MCP server but no control socket
+  yet, so a launcher cannot drive it the way it drives GridCraft. That is the first interop item on
+  the list, and it is named here so it cannot be forgotten.
+
+## 7. What every rule here has in common
 
 - **The gate is the enforcement.** A rule that `cargo xtask ci` does not check is a rule that will be
   broken by the next contributor in good faith. When adding a rule, add the check.
