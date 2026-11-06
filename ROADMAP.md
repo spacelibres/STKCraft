@@ -38,58 +38,62 @@ Shipped, in the order it landed:
 | Paper corpus fetcher, checksummed | done | 0.1.39 |
 | Crate names repeat their directory, all groups | done, enforced by the gate | 0.1.42 |
 | The window serves the control channel, with `ui.state` and `ui.screenshot` | done | 0.1.43 |
+| The model layer: any OpenAI-compatible endpoint, the credential stored `0600` | done | 0.1.44 |
 
 The engine speaks eight commands today: `scenario.rename`, `scenario.set-duration`, `satellite.add`,
 `satellite.remove`, `station.add`, `station.remove`, `access.compute`, `planet.access`.
 
 ## Next
 
-### 1. ~~The window serves what the CLI serves~~ — shipped in 0.1.43
+### Foundation, in this order — before any new domain feature
 
-The window answers `--control <port>`: `ui.state`, `ui.screenshot`, `engine.execute` and
-`scenario.read` are answered by the thread that owns the scenario, the stateless half by the socket
-thread, and a capture the window could not take is an error with the reason in it rather than an empty
-image. The tests drive it across a thread boundary without a display.
+The framework and the agent come first: every later step (sensors, coverage, the timeline) is a
+feature *of* them, and building a feature on a foundation that is still moving is how both end up
+half-done. The order below is dependency order, not preference.
 
-### 2. Sensors and targets, and what they can see
+#### F1. ~~The model layer~~ — shipped in 0.1.44
 
-**Why now.** Access today is a satellite and a station with a horizon mask. A mission analyst's real
-question is narrower: *with this sensor's field of view, at this maximum off-nadir angle, over this
-target area, when and for how long?* That is the product's reason to exist, and every later feature —
-coverage, a timeline, a report — is built on it.
+`Provider` (endpoint, model, credential, timeout) instead of one hard-wired client; the credential
+stored `0600` in `model.key`; `stkcraft model` to show and set it; settings beat the environment and
+the environment beats the shipped defaults. **Verified** with nothing in the environment at all.
+
+#### F2. Memory and context, at harness parity — next
+
+Today a long conversation is trimmed **by message count** and compaction *drops* turns with a fixed
+note. That is not memory; it is forgetting with a comment.
+
+**Done when**: the drop is triggered by the size of the request the model would receive, not by a
+count; the dropped span is replaced by a **summary the model wrote** (with a test proving a fact from
+the dropped span can still be recalled); pinned material — system prompt, skill index, the scenario
+document — is never cut; a session carries metadata (title, created, last used, scenario); and the
+window lists sessions and resumes one.
+
+#### F3. The extension runtime
+
+`stkcraft-framework-extensions` validates a manifest and admits a trust tier, and nothing loads one.
+**Done when** an installed package can contribute commands (an engine command with preset parameters),
+skills, a language catalog and a knowledge root; discovery, validation and registration go through the
+same command registry the menus use, so the CLI, MCP and the control channel see it too; third-party
+packages stay behind the non-default feature; and `stkcraft extensions` says which loaded and which
+were refused, with the reason.
+
+#### F4. The window's agent surface
+
+The assistant panel runs one conversation with no session, no model choice and no stop. **Done when**
+it uses F2's sessions, shows citations as places (`paper.pdf:page 7`), can be stopped mid-turn, and has
+a settings section for model, key, language and the knowledge directory — the parts F1 and F3 made
+settable, reachable without a command line.
+
+#### F5. Sensors and targets, and what they can see
+
+Access today is a satellite and a station with a horizon mask. A mission analyst's question is
+narrower: *with this sensor's field of view, at this maximum off-nadir angle, over this target area,
+when and for how long?*
 
 **Done when** a scenario can carry a sensor (cone half-angle, max off-nadir, min/max range) and a
 target (point or polygon), `access.compute` accepts them, and the geometry is verified against
 hand-computable cases: a target directly under the satellite is visible, one just outside the cone is
 not, and a polygon target's window is the union of its vertices' windows.
-
-### 3. A timeline the user can read
-
-**Why now.** The viewport shows one instant. A pass is an interval, and an interval is what a person
-takes to a review. The engine already computes the list (`access.compute` returns every pass with
-start, end and duration); nothing draws it.
-
-**Done when** the window has a timeline panel with the computed passes on it, the viewport can be
-driven to a pass instant, and a screenshot of the panel passes the same numeric check the other panels
-do — content in both halves, label pixels where the labels belong, and a blank image as the control.
-
-### 4. Recall over the corpus, beyond words
-
-**Why now.** The knowledge base answers exact-token questions well and fails a paraphrase. The vector
-store is written and unused; what it needs is a decision — which embedding model, run through whose
-key — and the discipline to keep it a *candidate* generator over BM25 rather than an authority.
-
-**Done when** a query that shares no word with the document still finds it, the result is labelled as
-recall rather than evidence, the citations remain page-level, and an offline run is identical on two
-machines because the embeddings are cached with the index.
-
-### 5. Numbers, dates and direction in every language
-
-**Why now.** The interface translates; the numbers do not. "45°" is written differently in German,
-"1 200 km" in French, and right-to-left layout is not a font problem but a layout one.
-
-**Done when** `cargo xtask i18n` reports a locale's number and date formats, the panels use them, and
-a `ar` catalog renders right-to-left in the screenshot path.
 
 ## Later
 

@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.45] — The order of work is the foundation, and the roadmap says so
+
+0.1.40 wrote the roadmap and put sensors and targets at the top of it. That was the wrong order and
+the correction matters more than the document: a sensor cone is a feature *of* the agent, the memory
+and the extension runtime, and building it while those are still moving is how both end up half-done.
+
+So `ROADMAP.md`'s *Next* is now a foundation sequence with a test for each step, and the sensor work
+moved behind it:
+
+- **F1 — the model layer.** Shipped in 0.1.44 (any OpenAI-compatible endpoint, credential stored
+  `0600`, settings beat the environment).
+- **F2 — memory and context at harness parity.** Next. The drop is triggered by the size of the
+  request the model would receive rather than a message count, the dropped span is replaced by a
+  summary the model wrote, pinned material is never cut, and the window lists and resumes sessions.
+- **F3 — the extension runtime.** A manifest that validates is not a package that loads: an
+  extension must be able to contribute commands, skills, a catalog and a knowledge root, and reach the
+  same registry the menus use.
+- **F4 — the window's agent surface.** Sessions, citations as places, a stop button, and settings
+  reachable without a command line.
+- **F5 — sensors and targets**, then coverage.
+
+The *Where the project is* table gained the two foundation steps that shipped, so the roadmap and the
+changelog tell the same story.
+
+### Changed
+
+- **Nothing executable.** This release is the correction of a plan plus the record of it; the code is
+  0.1.44's.
+
+### Not built yet
+
+- Everything in F2–F5, which is the point of writing them down in order.
+
 ## [0.1.44] — Your key, in the app, for whichever endpoint you point it at
 
 The foundation had one gap that made every other gap worse: the model was a single hard-wired client.
