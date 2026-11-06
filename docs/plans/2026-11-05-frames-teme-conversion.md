@@ -15,7 +15,7 @@ Earth-orientation parameters and exposes the two conversions the rest of the pro
 Nothing here invents a convention: every matrix is checked against two independent published
 implementations, and every acceptance test names the reference value it reproduces.
 
-**Tech Stack:** Rust 2024, `stkcraft-core` (`Vector3`, `Result`), `stkcraft-time` (`Epoch`,
+**Tech Stack:** Rust 2024, `stkcraft-framework-core` (`Vector3`, `Result`), `stkcraft-framework-time` (`Epoch`,
 `JulianDate`, `TimeScale`), `stkcraft-astro-sgp4` (`StateVector`). No new dependencies.
 
 ## Global Constraints
@@ -140,7 +140,7 @@ v_itrf = [   -3.225632748,   -2.872442510,    5.531931288] km/s
   (it is not; no code below indexes).
 
 **Interfaces:**
-- Consumes: `stkcraft_core::{Error, Result}`.
+- Consumes: `stkcraft_framework_core::{Error, Result}`.
 - Produces:
 
 ```rust
@@ -239,7 +239,7 @@ Expected: FAIL with `cannot find function 'iau_1980' in this scope`.
 //! exact, so the fractional precision of the polynomial is not destroyed by adding it to a
 //! number of order 1e4 arcseconds.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 /// Arcseconds to radians, `pi / (180 * 3600)`.
 const ARCSEC_TO_RAD: f64 = core::f64::consts::PI / 648_000.0;
@@ -468,7 +468,7 @@ paste fails loudly.
 //! Coefficients are in units of 0.1 milliarcsecond, and their `t` terms in 0.1 mas per Julian
 //! century.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 use crate::arguments::iau_1980 as fundamental_arguments;
 
@@ -577,7 +577,7 @@ git commit -m "M4.2: IAU-80 nutation series and mean obliquity"
 - Modify: `crates/frames/src/lib.rs`
 
 **Interfaces:**
-- Consumes: `rotation::Rotation3`, `stkcraft_core::{Error, Result}`.
+- Consumes: `rotation::Rotation3`, `stkcraft_framework_core::{Error, Result}`.
 - Produces:
 
 ```rust
@@ -688,7 +688,7 @@ Expected: FAIL, no `iau_1977_angles`.
 //! selects with `opt == e80`, and the one that belongs with the IAU-80 nutation series in
 //! `crate::nutation`.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 use crate::rotation::Rotation3;
 
@@ -758,7 +758,7 @@ pub fn iau_1976_matrix(ttt: f64) -> Result<Rotation3> {
 }
 ```
 
-Add `use stkcraft_core::Vector3;` inside the test module for the arcseconds test.
+Add `use stkcraft_framework_core::Vector3;` inside the test module for the arcseconds test.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -784,7 +784,7 @@ git commit -m "M4.3: IAU-77 precession matrix"
 - Modify: `crates/frames/src/lib.rs`
 
 **Interfaces:**
-- Consumes: `stkcraft_core::{Error, Result}`.
+- Consumes: `stkcraft_framework_core::{Error, Result}`.
 - Produces:
 
 ```rust
@@ -867,7 +867,7 @@ Expected: FAIL.
 //! because the reduction to `[0, 2pi)` afterwards is exact and the expression then matches the
 //! published one term for term.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 /// Seconds in a day, for the modulo.
 const SECONDS_PER_DAY: f64 = 86_400.0;
@@ -967,7 +967,7 @@ stkcraft-astro-sgp4.workspace = true
 
 **Layer check:** `stkcraft-astro-sgp4` is L2 and `stkcraft-astro-frames` is L2. A same-layer dependency is
 forbidden by `cargo xtask layers`. **Before writing any code**, decide the direction:
-either (a) move the state type down, or (b) define the conversion over `stkcraft_core` types
+either (a) move the state type down, or (b) define the conversion over `stkcraft_framework_core` types
 (`[Distance; 3]` position and `[Velocity; 3]` velocity) so `stkcraft-astro-frames` needs no SGP4
 dependency at all. **Take (b)** — a frame conversion has no business knowing how the state was
 produced, and it keeps the layering table untouched. Replace `StateVector` in the signatures

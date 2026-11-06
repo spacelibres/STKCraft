@@ -11,8 +11,8 @@
 //! propagation result is unaffected by a leap second.
 
 use serde::{Deserialize, Serialize};
-use stkcraft_core::{Angle, Error, Result};
-use stkcraft_time::{Epoch, JulianDate};
+use stkcraft_framework_core::{Angle, Error, Result};
+use stkcraft_framework_time::{Epoch, JulianDate};
 
 use crate::constants::{GravityField, MINUTES_PER_REVOLUTION};
 
@@ -197,7 +197,7 @@ impl Elements {
 mod tests {
     use super::*;
     use crate::tle::TwoLineElement;
-    use stkcraft_time::TimeScale;
+    use stkcraft_framework_time::TimeScale;
 
     fn elements_of(line1: &str, line2: &str) -> Elements {
         TwoLineElement::parse(line1, line2)

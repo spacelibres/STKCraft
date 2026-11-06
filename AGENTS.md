@@ -49,7 +49,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   `todo!`, `unimplemented!`; no `unsafe` (`unsafe_code = "forbid"`).
 - Every production crate root carries
   `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]`.
-- **Errors are `Result<T, E>`** through `stkcraft_core::Error` and `?`. An unfinished
+- **Errors are `Result<T, E>`** through `stkcraft_framework_core::Error` and `?`. An unfinished
   feature returns `Error::Unsupported`; it never panics and never returns a placeholder
   number.
 - **Input-derived numbers are hostile** (ephemeris files, scenario documents, command and
@@ -107,7 +107,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   has is a capability an agent has, and adding one means adding a command — never teaching the
   model a number. Do not put a prompt, a model name or a network call below the app layer.
 - **Every user-visible string is translatable, and English is the source.** Write interface text in
-  English and pass it through `tr!`, `trc!` or `trn!` (`stkcraft_i18n`): `cargo xtask i18n` extracts
+  English and pass it through `tr!`, `trc!` or `trn!` (`stkcraft_framework_i18n`): `cargo xtask i18n` extracts
   those literals, `cargo xtask ci` checks the catalogs, and `cargo xtask i18n translate --language
   <code>` fills a language from the user's own DeepSeek key. A string built at run time cannot be
   extracted, so the macros take literals. Rules and format: `docs/standards.md` §1,
@@ -143,7 +143,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   interface renders at all. Do not add a second font stack, a private theme token set or a widget
   that exists in `craft-ui`. `STKCRAFT_FONTS=off` renders without installed fonts, for a
   machine-independent screenshot. See `docs/standards.md` §5.
-- **Time goes through `stkcraft-time`.** Never hand-roll calendar conversion, leap seconds
+- **Time goes through `stkcraft-framework-time`.** Never hand-roll calendar conversion, leap seconds
   or time-scale offsets; never use a bare `f64` to mean "seconds since some epoch".
 - **Units are types.** `Angle`, `Distance`, `Duration` and `EpochOffset` exist so a
   degrees/radians mix-up is a compile error. Do not add `From<f64>` conversions.

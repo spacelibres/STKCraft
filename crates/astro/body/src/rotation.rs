@@ -123,7 +123,7 @@ mod tests {
     use super::*;
     use crate::Body;
     use crate::generated::{CSPICE_ET, CSPICE_FRAMES};
-    use stkcraft_time::{Epoch, JD_J2000, TimeScale};
+    use stkcraft_framework_time::{Epoch, JD_J2000, TimeScale};
 
     /// A TDB epoch from `et`, seconds past J2000 TDB, which is what SPICE calls `et`.
     fn epoch_at(et: f64) -> Epoch {

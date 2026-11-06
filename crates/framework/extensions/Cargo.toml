@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-extensions"
+name = "stkcraft-framework-extensions"
 description = "The extension package contract: manifests, ids and trust tiers"
 version.workspace = true
 edition.workspace = true

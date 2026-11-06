@@ -8,8 +8,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-core.workspace = true
-stkcraft-time.workspace = true
+stkcraft-framework-core.workspace = true
+stkcraft-framework-time.workspace = true
 stkcraft-astro-frames.workspace = true
 stkcraft-astro-sgp4.workspace = true
 stkcraft-astro-access.workspace = true

@@ -13,7 +13,7 @@
 //! below rather than implied, because no point-sampling method can see a window that opens and
 //! closes between two samples.
 
-use stkcraft_core::{Duration, EpochOffset, Error, Result};
+use stkcraft_framework_core::{Duration, EpochOffset, Error, Result};
 
 /// The width to which a window boundary is resolved, seconds.
 ///

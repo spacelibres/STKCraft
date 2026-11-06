@@ -27,7 +27,7 @@
 //! of files that were deleted or renamed instead of accumulating a copy of every revision a file has
 //! ever had.
 
-use stkcraft_storage::Cache;
+use stkcraft_framework_storage::Cache;
 
 use crate::chunk::Chunk;
 use crate::index::{Reader, write_string};
@@ -66,7 +66,7 @@ impl Reuse {
 pub fn library_key(manifest: &str) -> String {
     format!(
         "knowledge/library/{}",
-        stkcraft_storage::digest(manifest.as_bytes())
+        stkcraft_framework_storage::digest(manifest.as_bytes())
     )
 }
 

@@ -98,7 +98,7 @@ a `ar` catalog renders right-to-left in the screenshot path.
 ## Later
 
 - **The extension store**: install, update and verify a package from the window, with the trust tiers
-  `stkcraft-extensions` already defines.
+  `stkcraft-framework-extensions` already defines.
 - **OCR for scanned papers**, so the knowledge base reads the documents that have no text layer.
 - **A corpus regression table**: a known phrase landing on a known page of each fetched document, run
   by a person who has run `cargo xtask papers` rather than by `cargo xtask ci`.

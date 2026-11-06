@@ -32,7 +32,7 @@ elevation that overlap a downlink window in Q3").
 | `translation_row` | locale, context, English source, translation, provenance (a person or a model) | the catalogs are queried and reviewed, not just read |
 | `extension_package` | id, version, kind, trust tier, enabled-for-app, installed time | the store `craft-extensions` describes |
 
-**Engine of record:** SQLite, through one crate (`stkcraft-storage`), with the schema versioned and a
+**Engine of record:** SQLite, through one crate (`stkcraft-framework-storage`), with the schema versioned and a
 migration per version. It is embedded, it is a file a person can copy, it needs no server, and its
 `STRICT` tables catch the type mistakes that make an analysis unreproducible. A deployment that needs
 concurrency moves to PostgreSQL by changing the driver, not the schema — every column is portable.
@@ -102,7 +102,7 @@ without copying a byte of derived data — and deleting `cache/` never loses a d
 
 ## 5. Rules
 
-- **One crate owns persistence** (`stkcraft-storage`). No crate opens a database, writes a key-value
+- **One crate owns persistence** (`stkcraft-framework-storage`). No crate opens a database, writes a key-value
   file or issues SQL anywhere else; a crate that needs to remember something asks the storage crate.
 - **The record is append-only.** Nothing edits a computation row; a re-run is a new row with a new
   digest. Undo is a pointer to an earlier revision, not a mutation.

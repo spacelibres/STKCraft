@@ -18,7 +18,7 @@
 //!
 //! Records are 1024 bytes. Words are 8 bytes and are addressed from one.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 /// The size of a DAF record, in bytes.
 pub const RECORD_BYTES: usize = 1024;

@@ -8,11 +8,11 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-core.workspace = true
+stkcraft-framework-core.workspace = true
 # A body is part of a scenario document, so it serialises by name rather than by index.
 serde.workspace = true
-# An orientation model takes a TDB epoch, which only `stkcraft-time` can produce correctly.
-stkcraft-time.workspace = true
+# An orientation model takes a TDB epoch, which only `stkcraft-framework-time` can produce correctly.
+stkcraft-framework-time.workspace = true
 
 [lints]
 workspace = true

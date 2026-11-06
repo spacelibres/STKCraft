@@ -22,8 +22,8 @@
 //! planet-fixed answer.
 
 use stkcraft_astro_body::Body;
-use stkcraft_core::{Error, Result};
-use stkcraft_time::Epoch;
+use stkcraft_framework_core::{Error, Result};
+use stkcraft_framework_time::Epoch;
 
 /// A position and velocity in kilometres and kilometres per second.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -261,11 +261,11 @@ fn apply(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
 #[allow(clippy::indexing_slicing)] // the tests index three-component vectors by axis
 mod tests {
     use super::*;
-    use stkcraft_time::{JD_J2000, TimeScale};
+    use stkcraft_framework_time::{JD_J2000, TimeScale};
 
     fn tdb(seconds: f64) -> Epoch {
         Epoch::from_julian(
-            stkcraft_time::JulianDate::from_parts(JD_J2000, seconds / 86_400.0),
+            stkcraft_framework_time::JulianDate::from_parts(JD_J2000, seconds / 86_400.0),
             TimeScale::Tdb,
         )
     }

@@ -17,8 +17,8 @@
 //! It goes through [`ChatModel`], so a scripted model exercises everything below the network and a
 //! test needs no key. The real one is [`DeepSeek`](crate::DeepSeek), which speaks `curl`.
 
-use stkcraft_i18n::Source;
-use stkcraft_i18n::catalog::{self, Row};
+use stkcraft_framework_i18n::Source;
+use stkcraft_framework_i18n::catalog::{self, Row};
 
 use crate::{ChatModel, Message};
 
@@ -132,7 +132,7 @@ fn translate_batch<M: ChatModel>(
         }
     }
     let name = json
-        .get(stkcraft_i18n::LANGUAGE_NAME_SOURCE)
+        .get(stkcraft_framework_i18n::LANGUAGE_NAME_SOURCE)
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_owned();
@@ -175,7 +175,7 @@ fn prompt(locale: &str, language_name: &str, sources: &[&Source]) -> String {
          written in that language.\n\
          \n\
          Input:\n{input}",
-        name = stkcraft_i18n::LANGUAGE_NAME_SOURCE,
+        name = stkcraft_framework_i18n::LANGUAGE_NAME_SOURCE,
         input = serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".to_owned())
     )
 }

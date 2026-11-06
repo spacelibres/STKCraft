@@ -25,8 +25,8 @@
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use stkcraft_i18n::catalog::{self, Row};
-use stkcraft_i18n::{Source, Translations};
+use stkcraft_framework_i18n::catalog::{self, Row};
+use stkcraft_framework_i18n::{Source, Translations};
 
 /// What the worker reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,8 +178,8 @@ fn write_catalog(
     let mut text = catalog::header(language_name, locale);
     // The language names itself first, so a reader of the file sees what language it is in.
     let name_row = Row {
-        context: stkcraft_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
-        source: stkcraft_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
+        context: stkcraft_framework_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
+        source: stkcraft_framework_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
         translation: language_name.to_owned(),
     };
     text.push_str(&catalog::row_text(&name_row));
@@ -293,7 +293,8 @@ mod tests {
     #[test]
     fn missing_counts_only_what_still_shows_in_english() {
         // With no catalog on disk, everything is missing; the count is what the panel offers to fix.
-        let translations = stkcraft_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+        let translations =
+            stkcraft_framework_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
         let english_only = missing(&translations, "zz");
         assert_eq!(english_only, sources().len());
     }

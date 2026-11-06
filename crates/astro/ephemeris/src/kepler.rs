@@ -36,8 +36,8 @@
 //! some planets, so it is named rather than hidden.
 
 use stkcraft_astro_body::Body;
-use stkcraft_core::{Error, Result};
-use stkcraft_time::{Epoch, JD_J2000, TimeScale};
+use stkcraft_framework_core::{Error, Result};
+use stkcraft_framework_time::{Epoch, JD_J2000, TimeScale};
 
 use crate::spk::{Ephemeris, Origin, StateVector};
 
@@ -419,7 +419,7 @@ fn apply(matrix: &[[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
 #[expect(clippy::expect_used)]
 mod tests {
     use super::*;
-    use stkcraft_time::JulianDate;
+    use stkcraft_framework_time::JulianDate;
 
     fn tdb(et: f64) -> Epoch {
         Epoch::from_julian(

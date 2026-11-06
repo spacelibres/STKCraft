@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 
 use stkcraft_astro_engine::{Arg, Args, Registry, Scenario};
 use stkcraft_astro_sgp4::TwoLineElement;
-use stkcraft_core::Angle;
+use stkcraft_framework_core::Angle;
 
 use crate::render;
 
@@ -257,9 +257,9 @@ fn record_run(
     parameters: &str,
     inputs: &str,
     summary: &str,
-    windows: &[stkcraft_storage::AccessWindowRecord],
+    windows: &[stkcraft_framework_storage::AccessWindowRecord],
 ) {
-    let Ok(paths) = stkcraft_storage::Paths::for_user() else {
+    let Ok(paths) = stkcraft_framework_storage::Paths::for_user() else {
         eprintln!("stkcraft: the run was not recorded: no data directory");
         return;
     };
@@ -270,23 +270,23 @@ fn record_run(
 
 /// [`record_run`] against an explicit data directory, which is what a test uses.
 fn record_run_at(
-    paths: &stkcraft_storage::Paths,
+    paths: &stkcraft_framework_storage::Paths,
     command: &str,
     parameters: &str,
     inputs: &str,
     summary: &str,
-    windows: &[stkcraft_storage::AccessWindowRecord],
+    windows: &[stkcraft_framework_storage::AccessWindowRecord],
 ) -> Result<(), String> {
-    let mut store =
-        stkcraft_storage::Store::open(&paths.record()).map_err(|error| error.to_string())?;
+    let mut store = stkcraft_framework_storage::Store::open(&paths.record())
+        .map_err(|error| error.to_string())?;
     let id = store
-        .record_computation(&stkcraft_storage::Computation {
+        .record_computation(&stkcraft_framework_storage::Computation {
             scenario_name: "CLI".to_owned(),
             scenario_revision: None,
             command: command.to_owned(),
             parameters: parameters.to_owned(),
             engine_version: env!("CARGO_PKG_VERSION").to_owned(),
-            inputs_digest: stkcraft_storage::digest(inputs.as_bytes()),
+            inputs_digest: stkcraft_framework_storage::digest(inputs.as_bytes()),
             summary: summary.to_owned(),
         })
         .map_err(|error| error.to_string())?;
@@ -299,15 +299,15 @@ fn record_run_at(
 }
 
 /// The UTC text of an instant, for a stored window.
-fn utc_text(epoch: stkcraft_time::Epoch, offset_seconds: f64) -> String {
-    let instant = stkcraft_time::Epoch::from_julian(
+fn utc_text(epoch: stkcraft_framework_time::Epoch, offset_seconds: f64) -> String {
+    let instant = stkcraft_framework_time::Epoch::from_julian(
         epoch.julian().plus_seconds(offset_seconds),
         epoch.scale(),
     );
     instant
         .to_utc()
         .ok()
-        .and_then(|utc| stkcraft_time::julian_to_utc_naive(utc.julian()))
+        .and_then(|utc| stkcraft_framework_time::julian_to_utc_naive(utc.julian()))
         .map_or_else(
             || format!("JD {:.6}", instant.julian().sum()),
             |datetime| datetime.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
@@ -375,7 +375,7 @@ fn passes(request: &PassRequest) -> Result<(), String> {
     let mut windows = Vec::new();
     for access in &results {
         for window in &access.windows {
-            windows.push(stkcraft_storage::AccessWindowRecord {
+            windows.push(stkcraft_framework_storage::AccessWindowRecord {
                 satellite: satellite_name.clone(),
                 station: request.name.clone(),
                 start_utc: utc_text(epoch, window.start.as_seconds()),
@@ -512,8 +512,14 @@ fn planet(request: &PlanetRequest) -> Result<(), String> {
 }
 
 /// An absolute instant from a scenario epoch and an offset.
-fn instant_at(epoch: stkcraft_time::Epoch, offset_seconds: f64) -> stkcraft_time::Epoch {
-    stkcraft_time::Epoch::from_julian(epoch.julian().plus_seconds(offset_seconds), epoch.scale())
+fn instant_at(
+    epoch: stkcraft_framework_time::Epoch,
+    offset_seconds: f64,
+) -> stkcraft_framework_time::Epoch {
+    stkcraft_framework_time::Epoch::from_julian(
+        epoch.julian().plus_seconds(offset_seconds),
+        epoch.scale(),
+    )
 }
 
 /// Serve the engine's commands over the Model Context Protocol on stdin/stdout.
@@ -597,7 +603,7 @@ fn parse_chat<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation
 
 /// Where a conversation is stored: the data directory's `sessions/`.
 fn sessions_directory() -> Result<std::path::PathBuf, String> {
-    let paths = stkcraft_storage::Paths::for_user().map_err(|error| error.to_string())?;
+    let paths = stkcraft_framework_storage::Paths::for_user().map_err(|error| error.to_string())?;
     Ok(paths.root().join("sessions"))
 }
 
@@ -733,14 +739,14 @@ fn control(request: &ControlRequest) -> Result<(), String> {
 /// inputs — is what makes a number in a report checkable months later. A record that cannot be opened
 /// is reported rather than hidden: an empty history and an unreadable one are different facts.
 fn history() -> Result<(), String> {
-    let paths = stkcraft_storage::Paths::for_user().map_err(|error| error.to_string())?;
+    let paths = stkcraft_framework_storage::Paths::for_user().map_err(|error| error.to_string())?;
     println!(
         "STKCraft {} — history from {}",
         env!("CARGO_PKG_VERSION"),
         paths.record().display()
     );
-    let store =
-        stkcraft_storage::Store::open(&paths.record()).map_err(|error| error.to_string())?;
+    let store = stkcraft_framework_storage::Store::open(&paths.record())
+        .map_err(|error| error.to_string())?;
     let computations = store.computations(20).map_err(|error| error.to_string())?;
     if computations.is_empty() {
         println!("  nothing recorded yet");
@@ -820,9 +826,9 @@ fn knowledge_opened() -> Result<stkcraft_agent_knowledge::Opened, String> {
     }
     // The derived index is cached under the data directory, so a second run over a paper corpus is a
     // directory walk rather than a re-parse of every document.
-    let cache = stkcraft_storage::Paths::for_user()
+    let cache = stkcraft_framework_storage::Paths::for_user()
         .ok()
-        .map(|paths| stkcraft_storage::Cache::at(paths.cache().join("knowledge")));
+        .map(|paths| stkcraft_framework_storage::Cache::at(paths.cache().join("knowledge")));
     stkcraft_agent_knowledge::Library::open_cached(
         &directory,
         stkcraft_agent_knowledge::Limits::default(),
@@ -924,8 +930,8 @@ mod tests {
         // command, the engine version and the digest of the inputs it ran on.
         let directory = std::env::temp_dir().join("stkcraft-cli-record");
         let _ = std::fs::remove_dir_all(&directory);
-        let paths = stkcraft_storage::Paths::at(&directory);
-        let windows = vec![stkcraft_storage::AccessWindowRecord {
+        let paths = stkcraft_framework_storage::Paths::at(&directory);
+        let windows = vec![stkcraft_framework_storage::AccessWindowRecord {
             satellite: "ISS".to_owned(),
             station: "London".to_owned(),
             start_utc: "2024-01-01T09:12:04Z".to_owned(),
@@ -944,7 +950,7 @@ mod tests {
         )
         .expect("recorded");
 
-        let store = stkcraft_storage::Store::open(&paths.record()).expect("a record");
+        let store = stkcraft_framework_storage::Store::open(&paths.record()).expect("a record");
         let computations = store.computations(5).expect("read");
         assert_eq!(computations.len(), 1);
         let computation = &computations[0];
@@ -955,7 +961,7 @@ mod tests {
         // different scenario does not.
         assert_eq!(
             computation.record.inputs_digest,
-            stkcraft_storage::digest(b"1 25544U ...2 25544 ...London")
+            stkcraft_framework_storage::digest(b"1 25544U ...2 25544 ...London")
         );
         let stored = store.windows(computation.id).expect("read");
         assert_eq!(stored.len(), 1);
@@ -965,7 +971,10 @@ mod tests {
 
     #[test]
     fn a_recorded_instant_is_utc_text() {
-        let epoch = stkcraft_time::Epoch::from_jd(2_460_311.5, stkcraft_time::TimeScale::Tai);
+        let epoch = stkcraft_framework_time::Epoch::from_jd(
+            2_460_311.5,
+            stkcraft_framework_time::TimeScale::Tai,
+        );
         let text = utc_text(epoch, 0.0);
         assert!(text.ends_with('Z'), "{text}");
         assert_eq!(text.len(), 20, "{text}");

@@ -16,7 +16,7 @@
 //! the solar-system barycentre — the ICRF origin is the barycentre by definition, so "barycentric"
 //! is not an extra convention here. The time argument is **TDB**, because that is what a kernel's
 //! epochs are; an epoch in any other scale is refused rather than converted silently, since the
-//! conversion is the caller's to make and `stkcraft-time` can make it exactly.
+//! conversion is the caller's to make and `stkcraft-framework-time` can make it exactly.
 //!
 //! # Data lives outside the repository
 //!

@@ -27,7 +27,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use stkcraft_astro_engine::commands::{Parameter, ParameterKind, Registry};
-use stkcraft_i18n::catalog::{self, Catalog, Row};
+use stkcraft_framework_i18n::catalog::{self, Catalog, Row};
 
 use crate::layers::{APP_LAYER, LAYOUT};
 

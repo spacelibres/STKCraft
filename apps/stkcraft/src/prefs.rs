@@ -193,7 +193,7 @@ pub const OFFERED: [&str; 19] = [
 pub fn system_locale() -> Option<String> {
     for variable in ["LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(value) = std::env::var(variable)
-            && let Some(code) = stkcraft_i18n::parse_system_locale(&value)
+            && let Some(code) = stkcraft_framework_i18n::parse_system_locale(&value)
         {
             return Some(code);
         }
@@ -233,9 +233,9 @@ mod tests {
     #[test]
     fn a_system_locale_normalises_to_a_catalog_code() {
         assert_eq!(
-            stkcraft_i18n::parse_system_locale("zh_CN.UTF-8").as_deref(),
+            stkcraft_framework_i18n::parse_system_locale("zh_CN.UTF-8").as_deref(),
             Some("zh-cn")
         );
-        assert_eq!(stkcraft_i18n::parse_system_locale("C"), None);
+        assert_eq!(stkcraft_framework_i18n::parse_system_locale("C"), None);
     }
 }

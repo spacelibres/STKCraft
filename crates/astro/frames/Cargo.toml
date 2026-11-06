@@ -8,8 +8,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-core.workspace = true
-stkcraft-time.workspace = true
+stkcraft-framework-core.workspace = true
+stkcraft-framework-time.workspace = true
 serde.workspace = true
 
 [lints]

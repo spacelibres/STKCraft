@@ -9,7 +9,7 @@ authors.workspace = true
 
 [dependencies]
 # The derived index is cached in the key-value store (docs/design/storage.md).
-stkcraft-storage.workspace = true
+stkcraft-framework-storage.workspace = true
 # Papers arrive as PDFs, and the family's shared reader is what opens them: the same crate, and the
 # same patched backends, that `pdfcraft` and the other Craft apps read with.
 craft-pdf.workspace = true

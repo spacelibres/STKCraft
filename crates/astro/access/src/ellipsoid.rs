@@ -10,7 +10,7 @@
 //! flattening; everything else below is derived from them rather than transcribed, because a
 //! derived value typed from memory is a transcription error waiting to happen.
 
-use stkcraft_core::Angle;
+use stkcraft_framework_core::Angle;
 
 /// The WGS-84 semi-major axis (equatorial radius), km.
 ///

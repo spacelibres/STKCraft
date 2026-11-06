@@ -114,7 +114,7 @@ a shared on-disk store, themes carrying no code, and plug-ins whose v1 permissio
 - **What a plug-in is today is a registration**, not a loaded shared object: a command (one registry
   entry), a skill (one markdown document), or a bulk file (one verified row in `cargo xtask
   fetch-data`). Anything expressible that way is a plug-in now.
-- **The package contract is implemented** in `stkcraft-extensions`: a manifest that never states its
+- **The package contract is implemented** in `stkcraft-framework-extensions`: a manifest that never states its
   own trust level, ids checked by character class so they are safe as directory names, theme
   packages that may carry no code, permission lists that must be empty, and a `third-party` feature
   that no release build enables — with a test that fails if it ever becomes a default.
@@ -223,15 +223,13 @@ grouped by subject and every group has a rule about what may live in it.
 
 - **A new crate goes into the directory that matches its subject**, and `cargo xtask layers` fails for a
   workspace member that is not in the table, so the taxonomy cannot quietly grow a fourth category.
-- **The package name repeats the directory, in the order the path has it**: `crates/astro/body` is
-  `stkcraft-astro-body`, `crates/agent/mcp` is `stkcraft-agent-mcp`, `crates/ui/viewport` is
-  `stkcraft-ui-viewport`. The group is spelled out because the leaves are generic: `engine`, `mcp` and
-  `viewport` say nothing on their own in a `use` list, and a reader of `stkcraft-engine::analysis` has to
-  go and find out whether that is the platform or the domain.
-- **`crates/framework/` is the exception and stays bare**: `stkcraft-core`, `stkcraft-time`,
-  `stkcraft-i18n`, `stkcraft-extensions`, `stkcraft-storage`. That is the part a sibling app shares — the
-  platform, not the astronomy — so it is named for its subject rather than its group, and a
-  `stkcraft-framework-` prefix would be noise on the five crates everything depends on.
+- **The package name repeats the directory, in the order the path has it**: `crates/framework/core` is
+  `stkcraft-framework-core`, `crates/astro/body` is `stkcraft-astro-body`, `crates/agent/mcp` is
+  `stkcraft-agent-mcp`, `crates/ui/viewport` is `stkcraft-ui-viewport`. **There is no exception for the
+  platform.** It is longer than `stkcraft-core`, and that is the price of a rule with no carve-out:
+  `stkcraft-time` reads like a subject while `stkcraft-astro-sgp4` reads like a layer, and two
+  conventions in one workspace is how a reader ends up guessing. It is also the layer an outsider is
+  most likely to misread — `stkcraft-framework-storage` cannot be mistaken for part of the astronomy.
 - **A package name never disagrees with its directory.** `crates/agent/runtime` was once named
   `stkcraft-agent`, so a reader looking for the runtime found nothing and a reader looking for "the
   agent" found the runtime. 0.1.37 fixed it; the table in `xtask/src/layers.rs` pairs every name with its

@@ -50,7 +50,7 @@ pub mod rotation;
 pub use ellipsoid::Ellipsoid;
 pub use rotation::Orientation;
 
-use stkcraft_time::Epoch;
+use stkcraft_framework_time::Epoch;
 
 /// The constants and the rotation model of one body, as the kernel states them.
 ///
@@ -284,8 +284,9 @@ impl Body {
                 prime_meridian: 0.0,
             };
         }
-        let centuries = (jd - stkcraft_time::JD_J2000) / stkcraft_time::DAYS_PER_JULIAN_CENTURY;
-        let days = jd - stkcraft_time::JD_J2000;
+        let centuries = (jd - stkcraft_framework_time::JD_J2000)
+            / stkcraft_framework_time::DAYS_PER_JULIAN_CENTURY;
+        let days = jd - stkcraft_framework_time::JD_J2000;
 
         // The pole's right ascension and the prime meridian use sines, the declination uses
         // cosines. That asymmetry is not a mistake: it is how the IAU models are written, and
@@ -400,7 +401,7 @@ mod tests {
 
     #[test]
     fn a_nonsense_epoch_gives_zero_angles_rather_than_nans() {
-        let epoch = Epoch::from_jd(f64::NAN, stkcraft_time::TimeScale::Tdb);
+        let epoch = Epoch::from_jd(f64::NAN, stkcraft_framework_time::TimeScale::Tdb);
         let orientation = Body::Earth.orientation(epoch);
         assert_eq!(orientation.pole_ra, 0.0);
         assert_eq!(orientation.pole_dec, 0.0);

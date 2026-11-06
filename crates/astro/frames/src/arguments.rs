@@ -10,7 +10,7 @@
 //! so the fractional precision of the polynomial is not destroyed by adding it to a number of
 //! order 1e4 arcseconds.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 /// Arcseconds to radians, `pi / (180 * 3600)`.
 const ARCSEC_TO_RAD: f64 = core::f64::consts::PI / 648_000.0;

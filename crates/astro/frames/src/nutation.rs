@@ -10,7 +10,7 @@
 //! Coefficients are in units of 0.1 milliarcsecond, and their `t` terms in 0.1 mas per Julian
 //! century of TT.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 use crate::arguments::iau_1980 as fundamental_arguments;
 

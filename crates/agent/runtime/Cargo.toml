@@ -9,7 +9,7 @@ authors.workspace = true
 
 [dependencies]
 stkcraft-astro-engine.workspace = true
-stkcraft-i18n.workspace = true
+stkcraft-framework-i18n.workspace = true
 stkcraft-agent-mcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true

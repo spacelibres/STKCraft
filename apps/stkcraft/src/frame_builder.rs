@@ -17,8 +17,8 @@
 
 use stkcraft_astro_access::Ellipsoid;
 use stkcraft_astro_engine::{Propagator, Scenario};
-use stkcraft_core::Duration;
-use stkcraft_time::Epoch;
+use stkcraft_framework_core::Duration;
+use stkcraft_framework_time::Epoch;
 use stkcraft_ui_viewport::{Frame, SatelliteGlyph, StationGlyph, color_from_bytes};
 
 use crate::render;
@@ -257,8 +257,8 @@ mod tests {
     fn a_station_is_drawn_on_the_ellipsoid_surface() {
         let mut scenario = Scenario::empty("test");
         let site = stkcraft_astro_access::GroundSite::new(
-            stkcraft_core::Angle::from_deg(51.5),
-            stkcraft_core::Angle::from_deg(-0.13),
+            stkcraft_framework_core::Angle::from_deg(51.5),
+            stkcraft_framework_core::Angle::from_deg(-0.13),
             0.0,
         )
         .expect("valid site");
@@ -266,7 +266,9 @@ mod tests {
             .add_station(
                 "London",
                 site,
-                stkcraft_astro_access::Sensor::above_horizon(stkcraft_core::Angle::from_deg(10.0)),
+                stkcraft_astro_access::Sensor::above_horizon(
+                    stkcraft_framework_core::Angle::from_deg(10.0),
+                ),
             )
             .expect("added");
         let (frame, problems) = build_frame(&scenario, scenario.epoch);

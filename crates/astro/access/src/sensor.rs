@@ -11,7 +11,7 @@
 //! and the corners of that box are accepted when they are `sqrt(2)` times too far from the
 //! boresight.
 
-use stkcraft_core::{Angle, Distance, Error, Result, Vector3};
+use stkcraft_framework_core::{Angle, Distance, Error, Result, Vector3};
 
 use crate::geometry::Topocentric;
 

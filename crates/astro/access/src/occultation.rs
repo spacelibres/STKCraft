@@ -147,8 +147,8 @@ mod tests {
     /// The Earth-fixed position of a station at a latitude on the prime meridian.
     fn ground_site(latitude_deg: f64) -> [f64; 3] {
         let site = crate::site::GroundSite::new(
-            stkcraft_core::Angle::from_deg(latitude_deg),
-            stkcraft_core::Angle::from_deg(0.0),
+            stkcraft_framework_core::Angle::from_deg(latitude_deg),
+            stkcraft_framework_core::Angle::from_deg(0.0),
             0.0,
         )
         .expect("valid site");

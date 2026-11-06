@@ -15,7 +15,7 @@
 //! intermediate expression comparable, term for term, with the published algorithm.
 
 use serde::{Deserialize, Serialize};
-use stkcraft_core::{Distance, Error, Result, Velocity};
+use stkcraft_framework_core::{Distance, Error, Result, Velocity};
 
 use crate::constants::{
     ATMOSPHERE_Q0_KM, ATMOSPHERE_S_FLOOR_KM, DEEP_SPACE_PERIOD_MINUTES, EARTH_ROTATION_RAD_PER_MIN,
@@ -564,7 +564,10 @@ impl Satellite {
     /// non-positive, or a perturbation that has taken the elements out of family. All three
     /// are real outcomes for a stale element set and none of them has a meaningful state
     /// vector, so none of them returns one.
-    pub fn propagate(&mut self, since_epoch: stkcraft_core::Duration) -> Result<StateVector> {
+    pub fn propagate(
+        &mut self,
+        since_epoch: stkcraft_framework_core::Duration,
+    ) -> Result<StateVector> {
         self.propagate_minutes(since_epoch.as_seconds() / 60.0)
     }
 

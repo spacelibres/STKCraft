@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-core"
+name = "stkcraft-framework-core"
 description = "Units, error types and foundational value types for STKCraft"
 version.workspace = true
 edition.workspace = true

@@ -13,7 +13,7 @@
 //!
 //! in seconds, reduced modulo one day and converted at 240 seconds per degree.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 /// Seconds in a day, for the reduction to one turn.
 const SECONDS_PER_DAY: f64 = 86_400.0;

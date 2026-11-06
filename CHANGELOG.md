@@ -9,6 +9,34 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.42] — The platform is named like everything else, because a rule with a carve-out is not a rule
+
+0.1.37 gave the workspace one naming convention and one exception: `crates/<group>/<leaf>` became
+`stkcraft-<group>-<leaf>` for the domain, the agent and the UI — and `crates/framework/` stayed bare,
+as `stkcraft-core`, `stkcraft-time` and so on, on the theory that the platform is the part a sibling
+app shares and deserves a subject name rather than a group name.
+
+That theory does not survive a reader. `stkcraft-time` and `stkcraft_astro_sgp4` are two conventions
+in one workspace, and the one that is documented is the one nobody has to guess. Worse, the platform
+is the layer an outsider is most likely to misread: `stkcraft-storage` could be a feature of the
+astronomy, `stkcraft-framework-storage` cannot.
+
+### Changed
+
+- **The five platform crates are renamed with their group**: `stkcraft-framework-core`,
+  `stkcraft-framework-time`, `stkcraft-framework-i18n`, `stkcraft-framework-storage` and
+  `stkcraft-framework-extensions`. This is a breaking change for any downstream `use` line, and it is
+  the last one of its kind: `cargo xtask layers` now derives every expected name from every path with
+  no special case, so a new crate cannot reintroduce a second convention.
+- **Every `use` line, manifest, document and generated API page follows**, including the layer diagram
+  in `xtask/src/layers.rs` and the rule in `docs/standards.md` §7, which now says the longer name is
+  the price of a rule with no carve-out.
+
+### Not built yet
+
+- **The window's control channel** — the roadmap's next step, unchanged by this rename — is still the
+  next step.
+
 ## [0.1.41] — The gate was green here and red everywhere else, for eleven releases
 
 Since 0.1.30 every push to `main` has failed CI, and every one of them passed `cargo xtask ci`
@@ -201,11 +229,12 @@ names were the one place that separation was invisible.
   `stkcraft-astro-frames`, `stkcraft-astro-ephemeris`, `stkcraft-astro-sgp4`, `stkcraft-astro-access`,
   `stkcraft-astro-engine`, `stkcraft-agent-knowledge`, `stkcraft-agent-mcp`, `stkcraft-agent-runtime`,
   `stkcraft-agent-control`, `stkcraft-ui-viewport`.
-- **The platform keeps a bare name.** `crates/framework/` is `stkcraft-core`, `stkcraft-time`,
-  `stkcraft-i18n`, `stkcraft-storage` and `stkcraft-extensions`: that is the layer a sibling app shares,
-  named for its subject rather than its group, and a `stkcraft-framework-` prefix would be noise on the
-  five crates everything depends on. **This is the release's one breaking change** — `use
-  stkcraft_agent::…` becomes `use stkcraft_agent_runtime::…`, and every other old name maps the same way.
+- **The platform kept a bare name in this release.** `crates/framework/` stayed `stkcraft-core`,
+  `stkcraft-time`, `stkcraft-i18n`, `stkcraft-storage` and `stkcraft-extensions`. *0.1.42 reversed
+  that:* it is the one convention the workspace had that a reader could not predict from the path, and
+  a rule with a carve-out is a rule two people read two ways. **This release's one breaking change** —
+  `use stkcraft_agent::…` becomes `use stkcraft_agent_runtime::…`, and every other old name maps the
+  same way.
 - **`cargo xtask layers` enforces the naming rule**, not only the layering: the layer table pairs every
   package with its path, and a name that does not match what the path implies is a violation. The check
   is tested with a control case — the old `stkcraft-body` under `crates/astro/` fails it — so it cannot
@@ -538,7 +567,7 @@ proposal with the same rules the gate applies, and the interface changes languag
 - **`stkcraft_agent_runtime::translate`** — the batch, the prompt and the acceptance rules, once, for both
   callers: the developer task and the window. Two implementations would be two prompts and two
   acceptance rules, and the one that drifts is the one a user meets.
-- **`stkcraft_i18n::extract`** — the macro scanner, moved out of `xtask` so the build script, the
+- **`stkcraft_framework_i18n::extract`** — the macro scanner, moved out of `xtask` so the build script, the
   developer task and their tests share one answer to "which strings exist".
 
 ### Fixed
@@ -628,7 +657,7 @@ review, not a side effect of a build flag.
 
 ### Added
 
-- **`stkcraft-extensions`** — manifest parsing with `deny_unknown_fields`, ids checked by character
+- **`stkcraft-framework-extensions`** — manifest parsing with `deny_unknown_fields`, ids checked by character
   class (lowercase, dot-separated, no `..`, no `/`, at most 128 bytes, because an id becomes a path),
   version and name validation, `Kind::{Theme, Skills, Plugin}` and `TrustTier::{Internal,
   ThirdParty}`.
@@ -714,7 +743,7 @@ and marks every rule that describes something not yet built.
 
 ### Added
 
-- **`stkcraft-i18n`** — the catalog format and its lookups: parse with per-line errors, the
+- **`stkcraft-framework-i18n`** — the catalog format and its lookups: parse with per-line errors, the
   placeholder and ellipsis checks the shared project enforces, `@plural` rows with CLDR cardinal
   forms (1 form for Chinese and Japanese, 3 for Russian, Czech, Polish and Romanian, 6 for Arabic),
   `@id language.name` for the picker, region → base language → English fallback, and no failure
@@ -1333,7 +1362,7 @@ a wrong mission timeline quietly.
 - **`stkcraft-astro-ephemeris` (L3), with an `Ephemeris` trait** — barycentric ICRF position and velocity
   for a `Body` at a TDB instant, and nothing else. Keeping the contract that narrow is what makes a
   second backend a drop-in later. A TDB epoch is required rather than converted silently, because
-  the kernel's argument is TDB and the conversion belongs to `stkcraft-time`.
+  the kernel's argument is TDB and the conversion belongs to `stkcraft-framework-time`.
 - **A DAF/SPK structure reader** implemented from NAIF's public format documents: the file record,
   the summary records (whose control words are doubles so they read the same on either endianness),
   and every segment's interval, target, centre, frame, type and word addresses. Checked against
@@ -1398,7 +1427,7 @@ reaches TDB, and a new crate carries the solar-system bodies with the IAU's own 
 
 ### Added
 
-- **`TDB` is a real time scale.** `stkcraft-time` used to treat it as TT; it now carries the
+- **`TDB` is a real time scale.** `stkcraft-framework-time` used to treat it as TT; it now carries the
   seven largest terms of the Fairhead & Bretagnon (1990) series in the truncated form of Kaplan
   (2005), USNO Circular 179. Tests compare it with ERFA's full series at eight epochs from 1985
   to 2025: worst disagreement 5.2 µs. `TDB → TT` is a fixed-point inversion, because the series
@@ -1455,7 +1484,7 @@ the engine's number.
 ### Added
 
 - **`stkcraft-ui-viewport`, a new crate at the UI layer** (`APP_LAYER - 1`), depending only on
-  `stkcraft-core`, `wgpu`, `egui` and `bytemuck`:
+  `stkcraft-framework-core`, `wgpu`, `egui` and `bytemuck`:
   - `camera` — a turntable camera and the four matrices the viewport needs, written out rather
     than pulled from a maths crate. `Mat4` is column-major, which is what WGSL expects.
   - `frame` — `Frame`, the whole interface between the engine and the viewport: markers, ground
@@ -1577,7 +1606,7 @@ it reports when the satellite is visible and for how long.
   - `analysis` — access over a scenario, one satellite-to-station pair at a time or all pairs.
   - `commands` — the command table: seven commands, each with an id, label, menu path,
     documented parameters, an `enabled` predicate and a `run` function.
-- **`Epoch::now()` and `Epoch::j2000()`** in `stkcraft-time`.
+- **`Epoch::now()` and `Epoch::j2000()`** in `stkcraft-framework-time`.
 - **`docs/plans/2026-11-05-engine.md`** records the arc.
 
 ### Fixed
@@ -1960,12 +1989,12 @@ rest of the product is built on. **It cannot yet propagate an orbit, find an acc
 - **Enforced asset attribution** (`cargo xtask assets`). A file with an asset extension must
   have a row in `ATTRIBUTION.md`, and a row must name a file that exists, so the table cannot
   rot in either direction.
-- **`stkcraft-core` (L0).** Typed quantities — `Angle`, `Distance`, `Velocity`, `Mass`,
+- **`stkcraft-framework-core` (L0).** Typed quantities — `Angle`, `Distance`, `Velocity`, `Mass`,
   `Duration`, `EpochOffset` — with named conversions and no `From<f64>`, so a degrees/radians
   mix-up is a compile error. A single `Error` type whose `Unsupported` variant is the only
   sanctioned way to represent an unfinished feature. A `Vector3` whose `normalized` returns
   `None` for a zero or non-finite vector rather than producing NaN.
-- **`stkcraft-time` (L1).** The reference time scales (UTC, TAI, TT, TDB, TCB, TCG, UT1, GPS)
+- **`stkcraft-framework-time` (L1).** The reference time scales (UTC, TAI, TT, TDB, TCB, TCG, UT1, GPS)
   as a type, the IAU SOFA / ERFA constants with their sources cited, and the published
   `TAI - UTC` leap-second table from the IERS `tai-utc.dat` file.
 - **`stkcraft-astro-frames` (L2).** `Rotation3`, which refuses to exist unless its rows are

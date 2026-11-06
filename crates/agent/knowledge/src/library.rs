@@ -223,7 +223,7 @@ impl Library {
     pub fn open_cached(
         directory: &Path,
         limits: Limits,
-        cache: Option<&stkcraft_storage::Cache>,
+        cache: Option<&stkcraft_framework_storage::Cache>,
     ) -> Result<Opened, String> {
         let files = scan(directory, limits)?;
         let manifest = files
@@ -712,7 +712,7 @@ mod tests {
         std::fs::write(root.join("spec.md"), "Maximum off-nadir angle 45 degrees.")
             .expect("written");
         std::fs::write(root.join("thermal.txt"), "Radiator 2.4 square metres.").expect("written");
-        let cache = stkcraft_storage::Cache::at(&cache_directory);
+        let cache = stkcraft_framework_storage::Cache::at(&cache_directory);
 
         let cold = Library::open_cached(&root, Limits::default(), Some(&cache)).expect("opened");
         assert_eq!(cold.reuse.parsed, 2, "the first open parsed nothing");
@@ -737,7 +737,7 @@ mod tests {
         std::fs::create_dir_all(&root).expect("a directory");
         std::fs::write(root.join("a.md"), "first version").expect("written");
         std::fs::write(root.join("b.md"), "second document").expect("written");
-        let cache = stkcraft_storage::Cache::at(root.join("cache"));
+        let cache = stkcraft_framework_storage::Cache::at(root.join("cache"));
         Library::open_cached(&root, Limits::default(), Some(&cache)).expect("opened");
         let cached = cache.len();
 

@@ -29,7 +29,7 @@
 //! conversion has no business knowing how a state vector was produced. Callers convert
 //! explicitly, which keeps the boundary visible.
 
-use stkcraft_core::{Distance, Error, Result, Velocity};
+use stkcraft_framework_core::{Distance, Error, Result, Velocity};
 
 use crate::precession;
 use crate::rotation::Rotation3;

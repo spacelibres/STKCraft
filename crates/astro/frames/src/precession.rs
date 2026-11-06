@@ -6,7 +6,7 @@
 //! selects with its 1980 option, and the one that belongs with the IAU-80 nutation series in
 //! [`crate::nutation`].
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 use crate::rotation::Rotation3;
 
@@ -81,7 +81,7 @@ pub fn iau_1976_matrix(ttt: f64) -> Result<Rotation3> {
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 mod tests {
-    use stkcraft_core::Vector3;
+    use stkcraft_framework_core::Vector3;
 
     use super::*;
 

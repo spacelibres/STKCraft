@@ -330,7 +330,7 @@ impl Assistant {
         ui: &mut egui::Ui,
         scenario: &Scenario,
         skills: &std::path::Path,
-        translations: &stkcraft_i18n::Translations,
+        translations: &stkcraft_framework_i18n::Translations,
         language: &str,
     ) -> Option<Scenario> {
         self.poll();
@@ -338,13 +338,13 @@ impl Assistant {
         // the answer itself is the model's text and stays in whatever language it answered in.
         macro_rules! tr {
             ($source:literal) => {
-                stkcraft_i18n::tr!(translations, language, $source)
+                stkcraft_framework_i18n::tr!(translations, language, $source)
             };
         }
         ui.heading(tr!("Assistant"));
         if self.answered > 0 {
             ui.horizontal(|ui| {
-                ui.label(stkcraft_i18n::trn!(
+                ui.label(stkcraft_framework_i18n::trn!(
                     translations,
                     language,
                     "{n} answer in this conversation",

@@ -17,7 +17,7 @@
 use core::fmt;
 use core::ops::Mul;
 
-use stkcraft_core::{Error, Result, Vector3};
+use stkcraft_framework_core::{Error, Result, Vector3};
 
 /// A rotation between two reference frames, stored as a row-major 3x3 matrix.
 #[derive(Debug, Clone, Copy, PartialEq)]

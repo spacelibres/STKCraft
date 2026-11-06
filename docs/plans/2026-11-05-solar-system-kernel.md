@@ -23,7 +23,7 @@ kernels), then the paper. "It looks right" is not evidence.
 
 Each phase passes `cargo xtask ci` on its own and lands as its own commit.
 
-### Phase 1 — TDB (`stkcraft-time`) — **done**
+### Phase 1 — TDB (`stkcraft-framework-time`) — **done**
 
 - `TDB − TT` uses the seven largest terms of the Fairhead & Bretagnon (1990) series in the
   truncated form given by Kaplan (2005), USNO Circular 179; documented as better than 10 µs over

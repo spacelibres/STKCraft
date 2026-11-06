@@ -11,9 +11,9 @@ shared checker is a bug here rather than a local preference. See
 **Every user-visible string goes through a macro:**
 
 ```rust
-stkcraft_i18n::tr!(translations, locale, "Save")
-stkcraft_i18n::trc!(translations, locale, "menu", "Open Table…")   // a context, when one English has two meanings
-stkcraft_i18n::trn!(translations, locale, "{n} satellite", "{n} satellites", count)   // a count
+stkcraft_framework_i18n::tr!(translations, locale, "Save")
+stkcraft_framework_i18n::trc!(translations, locale, "menu", "Open Table…")   // a context, when one English has two meanings
+stkcraft_framework_i18n::trn!(translations, locale, "{n} satellite", "{n} satellites", count)   // a count
 ```
 
 A string built at run time is a string no catalog can be checked against, and a string formatted

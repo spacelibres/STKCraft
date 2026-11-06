@@ -6,7 +6,7 @@
 //! actually is; the local axes that follow are what elevation and azimuth are measured
 //! against.
 
-use stkcraft_core::{Angle, Error, Result, Vector3};
+use stkcraft_framework_core::{Angle, Error, Result, Vector3};
 
 use crate::ellipsoid::Ellipsoid;
 

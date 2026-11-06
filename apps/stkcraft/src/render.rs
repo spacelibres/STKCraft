@@ -6,7 +6,7 @@
 use std::fmt::Write as _;
 
 use stkcraft_astro_engine::SatelliteAccess;
-use stkcraft_time::{Epoch, julian_to_utc_naive};
+use stkcraft_framework_time::{Epoch, julian_to_utc_naive};
 
 /// What a pass table describes, so the formatter takes one value instead of eight.
 #[derive(Debug, Clone, Copy)]
@@ -157,7 +157,7 @@ pub fn format_duration(seconds: f64) -> String {
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 mod tests {
-    use stkcraft_core::{Duration, EpochOffset};
+    use stkcraft_framework_core::{Duration, EpochOffset};
 
     use super::*;
 
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn a_pass_table_lists_every_window_with_absolute_times() {
-        let epoch = stkcraft_time::utc_from_ymd_hms(2024, 1, 1, 12, 0, 0).expect("valid");
+        let epoch = stkcraft_framework_time::utc_from_ymd_hms(2024, 1, 1, 12, 0, 0).expect("valid");
         let text = pass_table(
             Report {
                 station_name: "London",
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn no_passes_says_so_rather_than_printing_an_empty_table() {
-        let epoch = stkcraft_time::utc_from_ymd_hms(2024, 1, 1, 12, 0, 0).expect("valid");
+        let epoch = stkcraft_framework_time::utc_from_ymd_hms(2024, 1, 1, 12, 0, 0).expect("valid");
         let text = pass_table(
             Report {
                 station_name: "Nowhere",
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn the_percentage_of_the_window_is_reported() {
-        let epoch = stkcraft_time::utc_from_ymd_hms(2024, 1, 1, 0, 0, 0).expect("valid");
+        let epoch = stkcraft_framework_time::utc_from_ymd_hms(2024, 1, 1, 0, 0, 0).expect("valid");
         // 6 hours of access in a 24 hour window is 25%.
         let text = pass_table(
             Report {

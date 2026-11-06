@@ -14,7 +14,7 @@
 //! conversion happens once, in [`Frame::from_scenario`], through `as_km()`. Nothing downstream of
 //! this point can mix units up because nothing downstream of this point has units.
 
-use stkcraft_core::Distance;
+use stkcraft_framework_core::Distance;
 
 /// A satellite's marker at one instant.
 #[derive(Debug, Clone, Copy, PartialEq)]

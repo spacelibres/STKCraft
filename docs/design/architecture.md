@@ -48,7 +48,7 @@ crate must be registered in `xtask/src/layers.rs`; the task fails for a workspac
 is missing from the table.
 
 The viewport sits above `LAST_NON_UI_LAYER` because it *is* the user interface's drawing code,
-but it depends only on `stkcraft-core`: it takes a `Frame` of already-computed positions and
+but it depends only on `stkcraft-framework-core`: it takes a `Frame` of already-computed positions and
 knows nothing about satellites, elements or access. That is the boundary that makes it
 replaceable — see below.
 
@@ -94,7 +94,7 @@ survive a round trip.
 ## The leap-second table
 
 UTC is steered by inserting whole seconds, so `TAI - UTC` changes. The table in
-`stkcraft-time::leaps` is the one in the IAU SOFA / ERFA reference implementation, which in
+`stkcraft-framework-time::leaps` is the one in the IAU SOFA / ERFA reference implementation, which in
 turn comes from the IERS `tai-utc.dat` file.
 
 Two consequences follow, and both are visible in the API rather than buried:

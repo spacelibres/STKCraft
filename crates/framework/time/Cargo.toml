@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-time"
+name = "stkcraft-framework-time"
 description = "Time scales, leap seconds and epoch arithmetic for STKCraft"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-core.workspace = true
+stkcraft-framework-core.workspace = true
 chrono.workspace = true
 serde.workspace = true
 thiserror.workspace = true

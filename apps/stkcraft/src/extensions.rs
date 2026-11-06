@@ -1,7 +1,7 @@
 //! `stkcraft extensions`: what is installed, and what the contract makes of it.
 //!
 //! A package is a directory under the configuration directory's `extensions/`, named by its id,
-//! holding `extension.toml`. This command reads each one with [`stkcraft_extensions::Manifest`] and
+//! holding `extension.toml`. This command reads each one with [`stkcraft_framework_extensions::Manifest`] and
 //! reports one of three things per package: admitted, refused with the reason, or malformed with the
 //! reason.
 //!
@@ -9,7 +9,7 @@
 //! this command exists so the contract has a real consumer instead of living only in tests: a
 //! validator with no user is a validator nobody has run.
 
-use stkcraft_extensions::{Manifest, Refusal, TrustTier, third_party_enabled};
+use stkcraft_framework_extensions::{Manifest, Refusal, TrustTier, third_party_enabled};
 
 /// The file a package's manifest lives in.
 pub const MANIFEST_FILE: &str = "extension.toml";

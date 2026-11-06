@@ -92,8 +92,8 @@ impl Paths {
     ///
     /// # Errors
     ///
-    /// [`stkcraft_core::Error::NotFound`] when the platform has no data directory to use.
-    pub fn for_user() -> Result<Self, stkcraft_core::Error> {
+    /// [`stkcraft_framework_core::Error::NotFound`] when the platform has no data directory to use.
+    pub fn for_user() -> Result<Self, stkcraft_framework_core::Error> {
         if let Some(explicit) = std::env::var_os("STKCRAFT_DATA") {
             return Ok(Self {
                 root: PathBuf::from(explicit),
@@ -111,7 +111,7 @@ impl Paths {
                     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
                 })
         };
-        let base = base.ok_or_else(|| stkcraft_core::Error::NotFound {
+        let base = base.ok_or_else(|| stkcraft_framework_core::Error::NotFound {
             what: "a platform data directory (set STKCRAFT_DATA to choose one)".to_owned(),
         })?;
         Ok(Self {

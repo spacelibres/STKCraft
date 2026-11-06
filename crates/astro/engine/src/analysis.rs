@@ -15,8 +15,8 @@
 //! a weaker guarantee. The guarantee is worth more.
 
 use stkcraft_astro_access::{AccessProblem, AccessWindow};
-use stkcraft_core::{Duration, EpochOffset, Error, Result};
-use stkcraft_time::Epoch;
+use stkcraft_framework_core::{Duration, EpochOffset, Error, Result};
+use stkcraft_framework_time::Epoch;
 
 use crate::propagate::{EARTH, Propagator};
 use crate::scenario::{SatelliteId, Scenario, StationId};
@@ -135,7 +135,7 @@ pub fn compute_all_access(scenario: &Scenario, step: Duration) -> Result<Vec<Sat
 mod tests {
     use stkcraft_astro_access::Sensor;
     use stkcraft_astro_sgp4::TwoLineElement;
-    use stkcraft_core::Angle;
+    use stkcraft_framework_core::Angle;
 
     use super::*;
     use stkcraft_astro_access::GroundSite;

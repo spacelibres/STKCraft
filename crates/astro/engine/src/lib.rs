@@ -7,7 +7,7 @@
 //!
 //! The layers below supply the physics:
 //!
-//! - `stkcraft-time` — epochs, scales and leap seconds.
+//! - `stkcraft-framework-time` — epochs, scales and leap seconds.
 //! - `stkcraft-astro-sgp4` — a two-line element set to a TEME state.
 //! - `stkcraft-astro-frames` — TEME to GCRF and to Earth-fixed.
 //! - `stkcraft-astro-access` — a station, a sensor and a position to access windows.

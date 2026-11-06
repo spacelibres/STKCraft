@@ -10,7 +10,7 @@
 
 use core::fmt;
 
-use stkcraft_core::Error;
+use stkcraft_framework_core::Error;
 
 /// A failure to propagate, with the reference implementation's code where one exists.
 ///

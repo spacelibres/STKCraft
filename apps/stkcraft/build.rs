@@ -40,7 +40,7 @@ fn main() {
     entries.sort();
 
     let mut source = String::from("/// The catalogs this build embeds, `(locale, text)`.\n");
-    source.push_str("pub const EMBEDDED: stkcraft_i18n::Embedded = &[\n");
+    source.push_str("pub const EMBEDDED: stkcraft_framework_i18n::Embedded = &[\n");
     for (locale, path) in &entries {
         let _ = writeln!(source, "    ({locale:?}, include_str!({path:?})),");
     }
@@ -82,7 +82,7 @@ fn interface_sources(directory: &Path) -> Vec<(String, String)> {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
-        for source in stkcraft_i18n::extract::sources(&text) {
+        for source in stkcraft_framework_i18n::extract::sources(&text) {
             let entry = (source.context, source.text);
             if !sources.contains(&entry) {
                 sources.push(entry);

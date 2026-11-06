@@ -9,7 +9,7 @@
 //! convention against a known transform, since a transposed matrix still "looks like a matrix"
 //! and would only show up as geometry in the wrong place.
 
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 /// A 4x4 matrix in column-major order, ready to upload.
 pub type Mat4 = [[f32; 4]; 4];

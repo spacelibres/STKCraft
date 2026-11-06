@@ -13,7 +13,7 @@
 //! with a hand-written closure and no orbital machinery, which is exactly what the tests below
 //! do.
 
-use stkcraft_core::{Duration, EpochOffset, Error, Result};
+use stkcraft_framework_core::{Duration, EpochOffset, Error, Result};
 
 use crate::ellipsoid::Ellipsoid;
 use crate::geometry::look_angle;
@@ -110,7 +110,7 @@ pub fn fixed_target_windows(
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 mod tests {
-    use stkcraft_core::Angle;
+    use stkcraft_framework_core::Angle;
 
     use super::*;
     use crate::window::DEFAULT_STEP;

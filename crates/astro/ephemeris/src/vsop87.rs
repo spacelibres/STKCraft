@@ -27,8 +27,8 @@
 //! VSOP-style guess for it would be wrong by degrees. The Moon is refused by name.
 
 use stkcraft_astro_body::Body;
-use stkcraft_core::{Error, Result};
-use stkcraft_time::{Epoch, JD_J2000, TimeScale};
+use stkcraft_framework_core::{Error, Result};
+use stkcraft_framework_time::{Epoch, JD_J2000, TimeScale};
 
 use crate::generated_vsop;
 use crate::spk::{Ephemeris, Origin, StateVector};
@@ -173,7 +173,7 @@ impl Ephemeris for Vsop87Ephemeris {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use stkcraft_time::JulianDate;
+    use stkcraft_framework_time::JulianDate;
 
     fn tdb(et: f64) -> Epoch {
         Epoch::from_julian(

@@ -13,8 +13,8 @@ range limits), the window finder (root isolation plus bracketing, not naive samp
 finally the access result type. Every piece is held to a hand-computable case, as `AGENTS.md`
 requires, and the window finder is held to a case whose answer is known analytically.
 
-**Tech Stack:** Rust 2024, `stkcraft-core` (`Angle`, `Distance`, `Duration`, `Vector3`,
-`Result`), `stkcraft-time` (`Epoch`, `TimeScale`), `stkcraft-astro-frames` (`CartesianState`,
+**Tech Stack:** Rust 2024, `stkcraft-framework-core` (`Angle`, `Distance`, `Duration`, `Vector3`,
+`Result`), `stkcraft-framework-time` (`Epoch`, `TimeScale`), `stkcraft-astro-frames` (`CartesianState`,
 `teme_to_itrf`). No new dependencies.
 
 ## Global Constraints
@@ -69,7 +69,7 @@ handled rather than skipped.
 - Modify: `Cargo.toml` (workspace member and dependency)
 
 **Interfaces:**
-- Consumes: `stkcraft_core::{Angle, Distance, Error, Result, Vector3}`.
+- Consumes: `stkcraft_framework_core::{Angle, Distance, Error, Result, Vector3}`.
 - Produces:
 
 ```rust
@@ -601,4 +601,4 @@ against a sampling implementation.
 
 **Type consistency.** `Topocentric` is produced by Task 3 and consumed by Task 4's
 `Sensor::accepts`. `EpochOffset` is used for window boundaries throughout, matching
-`stkcraft_core`'s existing type, so no bare `f64` seconds cross a boundary.
+`stkcraft_framework_core`'s existing type, so no bare `f64` seconds cross a boundary.

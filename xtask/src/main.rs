@@ -519,8 +519,8 @@ fn collect_assets(dir: &Path, skip: &[String], visit: &mut dyn FnMut(&Path)) -> 
 /// one has pulled in a file-system or threading dependency by accident. The app and xtask
 /// are deliberately absent: the first is the native shell, the second is a build tool.
 const PORTABLE_CRATES: [&str; 6] = [
-    "stkcraft-core",
-    "stkcraft-time",
+    "stkcraft-framework-core",
+    "stkcraft-framework-time",
     "stkcraft-astro-frames",
     "stkcraft-astro-sgp4",
     "stkcraft-astro-access",
@@ -1271,7 +1271,7 @@ mod tests {
     }
 
     #[test]
-    fn a_group_crate_is_named_for_its_group_and_the_platform_is_not() {
+    fn a_group_crate_is_named_for_its_group_including_the_platform() {
         // The two halves of the rule: a grouped crate spells the group out, and the platform — the
         // part a sibling app shares — does not.
         assert_eq!(
@@ -1288,7 +1288,7 @@ mod tests {
         );
         assert_eq!(
             layers::implied_name("crates/framework/time").as_deref(),
-            Some("stkcraft-time")
+            Some("stkcraft-framework-time")
         );
         // Paths outside `crates/` are named by their own rule, and a path that is not a crate at all
         // yields nothing rather than a guess.

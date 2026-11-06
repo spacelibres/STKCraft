@@ -8,10 +8,10 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-core.workspace = true
+stkcraft-framework-core.workspace = true
 # A station on another planet needs that body's ellipsoid and its IAU rotation model.
 stkcraft-astro-body.workspace = true
-stkcraft-time.workspace = true
+stkcraft-framework-time.workspace = true
 serde.workspace = true
 
 [lints]

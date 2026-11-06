@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension as _, params};
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 use crate::schema::{SCHEMA_VERSION, migration};
 

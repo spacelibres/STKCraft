@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 
 use stkcraft_astro_access::Sensor;
 use stkcraft_astro_sgp4::TwoLineElement;
-use stkcraft_core::{Angle, Duration, Error, Result};
+use stkcraft_framework_core::{Angle, Duration, Error, Result};
 
 use crate::analysis::{SatelliteAccess, compute_all_access};
 use crate::central::PlanetOrbit;
@@ -619,7 +619,7 @@ const BUILTIN: [Builtin; 8] = [
             // its document used; converting once here keeps the conversion out of the sampler.
             let epoch_tdb = scenario
                 .epoch
-                .to_scale(stkcraft_time::TimeScale::Tdb, None)?;
+                .to_scale(stkcraft_framework_time::TimeScale::Tdb, None)?;
             let orbit = PlanetOrbit::circular(body, radius_km, inclination.as_rad(), epoch_tdb)?;
             let access = stkcraft_astro_access::PlanetAccess {
                 body,

@@ -105,9 +105,9 @@ cannot justify.
 STKCraft is an early skeleton. What exists today:
 
 - The workspace, the `cargo xtask` gate, the enforced layering and the shared CI wiring.
-- `stkcraft-core`: typed units, the error type, and a 3D vector that returns `Option` rather
+- `stkcraft-framework-core`: typed units, the error type, and a 3D vector that returns `Option` rather
   than NaN when a direction is undefined.
-- `stkcraft-time`: the IAU time scales, the published leap-second table with a confidence
+- `stkcraft-framework-time`: the IAU time scales, the published leap-second table with a confidence
   report, and two-part Julian dates precise to well under a microsecond.
 - `stkcraft-astro-frames`: rotations that refuse to exist unless they are proper rotations.
 

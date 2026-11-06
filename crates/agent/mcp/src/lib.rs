@@ -40,8 +40,8 @@ use serde_json::{Value, json};
 use stkcraft_astro_engine::commands::{Arg, Args, Parameter, ParameterKind, Registry};
 use stkcraft_astro_engine::scenario::Scenario;
 use stkcraft_astro_engine::{PlanetPass, SatelliteAccess};
-use stkcraft_core::Angle;
-use stkcraft_time::{Epoch, julian_to_utc_naive};
+use stkcraft_framework_core::Angle;
+use stkcraft_framework_time::{Epoch, julian_to_utc_naive};
 
 /// The MCP revision this server implements.
 ///

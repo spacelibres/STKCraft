@@ -5,7 +5,7 @@
 //! the site's local east, north and up axes, so it depends on the frame constructed in
 //! [`crate::site`] being right; the tests here are chosen to catch it being wrong.
 
-use stkcraft_core::{Angle, Distance, Vector3};
+use stkcraft_framework_core::{Angle, Distance, Vector3};
 
 use crate::site::LocalFrame;
 
@@ -86,7 +86,7 @@ pub fn look_angle(frame: &LocalFrame, site: [f64; 3], target: [f64; 3]) -> Optio
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 mod tests {
-    use stkcraft_core::Angle;
+    use stkcraft_framework_core::Angle;
 
     use super::*;
     use crate::ellipsoid::Ellipsoid;

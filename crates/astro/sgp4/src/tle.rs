@@ -23,8 +23,8 @@
 //! the `twoline2rv` reader of the AIAA 2006-6753 reference implementation.
 
 use serde::{Deserialize, Serialize};
-use stkcraft_core::{Angle, Error, Result};
-use stkcraft_time::{Epoch, JulianDate, TimeScale};
+use stkcraft_framework_core::{Angle, Error, Result};
+use stkcraft_framework_time::{Epoch, JulianDate, TimeScale};
 
 use crate::elements::Elements;
 

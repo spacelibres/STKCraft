@@ -20,7 +20,7 @@ mod vectors;
 #[cfg(test)]
 #[expect(clippy::expect_used, clippy::panic)]
 mod verification {
-    use stkcraft_core::Duration;
+    use stkcraft_framework_core::Duration;
 
     use crate::model::Satellite;
     use crate::tle::TwoLineElement;
@@ -185,7 +185,7 @@ mod verification {
     ///
     /// The three `333xx` element sets carry wrong checksums in the published file by design,
     /// so the checksum is recomputed first and the orbital content is left untouched.
-    fn refusal_for(catalog: &str) -> Option<stkcraft_core::Error> {
+    fn refusal_for(catalog: &str) -> Option<stkcraft_framework_core::Error> {
         let case = CASES
             .iter()
             .find(|case| case.line2.get(2..7).map(str::trim) == Some(catalog))

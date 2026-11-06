@@ -8,10 +8,10 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-core.workspace = true
+stkcraft-framework-core.workspace = true
 stkcraft-astro-engine.workspace = true
 stkcraft-agent-knowledge.workspace = true
-stkcraft-time.workspace = true
+stkcraft-framework-time.workspace = true
 serde_json.workspace = true
 
 [lints]

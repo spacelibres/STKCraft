@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-storage"
+name = "stkcraft-framework-storage"
 description = "The record, the cache and the vector store: one crate owns persistence"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-core.workspace = true
+stkcraft-framework-core.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

@@ -12,7 +12,7 @@ publish = false
 serde_json.workspace = true
 stkcraft-agent-runtime.workspace = true
 stkcraft-astro-engine.workspace = true
-stkcraft-i18n.workspace = true
+stkcraft-framework-i18n.workspace = true
 toml = "0.8"
 
 [lints]

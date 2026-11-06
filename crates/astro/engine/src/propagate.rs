@@ -24,8 +24,8 @@ use stkcraft_astro_frames::{
     CartesianState, EarthOrientation, EquinoxTerms, teme_to_gcrf, teme_to_itrf,
 };
 use stkcraft_astro_sgp4::{Elements, Satellite, StateVector, TwoLineElement};
-use stkcraft_core::{Error, Result};
-use stkcraft_time::Epoch;
+use stkcraft_framework_core::{Error, Result};
+use stkcraft_framework_time::Epoch;
 
 /// A satellite prepared to propagate, with its frame context.
 #[derive(Debug, Clone)]
@@ -112,7 +112,7 @@ impl Propagator {
     pub fn gcrf(&mut self, at: Epoch) -> Result<CartesianState> {
         let teme = self.teme(at)?;
         let ttt = at
-            .to_scale(stkcraft_time::TimeScale::Tt, None)?
+            .to_scale(stkcraft_framework_time::TimeScale::Tt, None)?
             .julian()
             .centuries_since_j2000();
         teme_to_gcrf(ttt, &cartesian(&teme))
@@ -128,7 +128,7 @@ impl Propagator {
     /// As [`Self::teme`] and [`teme_to_itrf`].
     pub fn itrf(&mut self, at: Epoch) -> Result<[f64; 3]> {
         let state = self.itrf_state(at)?;
-        Ok(state.position.map(stkcraft_core::Distance::as_km))
+        Ok(state.position.map(stkcraft_framework_core::Distance::as_km))
     }
 
     /// The Earth-fixed state at an instant, km and km/s.
@@ -139,7 +139,7 @@ impl Propagator {
     pub fn itrf_state(&mut self, at: Epoch) -> Result<CartesianState> {
         let teme = self.teme(at)?;
         let ttt = at
-            .to_scale(stkcraft_time::TimeScale::Tt, None)?
+            .to_scale(stkcraft_framework_time::TimeScale::Tt, None)?
             .julian()
             .centuries_since_j2000();
         // The Earth orientation parameters carry their own UT1 offset, so the UT1 Julian Date
@@ -185,7 +185,7 @@ pub const EARTH: Ellipsoid = Ellipsoid::WGS84;
 #[expect(clippy::expect_used)]
 mod tests {
     use stkcraft_astro_sgp4::TwoLineElement;
-    use stkcraft_core::{Angle, Distance};
+    use stkcraft_framework_core::{Angle, Distance};
 
     use super::*;
 
@@ -220,7 +220,7 @@ mod tests {
         let mut p = propagator();
         // Stay on the element set's own scale: `seconds_until` refuses to subtract across
         // scales, which is the right default and is what caught this test when it tried.
-        let epoch_plus = stkcraft_time::Epoch::from_julian(
+        let epoch_plus = stkcraft_framework_time::Epoch::from_julian(
             p.epoch().julian().plus_seconds(600.0),
             p.epoch().scale(),
         );
@@ -254,7 +254,7 @@ mod tests {
         let mut worst = 0.0_f64;
         for hour in 1..=24 {
             let minutes = f64::from(hour) * 60.0;
-            let at = stkcraft_time::Epoch::from_julian(
+            let at = stkcraft_framework_time::Epoch::from_julian(
                 p.epoch().julian().plus_days(minutes / 1_440.0),
                 p.epoch().scale(),
             );

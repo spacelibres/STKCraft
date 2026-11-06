@@ -35,8 +35,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use stkcraft_i18n::Source as Extracted;
-use stkcraft_i18n::catalog::{self, Catalog, Row};
+use stkcraft_framework_i18n::Source as Extracted;
+use stkcraft_framework_i18n::catalog::{self, Catalog, Row};
 
 /// The directory the catalogs live in, relative to the workspace root.
 pub const LOCALES: &str = "share/locales";
@@ -229,7 +229,7 @@ fn extract_sources(root: &Path) -> Result<BTreeMap<Source, usize>, String> {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
-        for source in stkcraft_i18n::extract::sources(&text) {
+        for source in stkcraft_framework_i18n::extract::sources(&text) {
             *sources.entry(source).or_insert(0) += 1;
         }
     }
@@ -416,8 +416,8 @@ fn translate(
         // nobody can read.
         rows.insert(
             (
-                stkcraft_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
-                stkcraft_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
+                stkcraft_framework_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
+                stkcraft_framework_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
             ),
             translated_name.clone(),
         );
@@ -502,8 +502,8 @@ fn write_catalog(
     // translated catalog is about translations and not about row order.
     rows.sort_by(|a, b| (a.0).cmp(b.0));
     let name_row = (
-        stkcraft_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
-        stkcraft_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
+        stkcraft_framework_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
+        stkcraft_framework_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
     );
     if let Some(translation) = rows
         .iter()
@@ -585,8 +585,8 @@ mod tests {
         let mut rows = BTreeMap::new();
         rows.insert(
             (
-                stkcraft_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
-                stkcraft_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
+                stkcraft_framework_i18n::LANGUAGE_NAME_CONTEXT.to_owned(),
+                stkcraft_framework_i18n::LANGUAGE_NAME_SOURCE.to_owned(),
             ),
             "Deutsch".to_owned(),
         );

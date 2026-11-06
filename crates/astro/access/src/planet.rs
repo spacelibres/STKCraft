@@ -18,8 +18,8 @@
 //! 0.0013° in that time, which is less than the model's own error). Nothing else is approximated.
 
 use stkcraft_astro_body::Body;
-use stkcraft_core::{Error, Result};
-use stkcraft_time::Epoch;
+use stkcraft_framework_core::{Error, Result};
+use stkcraft_framework_time::Epoch;
 
 use crate::ellipsoid::Ellipsoid;
 use crate::problem::AccessProblem;
@@ -81,7 +81,7 @@ impl PlanetAccess {
     /// [`Error::Invalid`] for an epoch that is not TDB, since the orientation model would otherwise
     /// be evaluated at the wrong argument by up to a millisecond.
     pub fn visible_at(&self, target_inertial: [f64; 3], at: Epoch) -> Result<Option<bool>> {
-        if at.scale() != stkcraft_time::TimeScale::Tdb {
+        if at.scale() != stkcraft_framework_time::TimeScale::Tdb {
             return Err(Error::invalid(
                 "planetary access epoch",
                 format!(
@@ -105,12 +105,12 @@ impl PlanetAccess {
 #[expect(clippy::expect_used)]
 mod tests {
     use super::*;
-    use stkcraft_core::Angle;
-    use stkcraft_time::{JD_J2000, TimeScale};
+    use stkcraft_framework_core::Angle;
+    use stkcraft_framework_time::{JD_J2000, TimeScale};
 
     fn tdb(seconds: f64) -> Epoch {
         Epoch::from_julian(
-            stkcraft_time::JulianDate::from_parts(JD_J2000, seconds / 86_400.0),
+            stkcraft_framework_time::JulianDate::from_parts(JD_J2000, seconds / 86_400.0),
             TimeScale::Tdb,
         )
     }

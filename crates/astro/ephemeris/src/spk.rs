@@ -42,8 +42,8 @@
 use std::path::Path;
 
 use stkcraft_astro_body::Body;
-use stkcraft_core::{Error, Result};
-use stkcraft_time::{Epoch, JD_J2000, TimeScale};
+use stkcraft_framework_core::{Error, Result};
+use stkcraft_framework_time::{Epoch, JD_J2000, TimeScale};
 
 use crate::chebyshev;
 use crate::daf::Daf;
@@ -1266,7 +1266,7 @@ mod tests {
 
     fn tdb(et: f64) -> Epoch {
         Epoch::from_julian(
-            stkcraft_time::JulianDate::from_parts(JD_J2000, et / 86_400.0),
+            stkcraft_framework_time::JulianDate::from_parts(JD_J2000, et / 86_400.0),
             TimeScale::Tdb,
         )
     }
@@ -1290,7 +1290,7 @@ mod tests {
             .state(
                 Body::Mars,
                 Epoch::from_julian(
-                    stkcraft_time::JulianDate::from_parts(JD_J2000, 0.0),
+                    stkcraft_framework_time::JulianDate::from_parts(JD_J2000, 0.0),
                     TimeScale::Tdb,
                 ),
             )

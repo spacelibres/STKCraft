@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use stkcraft_astro_access::{GroundSite, Sensor};
 use stkcraft_astro_body::Body;
 use stkcraft_astro_sgp4::TwoLineElement;
-use stkcraft_core::{Error, Result};
-use stkcraft_time::Epoch;
+use stkcraft_framework_core::{Error, Result};
+use stkcraft_framework_time::Epoch;
 
 /// The central body a scenario without one is about.
 const fn default_central_body() -> Body {
@@ -268,7 +268,7 @@ impl Scenario {
 #[expect(clippy::expect_used)]
 mod tests {
     use stkcraft_astro_access::Ellipsoid;
-    use stkcraft_core::{Angle, Distance};
+    use stkcraft_framework_core::{Angle, Distance};
 
     use super::*;
 

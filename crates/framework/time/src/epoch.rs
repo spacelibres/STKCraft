@@ -13,7 +13,7 @@
 use core::fmt;
 
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, TimeZone, Utc};
-use stkcraft_core::{Error, Result};
+use stkcraft_framework_core::{Error, Result};
 
 use crate::leaps::{LeapLookup, tai_minus_utc};
 use crate::scales::TimeScale;
@@ -54,7 +54,7 @@ fn tai_minus_utc_at(jd: JulianDate) -> Result<f64> {
 /// the scalar:
 ///
 /// ```
-/// # use stkcraft_time::JulianDate;
+/// # use stkcraft_framework_time::JulianDate;
 /// // J2000.0 is JD 2451545.0 = 2451545 whole days + 0.0 day.
 /// let jd = JulianDate::from_parts(2_451_545.0, 0.0);
 /// assert!((jd.sum() - 2_451_545.0).abs() < 1e-12);

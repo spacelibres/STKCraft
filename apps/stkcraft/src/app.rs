@@ -23,8 +23,8 @@ use std::time::Instant;
 
 use eframe::egui;
 use stkcraft_astro_engine::{Registry, Scenario};
-use stkcraft_core::Angle;
-use stkcraft_time::Epoch;
+use stkcraft_framework_core::Angle;
+use stkcraft_framework_time::Epoch;
 use stkcraft_ui_viewport::scene::SceneData;
 use stkcraft_ui_viewport::{Camera, Frame, SceneCallback};
 
@@ -67,7 +67,7 @@ pub struct App {
     /// The assistant panel: a model driving this scenario through the engine's commands.
     assistant: Assistant,
     /// The interface catalogs this build embedded.
-    translations: stkcraft_i18n::Translations,
+    translations: stkcraft_framework_i18n::Translations,
     /// The interface language, as a catalog code. English is `"en"`.
     language: String,
     /// What the window writes back when a preference changes.
@@ -91,9 +91,9 @@ impl App {
         // Embedded catalogs first, then the ones this person generated: a catalog on disk is newer
         // than the one the binary was built with, and a language added without a rebuild works.
         let mut translations =
-            stkcraft_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+            stkcraft_framework_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
         for (locale, text) in crate::prefs::user_catalogs() {
-            let (catalog, _problems) = stkcraft_i18n::parse(&locale, &text);
+            let (catalog, _problems) = stkcraft_framework_i18n::parse(&locale, &text);
             translations.add(&catalog);
         }
         // The first run follows the system; an explicit choice always wins, because a person who
@@ -101,7 +101,9 @@ impl App {
         let requested = prefs.language.clone().or_else(system_locale);
         let language = requested
             .as_deref()
-            .map_or(stkcraft_i18n::Language::En, |tag| translations.resolve(tag))
+            .map_or(stkcraft_framework_i18n::Language::En, |tag| {
+                translations.resolve(tag)
+            })
             .code()
             .to_owned();
         Self {
@@ -145,9 +147,9 @@ impl App {
     /// than asking for a restart.
     fn reload_catalogs(&mut self) {
         let mut translations =
-            stkcraft_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+            stkcraft_framework_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
         for (locale, text) in crate::prefs::user_catalogs() {
-            let (catalog, _problems) = stkcraft_i18n::parse(&locale, &text);
+            let (catalog, _problems) = stkcraft_framework_i18n::parse(&locale, &text);
             translations.add(&catalog);
         }
         self.translations = translations;
@@ -200,7 +202,7 @@ impl App {
     ///
     /// The choice is written immediately rather than on exit: a window closed by a crash should not
     /// forget the language someone just picked, and one file write per click is nothing.
-    fn set_language(&mut self, language: &stkcraft_i18n::Language) {
+    fn set_language(&mut self, language: &stkcraft_framework_i18n::Language) {
         language.code().clone_into(&mut self.language);
         // The font stack is language-dependent (Han glyph shapes), so the next frame rebuilds it.
         self.fonts_for = None;
@@ -363,7 +365,7 @@ impl App {
         let language = self.language.clone();
         macro_rules! tr {
             ($source:literal) => {
-                stkcraft_i18n::tr!(&self.translations, &language, $source)
+                stkcraft_framework_i18n::tr!(&self.translations, &language, $source)
             };
         }
         ui.heading("STKCraft");
@@ -396,7 +398,7 @@ impl App {
         ui.separator();
         ui.heading(tr!("Scenario"));
         let satellites = self.scenario.satellites.len() as u64;
-        ui.label(stkcraft_i18n::trn!(
+        ui.label(stkcraft_framework_i18n::trn!(
             &self.translations,
             &language,
             "{n} satellite",
@@ -411,7 +413,7 @@ impl App {
             });
         }
         let stations = self.scenario.stations.len() as u64;
-        ui.label(stkcraft_i18n::trn!(
+        ui.label(stkcraft_framework_i18n::trn!(
             &self.translations,
             &language,
             "{n} station",
@@ -490,8 +492,8 @@ impl App {
 
         ui.separator();
         ui.heading(tr!("Language"));
-        let current =
-            stkcraft_i18n::Language::parse(&language).unwrap_or(stkcraft_i18n::Language::En);
+        let current = stkcraft_framework_i18n::Language::parse(&language)
+            .unwrap_or(stkcraft_framework_i18n::Language::En);
         let mut chosen = current.clone();
         egui::ComboBox::from_id_salt("language-picker")
             .selected_text(self.translations.language_name(current.code()))
@@ -507,7 +509,7 @@ impl App {
                     if self.translations.has_locale(code) {
                         continue;
                     }
-                    let language = stkcraft_i18n::Language::Other(code.to_owned());
+                    let language = stkcraft_framework_i18n::Language::Other(code.to_owned());
                     ui.selectable_value(
                         &mut chosen,
                         language,
@@ -521,7 +523,8 @@ impl App {
 
         // Self-translation: offered only when there is something to translate and English is not the
         // answer someone wants.
-        if !stkcraft_i18n::Language::parse(&language).is_some_and(|language| language.is_english())
+        if !stkcraft_framework_i18n::Language::parse(&language)
+            .is_some_and(|language| language.is_english())
         {
             let missing = crate::translate::missing(&self.translations, &language);
             if self.translation.is_some() {
@@ -530,7 +533,7 @@ impl App {
                     ui.label(tr!("Translating with your key…"));
                 });
             } else if missing > 0 {
-                let label = stkcraft_i18n::trn!(
+                let label = stkcraft_framework_i18n::trn!(
                     &self.translations,
                     &language,
                     "Translate {n} string with my key",
@@ -827,7 +830,8 @@ mod tests {
         // `cargo xtask i18n` is the gate; this is the smoke test that the catalogs a build embeds
         // actually answer. A catalog that parses in the task but not here would be a build-input
         // problem, which is exactly the failure mode of an embedded file.
-        let translations = stkcraft_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+        let translations =
+            stkcraft_framework_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
         for locale in translations.locales() {
             assert!(
                 translations.len(locale) > 0,
