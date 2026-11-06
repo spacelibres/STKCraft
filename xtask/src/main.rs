@@ -61,6 +61,7 @@ fn main() -> ExitCode {
         Some("papers" | "fetch-papers") => task_fetch_papers(args.get(1..).unwrap_or_default()),
         Some("math-regions") => task_math_regions(args.get(1..).unwrap_or_default()),
         Some("formulas") => task_formulas(args.get(1..).unwrap_or_default()),
+        Some("mathlib") => task_mathlib(args.get(1..).unwrap_or_default()),
         Some("standards" | "fetch-standards") => {
             task_fetch_standards(args.get(1..).unwrap_or_default())
         }
@@ -131,9 +132,11 @@ Tasks:
   standards download every CCSDS publication, verified (the set we align to)
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
+  mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
   standards download every CCSDS publication, verified (the set we align to)
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
+  mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
   fetch-data  download the ephemeris kernels and tables, verified
   lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
@@ -879,6 +882,78 @@ fn task_fetch_data(args: &[String]) -> Result<(), String> {
 /// that a region covers is a false positive, and every `formula` row that no region covers is a miss, and
 /// both are printed with the row that caused them. The exit status is the count of failures, so a caller
 /// (and a person) can tell "measured, and wrong" from "measured, and right".
+/// Read a Mathlib checkout into the declaration lexicon, as TSV.
+///
+/// The lexicon is what the formula classifier scores against (`docs/design/mathematics.md`): names,
+/// statements and docstrings, with the module path giving the taxonomy. It is read from a checkout the
+/// person supplies — `MATHLIB_DIR`, or the one argument — because Mathlib is a gigabyte of Lean and this
+/// repository does not carry it.
+///
+/// A row is `name<TAB>kind<TAB>domain<TAB>module<TAB>digest<TAB>statement<TAB>docstring`, and the file goes
+/// to `data/mathlib/declarations.tsv` unless a directory is named.
+fn task_mathlib(args: &[String]) -> Result<(), String> {
+    let root = workspace_root();
+    let checkout = args
+        .iter()
+        .find(|argument| !argument.starts_with('-'))
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("MATHLIB_DIR").map(std::path::PathBuf::from))
+        .ok_or_else(|| {
+            "mathlib needs a checkout: `MATHLIB_DIR=<mathlib4> cargo xtask mathlib`".to_owned()
+        })?;
+    if !checkout.is_dir() {
+        return Err(format!("{} is not a directory", checkout.display()));
+    }
+    let started = std::time::Instant::now();
+    let declarations = stkcraft_agent_knowledge::mathlib::parse_tree(&checkout);
+    if declarations.is_empty() {
+        return Err(format!(
+            "no declarations under {} — is that a Mathlib checkout?",
+            checkout.display()
+        ));
+    }
+    let directory = root.join("data/mathlib");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+    let path = directory.join("declarations.tsv");
+    let mut text = String::from("name\tkind\tdomain\tmodule\tdigest\tstatement\tdocstring\n");
+    for declaration in &declarations {
+        let clean = |field: &str| field.replace(['\t', '\n'], " ");
+        let _ = std::fmt::Write::write_fmt(
+            &mut text,
+            format_args!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                clean(&declaration.name),
+                clean(&declaration.kind),
+                clean(&declaration.domain),
+                clean(&declaration.module),
+                declaration.digest,
+                clean(&declaration.statement),
+                clean(&declaration.docstring)
+            ),
+        );
+    }
+    fs::write(&path, text)
+        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    let mut domains: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for declaration in &declarations {
+        *domains.entry(declaration.domain.as_str()).or_default() += 1;
+    }
+    println!(
+        "mathlib: {} declaration(s) in {} domain(s), read in {:.1} s, written to {}",
+        declarations.len(),
+        domains.len(),
+        started.elapsed().as_secs_f64(),
+        path.display()
+    );
+    let mut listed: Vec<(&str, usize)> = domains.into_iter().collect();
+    listed.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    for (domain, count) in listed.iter().take(8) {
+        println!("  {domain}: {count}");
+    }
+    Ok(())
+}
+
 fn task_formulas(_args: &[String]) -> Result<(), String> {
     let root = workspace_root();
     let table = fs::read_to_string(root.join("share/math/transcriptions.tsv"))

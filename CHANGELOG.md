@@ -9,6 +9,47 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.66] — Mathlib becomes a lexicon this program can hold
+
+Step 2 of the mathematics design, first half: `crates/agent/knowledge/src/mathlib.rs` reads Lean source into
+a table of **declarations** — name, kind, module, the taxonomy the module implies, statement, docstring and
+a SHA-256 of the header — and `cargo xtask mathlib` turns a checkout into `data/mathlib/declarations.tsv`.
+
+Nothing of Lean is linked and no proof is checked. This is a lexicon of names, statements and purposes,
+which is what a classifier scores against and what a Rust program can hold. The parser is deliberately
+line-oriented about **declaration headers**, and the module documentation says so: Lean lets a declaration
+run for a hundred lines, and this records the opening rather than pretending to understand the body.
+
+### Verified on real Mathlib source, not only a fixture
+
+Two files were fetched from `leanprover-community/mathlib4` and the reader was run over them:
+
+```
+$ MATHLIB_DIR=/tmp/ml-parent cargo xtask mathlib
+mathlib: 23 declaration(s) in 1 domain(s), read in 0.0 s, written to data/mathlib/declarations.tsv
+  Analysis: 23
+
+$ head -2 data/mathlib/declarations.tsv
+ContDiff.sqrt  theorem  Analysis  Mathlib/Analysis/SpecialFunctions/Sqrt.lean  4db10e…  (hf : ContDi…
+```
+
+The test `the_parser_reads_a_real_mathlib_file` asserts the declarations the file actually holds
+(`sqPartialHomeomorph`, `hasDerivAt_sqrt`, `deriv_sqrt`), that every row is in `Analysis`, that every digest
+is 64 hex characters, and that **at least one docstring was read** — the docstring is the point of the row:
+it is what says what a concept is for.
+
+Two defects were found by running it rather than by reading the code: the module path came out as
+`Mathlib/Mathlib/…` on a checkout that is already laid out as `Mathlib/…`, and the first test asserted a
+declaration name that file does not contain (`sqrt`) because I had guessed at Mathlib's contents instead of
+looking.
+
+### Not built yet
+
+- **The classifier**: normalising a formula's operators, scoring candidates against this table, recording
+  `mathlib_name/score/domain/classifier`. The acceptance table with rows that must classify as *no match*
+  comes with it.
+- `verify-formulas`, and the linked-OCR feature with its CI leg.
+
 ## [0.1.65] — The table proves both directions now
 
 `share/math/transcriptions.tsv` has **positive rows**: equations the pipeline must find, not only regions it
