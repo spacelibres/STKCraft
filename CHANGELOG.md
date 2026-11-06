@@ -9,6 +9,38 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.40] — The order of work is written down
+
+Forty releases in, the plan lived in one place only: the changelog, newest first, which says what
+happened and not what is next. `AGENTS.md` has told every session to start by reading a `ROADMAP.md`
+that did not exist. This release writes it.
+
+`ROADMAP.md` states three things:
+
+- **Where the project is**, as a table of areas and the releases that delivered them — time and SGP4
+  against their published references, ephemerides, access geometry, the agent, i18n, the knowledge
+  base, PDF reading, the control channel — so a reader can see the whole of it in one screen instead
+  of reading 47 changelog sections.
+- **What "done" means for a step**: the gate green, a numerical layer matching a published reference,
+  and the release itself producing the evidence — a screenshot, a CLI transcript, a citation — rather
+  than a changelog claiming it.
+- **What is next, in order, with the reason it is next and the test it has to pass.** The window
+  serving the control channel and `ui.screenshot`; sensors and targets, which is the access the
+  product exists for; a timeline a person can read; recall beyond exact words over the corpus; numbers
+  and direction in every language.
+
+### Changed
+
+- **`AGENTS.md` no longer says "once it exists"** about the roadmap, and its bulk-data rule is split
+  in two: the ephemeris fetch and the paper corpus, because they are two tables and one rule.
+- **`docs/README.md`** lists the roadmap first among the things to read.
+
+### Not built yet
+
+- Everything in the roadmap's *Next* section, which is the point of writing it down: the window's
+  control channel and `ui.screenshot`, sensors and targets, the timeline, the vector recall layer, and
+  number/date/RTL localization.
+
 ## [0.1.39] — A corpus to measure the reader on, and to search when nothing else is at hand
 
 0.1.38 taught the knowledge base to read PDFs. It had nothing but hand-built fixtures to prove it

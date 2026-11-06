@@ -13,7 +13,7 @@ It is one of the ArtCraft Craft apps and follows the same conventions as its sib
 
 ## Start every session here
 
-1. `ROADMAP.md` (once it exists) — current stage and focus.
+1. `ROADMAP.md` — what is shipped, what is next, and what "done" means for each step.
 2. `docs/standards.md` — **the rule book**: i18n, agent/skills/MCP, extensions, API docs, crate
    taxonomy, storage.
 3. `docs/design/architecture.md` — crate map, layers, and how a scenario flows through them.
