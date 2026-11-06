@@ -21,6 +21,7 @@ verified against CSPICE, and used in the regression table; none was guessed in a
 | `sat441.bsp` | `.../satellites/sat441.bsp` | `d7e444a9ba7a52b8f448ff0747030789524d2f0c1212e4e2bd7f5fc3c96444d5` | Saturn and its moons |
 | `ura111xl-799.bsp` | `.../satellites/ura111xl-799.bsp` | `fa55665eb129613574a5d029bf2cc7b521d3f0d2edc7de5790add3cf950714bf` | Uranus and its moons |
 | `nep097xl-899.bsp` | `.../satellites/nep097xl-899.bsp` | `95e815cb8584e530d3c83f35e39af4bf67d0874f01b65538cbe9dbf279818df8` | Neptune and its moons |
+| `nep097xl-801.bsp` | `.../satellites/nep097xl-801.bsp` | `3b4ec5b6f23a3b10da9574bc8fb35cfd93ebf9d7951bdcba0c7e26309304bfb1` | Triton (2.1 GB) |
 
 
 ## Fetching

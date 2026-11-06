@@ -638,7 +638,7 @@ fn tag_release(root: &Path) -> Result<(), String> {
 /// The checksums are what makes the fetch trustworthy: a kernel is a large binary that taints every
 /// number computed from it, so a silently truncated download (which this repository has already
 /// seen once) must fail loudly rather than produce a plausible ephemeris.
-const DATA_FILES: [(&str, &str, &str); 6] = [
+const DATA_FILES: [(&str, &str, &str); 7] = [
     (
         "de440s.bsp",
         "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
@@ -668,6 +668,11 @@ const DATA_FILES: [(&str, &str, &str); 6] = [
         "nep097xl-899.bsp",
         "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/nep097xl-899.bsp",
         "95e815cb8584e530d3c83f35e39af4bf67d0874f01b65538cbe9dbf279818df8",
+    ),
+    (
+        "nep097xl-801.bsp",
+        "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/nep097xl-801.bsp",
+        "3b4ec5b6f23a3b10da9574bc8fb35cfd93ebf9d7951bdcba0c7e26309304bfb1",
     ),
 ];
 

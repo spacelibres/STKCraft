@@ -85,9 +85,8 @@ pub(crate) struct BodyData {
 /// A body of the solar system that this kernel models.
 ///
 /// The eight planets, the Sun, the Moon, and seven of the larger moons of other planets: Phobos,
-/// Deimos, Io, Europa, Ganymede, Callisto and Titan. Triton is in the table too — its constants are
-/// IAU 2015 like the rest — but no kernel this repository fetches carries its ephemeris, so an
-/// ephemeris backend will refuse it by name rather than place it."
+/// Deimos, Io, Europa, Ganymede, Callisto and Titan, plus Triton, whose ephemeris comes from its own
+/// 2.1 GB kernel rather than the Neptune system file."
 ///
 /// Serialises as its IAU name (`"Mars"`), not as an index: a document written today must load in a
 /// build whose table has grown a body, and an index would silently point at the wrong planet.

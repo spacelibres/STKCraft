@@ -182,10 +182,11 @@ Sun appear to have no records at all.
 
 - **Landed:** Phobos, Deimos, Io, Europa, Ganymede, Callisto and Titan are bodies with IAU 2015
   constants and rotation models, and their ephemerides are in the CSPICE table (eight planets and
-  seven moons, 51 reference states, three epochs each, better than a metre). Triton is in the body
-  table but no fetched kernel carries its ephemeris, so a backend refuses it by name.
+  eight moons, 54 reference states, three epochs each, better than a metre). Triton needed its own
+  2.1 GB kernel (`nep097xl-801.bsp`, now in the fetch table with its verified checksum); without it
+  the reader refused the body by name rather than substituting Neptune.
 - **Not done:** an explicit "central body of each moon" link in the engine (the chain is resolved by
-  the ephemeris kernels, not by the document), and Triton's kernel (`nep097xl-801.bsp`, 2 GB).
+  the ephemeris kernels, not by the document).
 
 ## Not in scope
 

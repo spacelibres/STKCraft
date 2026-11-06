@@ -557,7 +557,7 @@ mod tests {
     /// (SHA-256 `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2`), taken
     /// 2026-11-05: `(NAIF id, ET seconds past J2000 TDB, [x, y, z, vx, vy, vz])`.
     #[allow(clippy::unreadable_literal, clippy::excessive_precision)] // CSPICE transcriptions
-    const CSPICE_STATES: [(i32, f64, [f64; 6]); 51] = [
+    const CSPICE_STATES: [(i32, f64, [f64; 6]); 54] = [
         (
             10,
             -320000000.0,
@@ -1170,6 +1170,42 @@ mod tests {
                 -3.861690,
             ],
         ),
+        (
+            801,
+            -320000000.0,
+            [
+                932611188.507508,
+                -4084647272.953415,
+                -1695135408.663905,
+                3.317819,
+                1.754413,
+                4.196730,
+            ],
+        ),
+        (
+            801,
+            0.0,
+            [
+                2513773078.775132,
+                -3438160134.369721,
+                -1469562705.548421,
+                7.465047,
+                5.357064,
+                3.109096,
+            ],
+        ),
+        (
+            801,
+            320000000.0,
+            [
+                3725547030.460472,
+                -2286629759.942793,
+                -1028550299.839767,
+                6.011955,
+                4.658771,
+                -1.505340,
+            ],
+        ),
     ];
 
     /// Compare the reader with CSPICE over the real kernel, when the kernel is available.
@@ -1215,7 +1251,7 @@ mod tests {
             checked += 1;
         }
         assert_eq!(
-            checked, 51,
+            checked, 54,
             "every reference state should have been compared"
         );
     }

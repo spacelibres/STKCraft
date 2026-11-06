@@ -9,6 +9,25 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.15] — Triton
+
+Triton was the one body in the table that no fetched kernel could place: the Neptune system file
+carries Neptune and its moons but not Triton's own ephemeris, so the reader refused it by name. Its
+2.1 GB kernel is now in the fetch table with the checksum of the file that was verified, and the
+CSPICE regression covers **54 reference states** — eight planets and eight moons, three epochs each,
+all under a metre.
+
+### Added
+
+- **`nep097xl-801.bsp`** in `docs/ephemeris-data.md` and `cargo xtask fetch-data`, with the SHA-256
+  of the download the tests ran against. Triton resolves `801 → 8 → SSB` across two kernels, which
+  is the chain the reader already walked for Mars and Jupiter.
+
+### Changed
+
+- **`Body::Triton` is placeable now**, so the notes that said a backend refuses it have been
+  corrected rather than left to contradict the tests.
+
 ## [0.1.14] — VSOP87: the full analytic theory
 
 The analytic backend the plan called for is here: VSOP87A, Bretagnon & Francou's published
