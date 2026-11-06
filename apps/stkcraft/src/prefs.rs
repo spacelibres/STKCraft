@@ -95,6 +95,13 @@ impl Prefs {
     }
 }
 
+/// The directory an installed extension package lives in, if this platform has a configuration
+/// directory: one folder per package, named by its id, holding `extension.toml`.
+#[must_use]
+pub fn extensions_dir() -> Option<PathBuf> {
+    Prefs::path().and_then(|path| path.parent().map(|parent| parent.join("extensions")))
+}
+
 /// The catalogs this person has, as `(locale, text)` pairs, from the configuration directory.
 ///
 /// A file that cannot be read is skipped rather than reported: it is one language, and the others

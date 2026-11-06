@@ -27,6 +27,8 @@ pub enum Invocation {
     Ask(String),
     /// Ask questions one after another, in one conversation, on standard input.
     Chat,
+    /// List the extension packages installed for this person.
+    Extensions,
 }
 
 /// The parameters of the `passes` subcommand.
@@ -73,6 +75,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Mcp => mcp(),
         Invocation::Ask(question) => ask(&question),
         Invocation::Chat => chat(),
+        Invocation::Extensions => crate::extensions::list(),
     }
 }
 
@@ -96,6 +99,7 @@ COMMANDS
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
     chat        Ask questions in one conversation, reading them from standard input
+    extensions  List the extension packages installed for this person
     version     Print the version
     help        Print this text
 
@@ -151,6 +155,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "planet" => parse_planet(arguments),
         "mcp" => Ok(Invocation::Mcp),
         "chat" => Ok(Invocation::Chat),
+        "extensions" => Ok(Invocation::Extensions),
         "ask" => {
             let question = arguments.next().ok_or_else(|| {
                 "`ask` needs a question, e.g. `stkcraft ask \"when does the ISS pass over London?\"`"

@@ -144,6 +144,8 @@ cargo xtask fetch-data                         # download the kernels, verified
 cargo xtask i18n                               # check the interface catalogs
 cargo xtask i18n report                        # what each language still lacks
 cargo xtask i18n translate --language de       # fill German from the English source
+cargo xtask api-docs                           # regenerate the API reference
+cargo run --release -p stkcraft -- extensions  # what extension packages are installed
 ```
 
 ### Version control and the changelog

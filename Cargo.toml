@@ -5,6 +5,7 @@ members = [
     "crates/time",
     "crates/body",
     "crates/ephemeris",
+    "crates/extensions",
     "crates/frames",
     "crates/i18n",
     "crates/sgp4",
@@ -18,7 +19,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.26"
+version = "0.1.27"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -27,18 +28,19 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-core = { path = "crates/core", version = "0.1.26" }
-stkcraft-time = { path = "crates/time", version = "0.1.26" }
-stkcraft-body = { path = "crates/body", version = "0.1.26" }
-stkcraft-ephemeris = { path = "crates/ephemeris", version = "0.1.26" }
-stkcraft-frames = { path = "crates/frames", version = "0.1.26" }
-stkcraft-i18n = { path = "crates/i18n", version = "0.1.26" }
-stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.26" }
-stkcraft-access = { path = "crates/access", version = "0.1.26" }
-stkcraft-engine = { path = "crates/engine", version = "0.1.26" }
-stkcraft-mcp = { path = "crates/mcp", version = "0.1.26" }
-stkcraft-agent = { path = "crates/agent", version = "0.1.26" }
-stkcraft-viewport = { path = "crates/viewport", version = "0.1.26" }
+stkcraft-core = { path = "crates/core", version = "0.1.27" }
+stkcraft-time = { path = "crates/time", version = "0.1.27" }
+stkcraft-body = { path = "crates/body", version = "0.1.27" }
+stkcraft-ephemeris = { path = "crates/ephemeris", version = "0.1.27" }
+stkcraft-extensions = { path = "crates/extensions", version = "0.1.27" }
+stkcraft-frames = { path = "crates/frames", version = "0.1.27" }
+stkcraft-i18n = { path = "crates/i18n", version = "0.1.27" }
+stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.27" }
+stkcraft-access = { path = "crates/access", version = "0.1.27" }
+stkcraft-engine = { path = "crates/engine", version = "0.1.27" }
+stkcraft-mcp = { path = "crates/mcp", version = "0.1.27" }
+stkcraft-agent = { path = "crates/agent", version = "0.1.27" }
+stkcraft-viewport = { path = "crates/viewport", version = "0.1.27" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.

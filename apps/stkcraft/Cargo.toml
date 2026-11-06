@@ -14,6 +14,7 @@ stkcraft-frames.workspace = true
 stkcraft-sgp4.workspace = true
 stkcraft-access.workspace = true
 stkcraft-engine.workspace = true
+stkcraft-extensions.workspace = true
 stkcraft-viewport.workspace = true
 # The agent interface: `stkcraft mcp` serves the command registry over stdio.
 stkcraft-mcp.workspace = true

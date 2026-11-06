@@ -124,6 +124,13 @@ pub const LAYOUT: &[CrateSpec] = &[
         path: "crates/ephemeris",
         layer: 3,
     },
+    // The extension package contract: manifests, ids and trust tiers. Pure data and validation, so
+    // it sits with the analysis layers even though only the app consumes it.
+    CrateSpec {
+        name: "stkcraft-extensions",
+        path: "crates/extensions",
+        layer: 3,
+    },
     CrateSpec {
         name: "stkcraft-engine",
         path: "crates/engine",

@@ -9,6 +9,48 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.27] — The extension contract, with the door bolted shut
+
+STKCraft now has a package contract, in the shape the ArtCraft family specified: a manifest, ids that
+are safe as directory names, themes that carry no code, and trust tiers the *host* assigns. It is
+deliberately the half that cannot hurt anyone — pure data and validation, no unpacking, no store, no
+code execution — and `stkcraft extensions` reports what is installed and why anything was refused.
+
+Third-party packages are designed in and switched off. The `third-party` cargo feature exists so the
+code path is written now and enabled later, no release build enables it, and a test fails if it ever
+becomes a default: opening the door is a decision after the family's threat-model gates and an outside
+review, not a side effect of a build flag.
+
+### Added
+
+- **`stkcraft-extensions`** — manifest parsing with `deny_unknown_fields`, ids checked by character
+  class (lowercase, dot-separated, no `..`, no `/`, at most 128 bytes, because an id becomes a path),
+  version and name validation, `Kind::{Theme, Skills, Plugin}` and `TrustTier::{Internal,
+  ThirdParty}`.
+- **Refusals that say what to fix**: a manifest that states its own trust level, a theme that names an
+  entry point, a permission list that is not empty, a package for another app, and a plug-in
+  anywhere — version 1 has no capability model, so a plug-in that ran would be one that could do
+  anything.
+- **`stkcraft extensions`** — reads `extensions/<id>/extension.toml` from the configuration directory
+  and prints each package as admitted or refused with the reason. A bad package is reported and does
+  not hide the good ones.
+- **The rule book's §3 now describes shipped behaviour** for the contract, and still marks the store,
+  the index, signatures and code execution as unbuilt.
+
+### Changed
+
+- **`docs/standards.md`'s conformance table** says what enforces each row: `cargo test` for the
+  feature and trust rules, `cargo xtask i18n`, `cargo xtask api-docs check`.
+
+### Not built yet
+
+- **No store, no installer, no unpacker, no signatures, and no third-party path.** A package on disk
+  is data; nothing loads it.
+- **A plug-in cannot be installed** — it is refused by name, which is the honest answer while the
+  permission model does not exist.
+- **The interface is still English-only in a fresh build**: no catalog ships, because a translation is
+  a thing a person has to read.
+
 ## [0.1.26] — The API reference is generated, and it can be read in your language
 
 `docs/api/en/index.md` is now built from the code — the command registry, the crate manifests and

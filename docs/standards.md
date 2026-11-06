@@ -13,7 +13,7 @@ here.
 |---|---|---|---|
 | Interface translations | `storytold/craft-i18n` catalog format | `cargo xtask i18n` | built |
 | Agent + skills + MCP | `storytold/craft-ai-integrations`, `craft-skills` | `cargo xtask ci`, `cargo xtask layers` | built, see §2 |
-| Extensions and plug-ins | `storytold/craft-extensions` package contract | `cargo xtask ci` (feature check) | partial, see §3 |
+| Extensions and plug-ins | `storytold/craft-extensions` package contract | `cargo test` (feature and trust tests) | partial, see §3 |
 | API documentation | this document, §4 | `cargo xtask api-docs check` | built, see §4 |
 | Layering | `AGENTS.md`, `xtask/src/layers.rs` | `cargo xtask layers` | built |
 | Version and release | `AGENTS.md` | `cargo xtask version`, `cargo xtask release` | built |
@@ -77,16 +77,18 @@ a shared on-disk store, themes carrying no code, and plug-ins whose v1 permissio
 - **What a plug-in is today is a registration**, not a loaded shared object: a command (one registry
   entry), a skill (one markdown document), or a bulk file (one verified row in `cargo xtask
   fetch-data`). Anything expressible that way is a plug-in now.
+- **The package contract is implemented** in `stkcraft-extensions`: a manifest that never states its
+  own trust level, ids checked by character class so they are safe as directory names, theme
+  packages that may carry no code, permission lists that must be empty, and a `third-party` feature
+  that no release build enables — with a test that fails if it ever becomes a default.
+  `stkcraft extensions` lists what is installed and why a package was refused.
 - **Dynamic code needs a capability story first** — what a plug-in may read, compute and spend — and
   a story invented after the fact is a hole. Until that story exists and passes review, this project
   runs no third-party code.
-- **When the contract lands**, these are the rules it must satisfy here: a manifest that never states
-  its own trust level; unpacking that is bounded in count, size and ratio, with no path leaving its
-  folder; ids and paths checked by character class; themes that carry no code; plug-ins with no file,
-  network or clock access in v1; and the third-party path behind a cargo feature that no release
-  build enables, with a test that fails if it ever becomes a default.
-- **Not built:** the manifest, the store, the trust tiers and that feature gate. §3's rules are the
-  requirements the implementation must meet; they are not a description of shipped code.
+- **Not built:** the store (bounded unpacking, atomic installs, enable-per-app), the index, the
+  signature check and any code execution at all. A package on disk is data; nothing loads it, and a
+  plug-in package is refused by name until a capability model exists. Unpacking, when it lands, must
+  be bounded in count, size and ratio with no path leaving its folder.
 
 ## 4. Documentation and API documentation
 
