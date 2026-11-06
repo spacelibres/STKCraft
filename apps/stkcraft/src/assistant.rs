@@ -48,6 +48,14 @@ enum State {
 /// What one question produces: the answer, and the scenario the model left behind.
 type Reply = Result<(String, Scenario), String>;
 
+/// What the worker is asked to do.
+enum Command {
+    /// Answer a question.
+    Ask(Job),
+    /// Forget the conversation, keeping the document the tools built.
+    Forget,
+}
+
 /// How a responder is built. The real one is [`deepseek`]; a test substitutes its own.
 type Factory = fn(&std::path::Path, &Scenario) -> Result<Box<dyn Responder>, String>;
 
@@ -62,6 +70,16 @@ struct Job {
     result: Sender<Reply>,
 }
 
+impl Command {
+    /// The question this command carries, if it is a question.
+    fn job(&self) -> Option<&Job> {
+        match self {
+            Self::Ask(job) => Some(job),
+            Self::Forget => None,
+        }
+    }
+}
+
 /// Answers questions, keeping the conversation between them.
 ///
 /// A trait rather than a function so a test can answer from a script: the panel's threading,
@@ -69,6 +87,13 @@ struct Job {
 pub trait Responder: Send {
     /// Answer one question about `scenario`, reporting each tool call to `trace`.
     fn ask(&mut self, scenario: &Scenario, question: &str, trace: &Sender<String>) -> Reply;
+
+    /// Forget the conversation, keeping whatever the tools have built.
+    ///
+    /// A discussion that has gone wrong — a wrong assumption the model keeps building on, a
+    /// scenario that was edited into nonsense — needs a way out that is not "restart the
+    /// application", and the scenario does not have to be thrown away with it.
+    fn forget(&mut self) {}
 }
 
 /// The real responder: `DeepSeek` driving the engine's tools, with the conversation kept.
@@ -86,6 +111,10 @@ impl Responder for DeepSeekResponder {
         };
         let answer = self.agent.ask_observing(question, &mut report)?;
         Ok((answer.text, self.agent.server().scenario().clone()))
+    }
+
+    fn forget(&mut self) {
+        self.agent.forget();
     }
 }
 
@@ -107,7 +136,7 @@ pub struct Assistant {
     state: State,
     trace: Vec<String>,
     /// Where questions go, once the worker exists.
-    jobs: Option<Sender<Job>>,
+    jobs: Option<Sender<Command>>,
     /// The answer in flight: its trace lines and its one result.
     run: Option<(Receiver<String>, Receiver<Reply>)>,
     /// A scenario the model produced, waiting to be adopted by the window exactly once.
@@ -150,7 +179,7 @@ impl Assistant {
         if self.jobs.is_some() {
             return;
         }
-        let (tx, rx) = channel::<Job>();
+        let (tx, rx) = channel::<Command>();
         let factory = self.factory;
         let scenario = scenario.clone();
         let skills = skills.to_path_buf();
@@ -160,7 +189,16 @@ impl Assistant {
             // export a key and ask again without restarting the window.
             let mut responder: Option<Box<dyn Responder>> = None;
             let mut last_error: Option<String> = None;
-            while let Ok(job) = rx.recv() {
+            while let Ok(command) = rx.recv() {
+                if matches!(command, Command::Forget) {
+                    if let Some(active) = responder.as_mut() {
+                        active.forget();
+                    }
+                    continue;
+                }
+                let Some(job) = command.job() else {
+                    continue;
+                };
                 if responder.is_none() {
                     match factory(&skills, &job.scenario) {
                         Ok(built) => {
@@ -181,13 +219,19 @@ impl Assistant {
                     let _ = job.result.send(Err(message));
                     continue;
                 };
-                let outcome = active.ask(&job.scenario, &job.question, &job.trace);
+                let (scenario, question, trace, result) = (
+                    job.scenario.clone(),
+                    job.question.clone(),
+                    job.trace.clone(),
+                    job.result.clone(),
+                );
+                let outcome = active.ask(&scenario, &question, &trace);
                 if outcome.is_err() {
                     // A failed turn may have left a partial conversation behind; the next question
                     // should start from a session whose history is still consistent.
                     responder = None;
                 }
-                let _ = job.result.send(outcome);
+                let _ = result.send(outcome);
             }
         });
         self.jobs = Some(tx);
@@ -220,7 +264,7 @@ impl Assistant {
             trace: trace_tx,
             result: result_tx,
         };
-        if jobs.send(job).is_err() {
+        if jobs.send(Command::Ask(job)).is_err() {
             self.jobs = None;
             self.state =
                 State::Failed("The assistant stopped; ask again to restart it.".to_owned());
@@ -229,6 +273,23 @@ impl Assistant {
         self.trace.clear();
         self.state = State::Running;
         self.run = Some((trace_rx, result_rx));
+    }
+
+    /// Start a new conversation: empty the panel and let the worker forget.
+    ///
+    /// The scenario is kept. A discussion that went wrong is not a document that went wrong, and
+    /// throwing away the satellites as well as the argument would make this button something nobody
+    /// dares press.
+    fn forget(&mut self) {
+        if let Some(jobs) = &self.jobs
+            && jobs.send(Command::Forget).is_err()
+        {
+            // The worker is gone; the next question starts a new one anyway.
+            self.jobs = None;
+        }
+        self.trace.clear();
+        self.state = State::Idle;
+        self.answered = 0;
     }
 
     /// Drain whatever the worker has reported. Never blocks.
@@ -272,10 +333,19 @@ impl Assistant {
         self.poll();
         ui.heading("Assistant");
         if self.answered > 0 {
-            ui.label(format!(
-                "{answered} answer(s) in this conversation",
-                answered = self.answered
-            ));
+            ui.horizontal(|ui| {
+                ui.label(format!(
+                    "{answered} answer(s) in this conversation",
+                    answered = self.answered
+                ));
+                if ui
+                    .button("New conversation")
+                    .on_hover_text("Forget the discussion; keep the scenario")
+                    .clicked()
+                {
+                    self.forget();
+                }
+            });
         }
         match stkcraft_agent::DeepSeek::from_environment() {
             Ok(model) => {
@@ -452,6 +522,26 @@ mod tests {
         assert_eq!(assistant.answered, 2);
         assert_eq!(assistant.trace.len(), 1);
         assert!(assistant.adopt.take().is_some());
+    }
+
+    #[test]
+    fn a_new_conversation_forgets_the_answer_and_keeps_the_scenario() {
+        let mut assistant = panel(twice);
+        assistant.question = "When is the pass?".to_owned();
+        assistant.start(&Scenario::empty("window"), std::path::Path::new("skills"));
+        settle(&mut assistant);
+        assert_eq!(assistant.answered, 1);
+        assert!(assistant.adopt.take().is_some());
+
+        assistant.forget();
+        assert_eq!(assistant.answered, 0);
+        assert_eq!(assistant.trace, Vec::<String>::new());
+        match &assistant.state {
+            State::Idle => {}
+            other => panic!("expected an idle panel after forgetting, got {other:?}"),
+        }
+        // The next question starts a fresh exchange rather than resuming a stale one.
+        assert!(!assistant.is_running());
     }
 
     #[test]

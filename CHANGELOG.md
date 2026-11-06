@@ -9,6 +9,35 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.24] — A way out of a conversation
+
+A conversation that has gone wrong — a wrong assumption the model keeps building on, a scenario
+edited into nonsense — used to leave one remedy: close the window and start again. The assistant
+panel now has **New conversation**: the discussion is forgotten, the scenario is kept. A discussion
+that went wrong is not a document that went wrong, and a button that threw away the satellites as
+well as the argument is a button nobody dares press.
+
+### Added
+
+- **New conversation** in the assistant panel, which empties the trace, the answer and the count,
+  and tells the worker to forget — so the next question arrives in a session that knows the
+  document and nothing about the argument.
+- **`Responder::forget`**, defaulting to nothing, so the panel can ask a session to start over
+  without knowing whether the responder keeps a conversation at all.
+
+### Changed
+
+- **The worker takes commands rather than jobs.** Asking and forgetting are the same message type,
+  so the thread that owns the conversation is the only thing that has to know what forgetting
+  means.
+
+### Not built yet
+
+- **The conversation is not saved**, and closing the window ends it.
+- **No streaming of the model's prose**; the tool-call trace streams, the answer arrives whole.
+- **`resources/updated` notifications, `stkcraft mcp` permission prompts and dynamic third-party
+  plugins** are unchanged.
+
 ## [0.1.23] — One conversation, not one question
 
 The agent now remembers. `stkcraft chat` asks questions one after another in a single session, and
