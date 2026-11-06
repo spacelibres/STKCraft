@@ -1,10 +1,10 @@
-//! Embeds the interface catalogs from `locales/` into the binary.
+//! Embeds the interface catalogs from `share/locales/` into the binary.
 //!
-//! The catalogs are the build input the shared format describes: `locales/<locale>/stkcraft.tsv`.
-//! They are *optional* — a checkout with no `locales/` builds and runs in English — so the text is
+//! The catalogs are the build input the shared format describes: `share/locales/<locale>/stkcraft.tsv`.
+//! They are *optional* — a checkout with no `share/locales/` builds and runs in English — so the text is
 //! included through a generated module rather than `include_str!` of a file that may not exist.
 //!
-//! Re-running is driven by `cargo:rerun-if-changed=../../locales`, so editing a catalog rebuilds
+//! Re-running is driven by `cargo:rerun-if-changed=../../share/locales`, so editing a catalog rebuilds
 //! the crate that embeds it and a translated string cannot sit stale in a binary.
 //!
 //! It also extracts **every interface string the window can show** and embeds the list. A window
@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_owned());
-    let locales = Path::new(&manifest).join("../../locales");
+    let locales = Path::new(&manifest).join("../../share/locales");
     println!("cargo:rerun-if-changed={}", locales.display());
 
     let mut entries: Vec<(String, String)> = Vec::new();

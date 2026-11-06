@@ -4,7 +4,7 @@ STKCraft's interface is written in English in the source and translated by catal
 the ArtCraft family's format — the same one `storytold/craft-i18n` holds and the other Craft apps
 read — so a translation written here can be contributed there, and a rule that disagrees with the
 shared checker is a bug here rather than a local preference. See
-[standards.md](standards.md) for the rule that governs all of this.
+[standards.md](../standards.md) for the rule that governs all of this.
 
 ## The one rule
 
@@ -31,7 +31,7 @@ a scenario's name is data, not a label.
 
 ## The catalog format
 
-One file per locale: `locales/<locale>/stkcraft.tsv`. Three TAB-separated columns:
+One file per locale: `share/locales/<locale>/stkcraft.tsv`. Three TAB-separated columns:
 
 ```text
 context	English source text	translation

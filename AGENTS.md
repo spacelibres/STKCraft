@@ -16,7 +16,7 @@ It is one of the ArtCraft Craft apps and follows the same conventions as its sib
 1. `ROADMAP.md` (once it exists) — current stage and focus.
 2. `docs/standards.md` — **the rule book**: i18n, agent/skills/MCP, extensions, API docs, crate
    taxonomy, storage.
-3. `docs/architecture.md` — crate map, layers, and how a scenario flows through them.
+3. `docs/design/architecture.md` — crate map, layers, and how a scenario flows through them.
 4. `AGENTS.md` (this file) — the rules below.
 
 `plan/` is gitignored and local only.
@@ -79,7 +79,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   commit a large binary fixture. `cargo xtask fetch-data` downloads all of it — ephemeris kernels,
   IERS Earth orientation, the leap-second kernel, planetary constants and the star catalogue — into
   `data/`, which is `.gitignore`d, as parallel ranged downloads (eight at a time, `--jobs` to
-  change it), and verifies each against the SHA-256 recorded in `docs/ephemeris-data.md`; a
+  change it), and verifies each against the SHA-256 recorded in `docs/guides/ephemeris-data.md`; a
   deployment fetches the same files from the same URLs. Nothing is committed, and a row is added to
   that table only with the checksum of a file that was actually verified.
 - **Everything is a command.** User-visible behaviour = a command in the engine
@@ -108,13 +108,13 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   those literals, `cargo xtask ci` checks the catalogs, and `cargo xtask i18n translate --language
   <code>` fills a language from the user's own DeepSeek key. A string built at run time cannot be
   extracted, so the macros take literals. Rules and format: `docs/standards.md` §1,
-  `docs/localization.md`.
+  `docs/guides/localization.md`.
 - **The user's documents come before the model's memory.** Anything factual or numeric starts with
   `knowledge.search` over the person's own library, and the answer cites `path:lines a-b`. A search
   that finds nothing is reported as nothing: the model says the library does not cover the question
   before it offers general knowledge, and never dresses memory up as a document. Rules:
-  `docs/standards.md` §2a, `docs/knowledge.md`.
-- **Skills are documents, not code.** A `skills/<name>/SKILL.md` starts with one `#` heading
+  `docs/standards.md` §2a, `docs/design/knowledge.md`.
+- **Skills are documents, not code.** A `share/skills/<name>/SKILL.md` starts with one `#` heading
   whose text is its description, then the procedure: the order of commands, what the answer
   means, and the traps. They are loaded at run time, so a new skill needs no rebuild; they are
   listed by name in the system prompt and read only when a job needs one.
@@ -125,7 +125,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   membership. A `body` or an `access` crate under `framework/` is a bug.
 - **State is not scattered.** Every stored thing is relational (the record), key-value (a derived,
   disposable cache) or vector (recall candidates), and one crate owns persistence.
-  `docs/storage.md` is the decision record; a stray JSON file beside the executable is the failure it
+  `docs/design/storage.md` is the decision record; a stray JSON file beside the executable is the failure it
   exists to prevent.
 - **Layering** is enforced by `cargo xtask layers`. A crate may depend only on a strictly
   lower layer, and nothing at or below `LAST_NON_UI_LAYER` may depend on egui, eframe,

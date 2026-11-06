@@ -38,7 +38,7 @@ Planned, in the order they will land:
 crates/astro/geom        conic sections, sphere coordinate transforms, intersections
 crates/astro/atmos       neutral atmosphere density
 crates/astro/coverage    grids and grids-of-figures over time
-crates/framework/storage the record, the cache and the vector store (docs/storage.md)
+crates/framework/storage the record, the cache and the vector store (docs/design/storage.md)
 crates/astro/papers      PDF ingestion for the knowledge base (via the family's craft-pdf)
 ```
 
@@ -178,7 +178,7 @@ A plugin, at this stage, is a *registration*, not a loaded shared object:
   the menu, shortcut, CLI, control channel, MCP server and agent all dispatch by id;
 - a **skill** is one markdown document picked up from `skills/`, needing no code and no rebuild;
 - a **bulk file** is one row in `cargo xtask fetch-data`, with a checksum recorded in
-  `docs/ephemeris-data.md`.
+  `docs/guides/ephemeris-data.md`.
 
 Dynamic third-party code is deliberately *not* built yet. Running someone else's code inside an
 analysis process needs a capability story — what a plugin may read, what it may compute, what it

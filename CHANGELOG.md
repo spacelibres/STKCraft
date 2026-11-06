@@ -9,6 +9,38 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.33] — The repository root is a map, and content is not mixed with code
+
+The crate tree was regrouped last release; the root was not. `skills/` and `locales/` — content the
+*application loads at run time* — sat beside the source, `docs/` was a flat pile of six documents of
+three different kinds, and there was no statement anywhere of what a top-level directory is for. A
+professional reading the tree could not tell content from code from generated text from fetched data.
+
+### Changed
+
+- **Content moved to `share/`**, by kind: `share/skills/<name>/SKILL.md` and
+  `share/locales/<locale>/stkcraft.tsv`. It is what the app loads, it is copied beside the binary in a
+  deployment, and it is neither code nor licensed artwork. `build.rs` embeds the catalogs from there,
+  and `share/skills` is found beside the executable and then in the working directory.
+- **`docs/` grouped by kind**: `docs/design/` (architecture, storage, knowledge — decisions),
+  `docs/guides/` (localization, ephemeris data — how-tos), `docs/api/` (generated), `docs/plans/`
+  (dated history), with `docs/standards.md` staying at the top because it governs all of them.
+
+### Added
+
+- **`docs/standards.md` §9 — repository layout**: every top-level entry, what belongs there, what may
+  not, and the three rules that keep the map honest (content is not scattered beside the source;
+  generated and fetched things are never committed, except `docs/api/` which the gate checks; a
+  document's home is chosen by kind, not by date).
+- **`docs/README.md`** — an index of the documentation, so nobody has to guess where something is
+  written down, plus where a new document of each kind belongs.
+- **A "Repository layout" section in `README.md`** — the map a first-time reader sees.
+
+### Not built yet
+
+- **The storage crate**, the **control channel**, **PDF ingestion** and the **paper corpus** remain the
+  next four steps, in that order (the order is in `CHANGELOG.md` 0.1.32 and in §8).
+
 ## [0.1.32] — The tree says what each crate is, and the storage design is decided
 
 Two things a professional looks at first: how the crates are organised, and where the data lives.

@@ -505,14 +505,19 @@ fn chat() -> Result<(), String> {
 }
 
 /// Where the skill documents live, if they are anywhere this build can find them.
+///
+/// `share/skills/` beside the executable first (a deployment copies the binary and its `share/`
+/// together), then `share/skills/` in the working directory (a developer runs from the repository
+/// root). Content is not scattered beside the source: `share/` holds what the app loads, and the
+/// repository layout is `docs/standards.md` §9.
 pub fn skills_directory() -> std::path::PathBuf {
     let beside_executable = std::env::current_exe()
         .ok()
-        .and_then(|path| path.parent().map(|parent| parent.join("skills")));
+        .and_then(|path| path.parent().map(|parent| parent.join("share/skills")));
     if let Some(path) = beside_executable.filter(|path| path.is_dir()) {
         return path;
     }
-    std::path::PathBuf::from("skills")
+    std::path::PathBuf::from("share/skills")
 }
 
 /// The user's knowledge base: `--knowledge <dir>`, or `STKCRAFT_KNOWLEDGE`, or the configuration

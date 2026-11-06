@@ -20,7 +20,7 @@
 //! the shared catalogs, arbitrates the rules CI enforces, and the other Craft apps read the same
 //! tables. A translation written here can be contributed there, and a rule that disagrees with the
 //! shared checker is a bug in this crate rather than a local preference. See `docs/standards.md`
-//! and `docs/localization.md`.
+//! and `docs/guides/localization.md`.
 //!
 //! The rules, in short:
 //!

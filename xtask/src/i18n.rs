@@ -39,7 +39,7 @@ use stkcraft_i18n::Source as Extracted;
 use stkcraft_i18n::catalog::{self, Catalog, Row};
 
 /// The directory the catalogs live in, relative to the workspace root.
-pub const LOCALES: &str = "locales";
+pub const LOCALES: &str = "share/locales";
 
 /// The catalog file an app's rows go in; one per app, as the shared format names it.
 pub const APP_CATALOG: &str = "stkcraft.tsv";
@@ -151,7 +151,7 @@ pub fn run(root: &Path, options: &Options) -> Result<(), String> {
             eprintln!("i18n: {problem}");
         }
         return Err(format!(
-            "{} catalog problem(s); the format is described in docs/localization.md",
+            "{} catalog problem(s); the format is described in docs/guides/localization.md",
             problems.len()
         ));
     }
@@ -182,7 +182,7 @@ pub fn run(root: &Path, options: &Options) -> Result<(), String> {
 /// One locale's catalog as read from disk.
 type Loaded = (String, Catalog, Vec<catalog::Problem>);
 
-/// Read every catalog under `locales/<locale>/stkcraft.tsv`, in locale order.
+/// Read every catalog under `share/locales/<locale>/stkcraft.tsv`, in locale order.
 #[allow(clippy::unnecessary_wraps)]
 fn read_catalogs(root: &Path) -> Result<Vec<Loaded>, String> {
     let directory = root.join(LOCALES);

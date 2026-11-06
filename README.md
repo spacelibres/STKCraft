@@ -28,7 +28,7 @@
 > [!NOTE]
 > **This is an early skeleton.** The workspace, the quality gate, the layering rule and the
 > first three numerical crates are in place. Orbit propagation, access and coverage — the
-> parts that make it useful — are being built next. See [`docs/architecture.md`](docs/architecture.md)
+> parts that make it useful — are being built next. See [`docs/design/architecture.md`](docs/design/architecture.md)
 > for the crate map and what lands in which order.
 
 ## Why STKCraft
@@ -83,7 +83,7 @@ CLI, the MCP server and the browser.
 
 - **Contributor and agent rules** (clean-room, asset policy, never-crash, the verification
   standard): [`AGENTS.md`](AGENTS.md)
-- **Crate map and the reasoning behind it**: [`docs/architecture.md`](docs/architecture.md)
+- **Crate map and the reasoning behind it**: [`docs/design/architecture.md`](docs/design/architecture.md)
 - **Bundled assets**: every one is listed with its licence in [`ATTRIBUTION.md`](ATTRIBUTION.md)
 
 ## Verifying the numbers
@@ -128,3 +128,19 @@ by this license. Forks and modified versions must remove them.
 
 STKCraft is a clean-room implementation. It is built from published standards and public
 papers; no commercial mission-analysis product's code, data files or artwork is used.
+
+## Repository layout
+
+```
+crates/framework/   the platform — units, time, translations, extensions (nothing here knows what an orbit is)
+crates/astro/       the orbital-analysis domain — bodies, frames, ephemerides, propagation, access, engine
+crates/agent/       the model-facing surface — the knowledge base, the MCP server, the agent runtime
+crates/ui/          presentation — the 3D viewport
+apps/stkcraft/      the window, the CLI, the MCP server and the assistant
+share/              content the app loads — interface catalogs and skill documents
+docs/               the engineering record, indexed by docs/README.md
+packaging/          installers;  contributors/  credits;  xtask/  the build tool
+data/  plan/        fetched bulk data and local notes, both gitignored
+```
+
+The map, and the rules that keep it honest, are in [docs/standards.md](docs/standards.md) §9.
