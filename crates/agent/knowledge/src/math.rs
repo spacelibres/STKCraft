@@ -162,6 +162,158 @@ pub fn is_math_font(name: &str) -> bool {
         || lower.contains("sub") && lower.contains("mat")
 }
 
+/// One glyph run as the segmenter sees it: a piece of a line with its box and its evidence.
+///
+/// The PDF layer already produces these — `crates/agent/knowledge/src/pdf.rs` groups glyphs into
+/// fragments with an `x` range, a baseline and an em size — and this type is the seam that keeps the
+/// segmenter testable without a PDF: a test builds runs by hand and asserts the regions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Run {
+    /// The one-based page it is on.
+    pub page: usize,
+    /// Its text, with the word breaks the generator positioned put back.
+    pub text: String,
+    /// Its left and right edge, in page points.
+    pub x0: f64,
+    /// Its right edge.
+    pub x1: f64,
+    /// Its baseline, in page points (y grows downwards).
+    pub y: f64,
+    /// The type size, in points.
+    pub em: f64,
+    /// The faces its glyphs were drawn with.
+    pub fonts: Vec<String>,
+    /// How many distinct baselines its glyphs used.
+    pub baselines: usize,
+}
+
+impl Run {
+    /// The evidence this run carries.
+    #[must_use]
+    pub fn evidence(&self) -> Evidence {
+        let fonts: Vec<&str> = self.fonts.iter().map(String::as_str).collect();
+        Evidence::of(&self.text, &fonts, self.baselines)
+    }
+}
+
+/// A region of page that the segmenter believes is mathematics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Region {
+    /// The page it is on.
+    pub page: usize,
+    /// The box, in page points: the union of the runs it holds.
+    pub x0: f64,
+    /// The top of the box.
+    pub y0: f64,
+    /// The right of the box.
+    pub x1: f64,
+    /// The bottom of the box.
+    pub y1: f64,
+    /// The text the text layer gives for the region, runs joined in reading order.
+    pub unicode: String,
+    /// Why it was called mathematics: the evidence of its strongest run.
+    pub evidence: Evidence,
+    /// How many runs it holds.
+    pub runs: usize,
+}
+
+/// How far apart two runs on one baseline may be and still belong to one region, in ems.
+///
+/// A space is a quarter of an em and a relation is set off by about half; a gap wider than this is a
+/// column break or a different table cell, not one formula.
+pub const JOIN_GAP_EM: f64 = 2.0;
+
+/// How far a line may sit from the region above it and still continue it, in ems.
+///
+/// A display equation is often two lines — a fraction, or a matrix — and the gap between them is a
+/// line's worth of leading, not a paragraph's.
+pub const CONTINUE_GAP_EM: f64 = 2.2;
+
+/// Group runs into the regions that are mathematics.
+///
+/// The rules, in order of application:
+///
+/// 1. A run that **is** mathematics starts a region, or joins the open one when it is close enough —
+///    same baseline within half an em and no further than [`JOIN_GAP_EM`] away, or on a line within
+///    [`CONTINUE_GAP_EM`] of the region's last line, which is how a formula split across two lines is
+///    kept whole.
+/// 2. A run that **is not** mathematics joins an open region only when it is adjacent on the same
+///    baseline — `=` and a variable are set in the body face in many papers, and dropping them would
+///    cut a formula in half.
+/// 3. A region closes when nothing has joined it and the next run starts a new one, or when the page
+///    changes.
+///
+/// A region always holds at least one run that *is* mathematics: prose with a passing symbol in it is
+/// prose, and that is decided by [`Evidence::is_mathematics`], not here.
+#[must_use]
+pub fn segment(runs: &[Run]) -> Vec<Region> {
+    let mut regions: Vec<Region> = Vec::new();
+    let mut current: Option<Region> = None;
+    let mut current_page = 0_usize;
+    for run in runs {
+        let mathematical = run.evidence().is_mathematics();
+        let joins = current.as_ref().is_some_and(|open| {
+            if open.page != run.page {
+                return false;
+            }
+            let em = run.em.max(1.0);
+            let overlap =
+                run.x0 <= open.x1 + JOIN_GAP_EM * em && run.x1 >= open.x0 - JOIN_GAP_EM * em;
+            if !overlap {
+                return false;
+            }
+            // Same baseline, close enough to be one line of one formula.
+            let on_line =
+                (run.y - open.y1).abs() <= 0.5 * em && run.x0 - open.x1 <= JOIN_GAP_EM * em;
+            // Or the next line of a display formula: a fraction, a matrix, a continued equation.
+            let next_line = run.y - open.y1 > 0.0 && run.y - open.y1 <= CONTINUE_GAP_EM * em;
+            on_line || next_line
+        });
+        if let Some(region) = current.take() {
+            if mathematical && !joins || current_page != run.page {
+                regions.push(region);
+            } else if joins {
+                let mut region = region;
+                region.x0 = region.x0.min(run.x0);
+                region.x1 = region.x1.max(run.x1);
+                region.y1 = region.y1.max(run.y);
+                region.y0 = region.y0.min(run.y);
+                if !region.unicode.is_empty() {
+                    region.unicode.push(' ');
+                }
+                region.unicode.push_str(&run.text);
+                region.runs += 1;
+                let evidence = run.evidence();
+                if evidence.math_characters > region.evidence.math_characters {
+                    region.evidence = evidence;
+                }
+                current = Some(region);
+                current_page = run.page;
+                continue;
+            } else {
+                regions.push(region);
+            }
+        }
+        if mathematical {
+            current = Some(Region {
+                page: run.page,
+                x0: run.x0,
+                x1: run.x1,
+                y0: run.y,
+                y1: run.y,
+                unicode: run.text.clone(),
+                evidence: run.evidence(),
+                runs: 1,
+            });
+            current_page = run.page;
+        }
+    }
+    if let Some(region) = current {
+        regions.push(region);
+    }
+    regions
+}
+
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
@@ -224,5 +376,93 @@ mod tests {
         }
         // Prose with a digit and an equals sign is not mathematics.
         assert!(!Evidence::of("the answer = 4", &["Times-Roman"], 1).is_mathematics());
+    }
+
+    /// A run at a stated place, with the faces a test wants to claim.
+    fn run(page: usize, text: &str, x0: f64, x1: f64, y: f64, em: f64, font: &str) -> Run {
+        Run {
+            page,
+            text: text.to_owned(),
+            x0,
+            x1,
+            y,
+            em,
+            fonts: vec![font.to_owned()],
+            baselines: 1,
+        }
+    }
+
+    #[test]
+    fn a_display_equation_becomes_one_region_with_its_box() {
+        // `∫ f dx = F` set with a maths face on the operator and the body face elsewhere: the equals
+        // sign and the prose face must not cut the formula in half.
+        let runs = [
+            run(1, "∫", 120.0, 128.0, 340.0, 12.0, "CMMI10"),
+            run(1, "f dx", 130.0, 176.0, 340.0, 12.0, "CMMI10"),
+            run(1, "=", 180.0, 190.0, 340.0, 12.0, "Times-Roman"),
+            run(1, "F", 194.0, 202.0, 340.0, 12.0, "CMMI10"),
+        ];
+        let regions = segment(&runs);
+        assert_eq!(regions.len(), 1, "{regions:#?}");
+        let region = &regions[0];
+        assert_eq!(region.page, 1);
+        assert_eq!(region.runs, 4);
+        assert_eq!(region.unicode, "∫ f dx = F");
+        assert!((region.x0 - 120.0).abs() < f64::EPSILON);
+        assert!((region.x1 - 202.0).abs() < f64::EPSILON);
+        assert_eq!(region.evidence.blocks, vec!["Operators"]);
+    }
+
+    #[test]
+    fn prose_with_one_greek_letter_makes_no_region() {
+        // The rule the whole design turns on: a sentence mentioning `α` is a sentence.
+        let runs = [
+            run(1, "the angle", 120.0, 180.0, 200.0, 12.0, "Times-Roman"),
+            run(1, "α", 184.0, 192.0, 200.0, 12.0, "Times-Roman"),
+            run(1, "is small", 196.0, 250.0, 200.0, 12.0, "Times-Roman"),
+        ];
+        assert_eq!(segment(&runs), Vec::new());
+    }
+
+    #[test]
+    fn two_equations_on_one_page_stay_two_regions() {
+        // Vertical distance ends a region: two display equations 40 points apart are two formulas.
+        let runs = [
+            run(1, "∑", 120.0, 130.0, 200.0, 12.0, "CMMI10"),
+            run(1, "x", 134.0, 142.0, 200.0, 12.0, "CMMI10"),
+            run(1, "∫", 120.0, 130.0, 240.0, 12.0, "CMMI10"),
+            run(1, "y", 134.0, 142.0, 240.0, 12.0, "CMMI10"),
+        ];
+        let regions = segment(&runs);
+        assert_eq!(regions.len(), 2, "{regions:#?}");
+        assert_eq!(regions[0].unicode, "∑ x");
+        assert_eq!(regions[1].unicode, "∫ y");
+    }
+
+    #[test]
+    fn a_formula_continued_on_the_next_line_is_one_region() {
+        // A fraction or a matrix is set above and below one baseline: the continuation gap keeps it.
+        let runs = [
+            run(1, "∑", 120.0, 130.0, 200.0, 12.0, "CMMI10"),
+            run(1, "n", 134.0, 140.0, 214.0, 12.0, "CMMI10"),
+            run(1, "2", 120.0, 126.0, 228.0, 12.0, "CMMI10"),
+        ];
+        let regions = segment(&runs);
+        assert_eq!(regions.len(), 1, "{regions:#?}");
+        assert_eq!(regions[0].runs, 3);
+        assert!((regions[0].y0 - 200.0).abs() < f64::EPSILON);
+        assert!((regions[0].y1 - 228.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_region_never_crosses_a_page() {
+        let runs = [
+            run(1, "∫", 120.0, 130.0, 700.0, 12.0, "CMMI10"),
+            run(2, "dx", 120.0, 140.0, 40.0, 12.0, "CMMI10"),
+        ];
+        let regions = segment(&runs);
+        assert_eq!(regions.len(), 2, "{regions:#?}");
+        assert_eq!(regions[0].page, 1);
+        assert_eq!(regions[1].page, 2);
     }
 }

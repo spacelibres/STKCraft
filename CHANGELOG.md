@@ -9,6 +9,43 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.52] — Regions: a formula becomes a box on a page
+
+0.1.51 decided whether a run of glyphs *is* mathematics. This decides **where a formula starts and
+ends** — the step that turns evidence into a `Region` with a page, a box in points, its text-layer
+Unicode, and the reason it was called mathematics.
+
+Three rules, and each exists because of a way real typesetting breaks a naive one:
+
+- **A mathematical run opens a region**; another joins it when it is on the same baseline within half
+  an em and no more than two ems away, or on the line below within 2.2 ems — which is what keeps a
+  fraction, a matrix, or an equation continued onto a second line as one region instead of three.
+- **A non-mathematical run joins only when it is adjacent on the same baseline.** `=` and the variables
+  beside it are set in the body face in many papers; dropping them because they failed the evidence test
+  would cut a formula in half. The region still needs at least one run that *is* mathematics — prose with
+  a passing symbol in it stays prose.
+- **A region never crosses a page**, and a formula forty points below another is another formula.
+
+### Added
+
+- **`stkcraft_agent_knowledge::math::{Run, Region, segment}`** — the seam between the PDF layer and the
+  store. `Run` is what the interpreter already knows (text, box, baseline, em size, faces, baseline
+  shifts), so a test builds runs by hand and asserts regions without a PDF: a display equation with a
+  body-face equals sign, prose containing `α`, two equations on one page, a continued fraction, and a
+  region that would have straddled a page turn.
+
+### Verified
+
+`cargo test -p stkcraft-agent-knowledge`: 64 tests. The five new ones pin the failure modes the rules
+exist for — in particular `prose_with_one_greek_letter_makes_no_region`, which is the rule that keeps a
+sentence out of the formula store.
+
+### Not built yet
+
+- **Storage**: the `formulas` table with its provenance columns, and the index over it.
+- Then the transcription table, OCR and the formula model, the Mathlib index and classifier, and
+  `verify-formulas`.
+
 ## [0.1.51] — The evidence a run is mathematics, pinned character by character
 
 The first line of code under `docs/design/mathematics.md`, and deliberately the smallest one that can be
