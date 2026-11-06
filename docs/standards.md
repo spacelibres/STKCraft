@@ -18,6 +18,8 @@ here.
 | Extensions and plug-ins | `storytold/craft-extensions` package contract | `cargo test` (feature and trust tests) | partial, see §3 |
 | API documentation | this document, §4 | `cargo xtask api-docs check` | built, see §4 |
 | UI library and fonts | `storytold/craft-libs` (`craft-ui`), `storytold/egui` fork | `cargo test`, `[patch.crates-io]` | built |
+| Crate taxonomy | this document, §7 | `cargo xtask layers` | built |
+| Storage | `docs/storage.md` | design fixed; implementation next | partial, see §8 |
 | Layering | `AGENTS.md`, `xtask/src/layers.rs` | `cargo xtask layers` | built |
 | Version and release | `AGENTS.md` | `cargo xtask version`, `cargo xtask release` | built |
 
@@ -201,7 +203,49 @@ fixed from the start rather than retrofitted.
   yet, so a launcher cannot drive it the way it drives GridCraft. That is the first interop item on
   the list, and it is named here so it cannot be forgotten.
 
-## 7. What every rule here has in common
+## 7. Crate taxonomy
+
+**A crate's place in the tree says what it is.** A reader — especially a professional one — should be
+able to tell the platform from the domain from the presentation without opening a file, so the tree is
+grouped by subject and every group has a rule about what may live in it.
+
+| Directory | What belongs there | Rule |
+|---|---|---|
+| `crates/framework/` | the platform: units, time, translations, persistence, the extension contract | nothing here may know what an orbit is. A name like `body` or `access` appearing here is a bug |
+| `crates/astro/` | the orbital-analysis domain: bodies, frames, ephemerides, propagation, access geometry, the engine | the astronomy lives here and nowhere else. Every constant and formula carries its source |
+| `crates/agent/` | the model-facing surface: the knowledge base, the MCP server, the agent runtime | a crate here drives the engine through the command registry and may not reach past it |
+| `crates/ui/` | presentation | may use GPU and windowing crates; may not compute physics |
+| `apps/` | the deliverable: window, CLI, MCP server and assistant wiring | thin: every behaviour it offers is a command or a transport |
+| `xtask/` | the build tool | sits outside the layer graph |
+
+- **A new crate goes into the directory that matches its subject**, and `cargo xtask layers` fails for a
+  workspace member that is not in the table, so the taxonomy cannot quietly grow a fourth category.
+- **Names keep the `stkcraft-` prefix** rather than a domain prefix: `stkcraft-body` is unambiguous
+  inside `crates/astro/`, and the family's convention is one prefix for the app's crates.
+- **The layer number and the directory agree**: framework ≤ 4, astro 2–4, agent 3–6, ui 5, apps 6. A
+  crate that needs a higher layer than its directory implies is in the wrong directory.
+
+## 8. Storage
+
+**Do not scatter state.** Every stored thing belongs to one of three stores, chosen by the question a
+reader asks of it, and `docs/storage.md` is the decision record:
+
+- **relational** for the record — scenarios, their revisions, the contents, the computed windows, the
+  provenance of each run, documents and citations, translation rows, installed packages;
+- **key-value** for derived, disposable caches — kernel indexes, the knowledge inverted index, vectors,
+  generated catalogs;
+- **vector** for recall over a large corpus, once an embedding model is chosen — candidates only, never
+  the authority.
+
+- **One crate owns persistence.** No other crate opens a database, writes a key-value file or issues
+  SQL; a crate that needs to remember something asks the storage crate.
+- **Config is what a person decided, data is what the program produced.** They live in different
+  directories, and deleting the cache never loses a decision.
+- **Every stored value that came from outside carries its digest**, so a record can be reproduced.
+- **Not built:** the storage crate itself, the PostgreSQL path, embeddings, and the corpus fetcher.
+  `docs/storage.md` §6 states each.
+
+## 9. What every rule here has in common
 
 - **The gate is the enforcement.** A rule that `cargo xtask ci` does not check is a rule that will be
   broken by the next contributor in good faith. When adding a rule, add the check.

@@ -14,7 +14,8 @@ It is one of the ArtCraft Craft apps and follows the same conventions as its sib
 ## Start every session here
 
 1. `ROADMAP.md` (once it exists) — current stage and focus.
-2. `docs/standards.md` — **the rule book**: i18n, agent/skills/MCP, extensions, API docs.
+2. `docs/standards.md` — **the rule book**: i18n, agent/skills/MCP, extensions, API docs, crate
+   taxonomy, storage.
 3. `docs/architecture.md` — crate map, layers, and how a scenario flows through them.
 4. `AGENTS.md` (this file) — the rules below.
 
@@ -117,6 +118,15 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   whose text is its description, then the procedure: the order of commands, what the answer
   means, and the traps. They are loaded at run time, so a new skill needs no rebuild; they are
   listed by name in the system prompt and read only when a job needs one.
+- **A crate's place in the tree says what it is.** `crates/framework/` is the platform (nothing there
+  knows what an orbit is), `crates/astro/` is the orbital-analysis domain, `crates/agent/` is the
+  model-facing surface, `crates/ui/` is presentation. A new crate goes into the directory that matches
+  its subject; the taxonomy is `docs/standards.md` §7 and `cargo xtask layers` is what enforces the
+  membership. A `body` or an `access` crate under `framework/` is a bug.
+- **State is not scattered.** Every stored thing is relational (the record), key-value (a derived,
+  disposable cache) or vector (recall candidates), and one crate owns persistence.
+  `docs/storage.md` is the decision record; a stray JSON file beside the executable is the failure it
+  exists to prevent.
 - **Layering** is enforced by `cargo xtask layers`. A crate may depend only on a strictly
   lower layer, and nothing at or below `LAST_NON_UI_LAYER` may depend on egui, eframe,
   winit or rfd. Register every new crate in `xtask/src/layers.rs`.

@@ -9,6 +9,42 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.32] — The tree says what each crate is, and the storage design is decided
+
+Two things a professional looks at first: how the crates are organised, and where the data lives.
+Both were decided by accretion until now — a `crates/` directory in the order things happened to be
+written, and state in whatever file was nearest. This release fixes the shape of both, on paper and in
+the tree, before more code makes the wrong shape permanent.
+
+### Changed
+
+- **`crates/` is grouped by subject.** `crates/framework/` is the platform — units, time, translations,
+  the extension contract — and nothing in it may know what an orbit is. `crates/astro/` is the domain:
+  bodies, frames, ephemerides, propagation, access geometry, the engine. `crates/agent/` is the
+  model-facing surface: the knowledge base, the MCP server, the runtime. `crates/ui/` is presentation.
+  A reader can now tell which is which without opening a file, and a crate that needs a higher layer
+  than its directory implies is in the wrong directory.
+- **Crate names keep the `stkcraft-` prefix**, so `use stkcraft_body::Body` is unchanged and the family's
+  one-prefix convention holds; it is the *directory* that carries the taxonomy.
+
+### Added
+
+- **`docs/standards.md` §7 (crate taxonomy)** — which directory means what, with the rule that a new
+  crate goes where its subject puts it and `cargo xtask layers` is what enforces membership.
+- **`docs/standards.md` §8 and `docs/storage.md`** — the storage decision record: the **relational**
+  store holds the record (scenarios and their revisions, satellites, stations, sensors, access windows,
+  the provenance of every run, documents and citations, translation rows, installed packages); the
+  **key-value** store holds derived, disposable caches (kernel indexes, the knowledge index, vectors,
+  generated catalogs); the **vector** store holds recall candidates once an embedding model exists and
+  never the authority. One crate will own persistence; nothing else may open a database.
+
+### Not built yet
+
+- **The storage crate itself** — this release fixes the design, and the schema lands next with the
+  SQLite record, the key-value cache and the vector table.
+- **The control channel** the siblings expose, **PDF ingestion** for the knowledge base, and the
+  **paper corpus** fetcher are the next three steps, in that order.
+
 ## [0.1.31] — The user's documents are the expert panel
 
 A model asked "what is the maximum off-nadir angle for this sensor" answers from its training data,

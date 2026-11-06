@@ -7,26 +7,39 @@ the crates fit together and why they are split the way they are.
 ## Crates and layers
 
 ```text
-L0  core      units (Angle, Distance, Duration, EpochOffset), the Error type, Vector3
-L1  time      time scales, the IERS leap-second table, Julian dates and epochs
-L2  frames    reference frames and rotations
-L2  sgp4      SGP4/SDP4 propagation from a two-line element set
-L3  access    line of sight, elevation masks, occultation, access windows
-L4  engine    scenario, propagation, analysis, the command registry
-L5  mcp       the MCP server: every command as an agent tool, every skill as a prompt
-L5  viewport  the 3D viewport: GPU rendering and generated geometry
-L6  agent     a model that drives the engine through the MCP tools
-    apps      stkcraft (window, CLI, MCP server and agent)
+crates/framework/        the platform — nothing here knows what an orbit is
+  core                   units (Angle, Distance, Duration, EpochOffset), the Error type, Vector3
+  time                   time scales, the IERS leap-second table, Julian dates and epochs
+  i18n                   the interface catalogs: format, lookup, plurals
+  extensions             the package contract: manifests, ids, trust tiers
+
+crates/astro/            the orbital-analysis domain — the astronomy lives here
+  body                   IAU constants, ellipsoid and rotation models for 18 bodies
+  frames                 reference frames and rotations
+  ephemeris              NAIF SPK/DAF, VSOP87A and Keplerian backends
+  sgp4                   SGP4/SDP4 propagation from a two-line element set
+  access                 line of sight, elevation masks, occultation, access windows
+  engine                 scenario, propagation, analysis, the command registry
+
+crates/agent/            the model-facing surface
+  knowledge              the user's own documents, searched before a model answers
+  mcp                    the command registry spoken to an outside client
+  runtime                a model driving the engine through those tools
+
+crates/ui/               presentation
+  viewport               the 3D viewport: GPU rendering and generated geometry
+
+apps/stkcraft            window, CLI, MCP server and assistant
 ```
 
 Planned, in the order they will land:
 
 ```text
-L0  geom      conic sections, coordinate transforms on the sphere, intersection routines
-L1  astro     low-precision Sun, Moon and planet positions
-L2  ephemeris SP3 and CCSDS OEM/OPM/OMM readers
-L2  atmos     neutral atmosphere density
-L3  coverage  grids and grids-of-figures over time
+crates/astro/geom        conic sections, sphere coordinate transforms, intersections
+crates/astro/atmos       neutral atmosphere density
+crates/astro/coverage    grids and grids-of-figures over time
+crates/framework/storage the record, the cache and the vector store (docs/storage.md)
+crates/astro/papers      PDF ingestion for the knowledge base (via the family's craft-pdf)
 ```
 
 `cargo xtask layers` enforces that a crate depends only on a strictly lower layer, and that
@@ -184,7 +197,7 @@ pattern:
 
 - The verification data is a transcription of the AIAA 2006-6753 archive — the 33 element
   sets and the reference implementation's own output for them — kept in
-  `crates/sgp4/src/tests/vectors/data.rs` with its source named.
+  `crates/astro/sgp4/src/tests/vectors/data.rs` with its source named.
 - The tests compare against that data in two groups, because the two halves of the theory are
   in different states. The near-Earth half is held to `4e-9 km`, which is the limit of what
   a table printed to eight decimals can express; the deep-space half is held to the accuracy

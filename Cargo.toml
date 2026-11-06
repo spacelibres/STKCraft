@@ -1,26 +1,30 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/core",
-    "crates/time",
-    "crates/body",
-    "crates/ephemeris",
-    "crates/extensions",
-    "crates/frames",
-    "crates/i18n",
-    "crates/knowledge",
-    "crates/sgp4",
-    "crates/access",
-    "crates/engine",
-    "crates/mcp",
-    "crates/agent",
-    "crates/viewport",
+    # The platform: nothing here knows what an orbit is.
+    "crates/framework/core",
+    "crates/framework/time",
+    "crates/framework/i18n",
+    "crates/framework/extensions",
+    # The orbital-analysis domain: the astronomy lives here and nowhere else.
+    "crates/astro/body",
+    "crates/astro/frames",
+    "crates/astro/ephemeris",
+    "crates/astro/sgp4",
+    "crates/astro/access",
+    "crates/astro/engine",
+    # The model-facing surface: what an agent or an MCP client drives.
+    "crates/agent/knowledge",
+    "crates/agent/mcp",
+    "crates/agent/runtime",
+    # Presentation.
+    "crates/ui/viewport",
     "apps/stkcraft",
     "xtask",
 ]
 
 [workspace.package]
-version = "0.1.31"
+version = "0.1.32"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -29,20 +33,20 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-core = { path = "crates/core", version = "0.1.31" }
-stkcraft-time = { path = "crates/time", version = "0.1.31" }
-stkcraft-body = { path = "crates/body", version = "0.1.31" }
-stkcraft-ephemeris = { path = "crates/ephemeris", version = "0.1.31" }
-stkcraft-extensions = { path = "crates/extensions", version = "0.1.31" }
-stkcraft-frames = { path = "crates/frames", version = "0.1.31" }
-stkcraft-i18n = { path = "crates/i18n", version = "0.1.31" }
-stkcraft-knowledge = { path = "crates/knowledge", version = "0.1.31" }
-stkcraft-sgp4 = { path = "crates/sgp4", version = "0.1.31" }
-stkcraft-access = { path = "crates/access", version = "0.1.31" }
-stkcraft-engine = { path = "crates/engine", version = "0.1.31" }
-stkcraft-mcp = { path = "crates/mcp", version = "0.1.31" }
-stkcraft-agent = { path = "crates/agent", version = "0.1.31" }
-stkcraft-viewport = { path = "crates/viewport", version = "0.1.31" }
+stkcraft-core = { path = "crates/framework/core", version = "0.1.32" }
+stkcraft-time = { path = "crates/framework/time", version = "0.1.32" }
+stkcraft-body = { path = "crates/astro/body", version = "0.1.32" }
+stkcraft-ephemeris = { path = "crates/astro/ephemeris", version = "0.1.32" }
+stkcraft-extensions = { path = "crates/framework/extensions", version = "0.1.32" }
+stkcraft-frames = { path = "crates/astro/frames", version = "0.1.32" }
+stkcraft-i18n = { path = "crates/framework/i18n", version = "0.1.32" }
+stkcraft-knowledge = { path = "crates/agent/knowledge", version = "0.1.32" }
+stkcraft-sgp4 = { path = "crates/astro/sgp4", version = "0.1.32" }
+stkcraft-access = { path = "crates/astro/access", version = "0.1.32" }
+stkcraft-engine = { path = "crates/astro/engine", version = "0.1.32" }
+stkcraft-mcp = { path = "crates/agent/mcp", version = "0.1.32" }
+stkcraft-agent = { path = "crates/agent/runtime", version = "0.1.32" }
+stkcraft-viewport = { path = "crates/ui/viewport", version = "0.1.32" }
 
 # Third-party. Time goes through `chrono` per the suite standard: never hand-roll
 # UTC/calendar conversion.

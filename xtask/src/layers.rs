@@ -81,19 +81,19 @@ pub const GUI_CRATES: [&str; 7] = [
 pub const LAYOUT: &[CrateSpec] = &[
     CrateSpec {
         name: "stkcraft-core",
-        path: "crates/core",
+        path: "crates/framework/core",
         layer: 0,
     },
     // Interface translations have no dependency at all: they are a text format and a lookup. They
     // sit beside `core` because the engine's own messages are user-visible and reach them too.
     CrateSpec {
         name: "stkcraft-i18n",
-        path: "crates/i18n",
+        path: "crates/framework/i18n",
         layer: 0,
     },
     CrateSpec {
         name: "stkcraft-time",
-        path: "crates/time",
+        path: "crates/framework/time",
         layer: 1,
     },
     // Body constants and rotation models sit beside the frame machinery: both are L2, and
@@ -101,27 +101,27 @@ pub const LAYOUT: &[CrateSpec] = &[
     // from `stkcraft-frames`.
     CrateSpec {
         name: "stkcraft-body",
-        path: "crates/body",
+        path: "crates/astro/body",
         layer: 2,
     },
     CrateSpec {
         name: "stkcraft-frames",
-        path: "crates/frames",
+        path: "crates/astro/frames",
         layer: 2,
     },
     CrateSpec {
         name: "stkcraft-sgp4",
-        path: "crates/sgp4",
+        path: "crates/astro/sgp4",
         layer: 2,
     },
     CrateSpec {
         name: "stkcraft-access",
-        path: "crates/access",
+        path: "crates/astro/access",
         layer: 3,
     },
     CrateSpec {
         name: "stkcraft-ephemeris",
-        path: "crates/ephemeris",
+        path: "crates/astro/ephemeris",
         layer: 3,
     },
     // The extension package contract: manifests, ids and trust tiers. Pure data and validation, so
@@ -130,17 +130,17 @@ pub const LAYOUT: &[CrateSpec] = &[
     // model, so it sits with the analysis layers and can be tested without either.
     CrateSpec {
         name: "stkcraft-knowledge",
-        path: "crates/knowledge",
+        path: "crates/agent/knowledge",
         layer: 3,
     },
     CrateSpec {
         name: "stkcraft-extensions",
-        path: "crates/extensions",
+        path: "crates/framework/extensions",
         layer: 3,
     },
     CrateSpec {
         name: "stkcraft-engine",
-        path: "crates/engine",
+        path: "crates/astro/engine",
         layer: 4,
     },
     // The MCP server is a transport onto the engine: a menu, a CLI and an MCP session all reach
@@ -148,7 +148,7 @@ pub const LAYOUT: &[CrateSpec] = &[
     // viewport, one below the agent, because it consumes the engine and nothing consumes it.
     CrateSpec {
         name: "stkcraft-mcp",
-        path: "crates/mcp",
+        path: "crates/agent/mcp",
         layer: APP_LAYER - 2,
     },
     // The 3D viewport sits above the analysis layers because it is a UI crate: it may use
@@ -156,7 +156,7 @@ pub const LAYOUT: &[CrateSpec] = &[
     // `stkcraft-core`, so it can be replaced without touching the engine.
     CrateSpec {
         name: "stkcraft-viewport",
-        path: "crates/viewport",
+        path: "crates/ui/viewport",
         layer: APP_LAYER - 2,
     },
     // The agent drives the engine through the MCP server's tools, so it sits strictly above that
@@ -164,7 +164,7 @@ pub const LAYOUT: &[CrateSpec] = &[
     // server from another process, leaves this crate out of the picture entirely.
     CrateSpec {
         name: "stkcraft-agent",
-        path: "crates/agent",
+        path: "crates/agent/runtime",
         layer: APP_LAYER - 1,
     },
     CrateSpec {
