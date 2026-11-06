@@ -9,6 +9,45 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.64] — The table went green, and the false positives are gone
+
+`cargo xtask formulas` reads **6 rows checked, 6 correct, 0 wrong** — the six regions the ODM book used to
+report as formulas are recognised as what they are: table rows, numbered-rule prose and keyword lines.
+
+Two structural exclusions did it, neither of which parses a table:
+
+- **A shared edge is a column.** A line whose right edge (within 2 points) or left edge (within 1 point) is
+  shared with three or more lines on the page is a cell in a table or a column of labels, not a display
+  equation — a formula is set *alone* horizontally. Matching only the right edge took the table from 6 wrong
+  to 4; matching the left edge as well took it to zero.
+- **A list marker is not a formula.** A line opening with `1)`, `c)`, `No ` or a bullet is a numbered rule;
+  the ODM's integer-and-float rules are exactly that, centred and full of `+`/`-`/`<=`.
+
+### Measured after the change
+
+| Document | 0.1.62 | now |
+|---|---|---|
+| `502x0b1s.pdf` (ODM) | 6 (all false) | **0** |
+| `101x0b3s.pdf` | 42 | 35 |
+| `101x0b4s.pdf` | 150 | 80 |
+| `922x27o1.pdf` | 24 | 24 |
+
+The ODM now reports **no** formulas — which is the truth: it sets its equations in the body face and this
+pipeline still cannot see them. The other three lost the regions that were tables, and the transcription
+table says the six known false positives are gone.
+
+### Verified
+
+`cargo xtask formulas` — the instrument from 0.1.63 — is green, and it stays outside `cargo xtask ci`
+because it needs the corpus.
+
+### Not built yet
+
+- **Positive rows**: the ODM has no equation this pipeline can see, so the table still has no `formula`
+  row. They have to come from a document that typesets mathematics (`arxiv-2402.04830` is the candidate),
+  and until one is added the table proves only that certain things are *not* formulas.
+- Mathlib classification, `verify-formulas`, and the linked-OCR feature with its CI leg.
+
 ## [0.1.63] — The transcription table, and it is red on purpose
 
 `share/math/transcriptions.tsv` and `cargo xtask formulas` are the instrument

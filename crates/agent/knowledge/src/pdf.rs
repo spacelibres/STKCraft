@@ -441,6 +441,18 @@ fn regions_of(spans: &[Span]) -> Vec<crate::math::Region> {
             // promoting list paragraphs and multi-line prose blocks that happened to be centred and
             // hold a relation. A formula a person can cite is short.
             let sentence_like = span.text.chars().count() > 80 || span.text.contains(". ");
+            // A table cell is not an equation. Two structures give one away without parsing a table: its
+            // right edge is shared with other lines (a column of cells ends together), and its text opens
+            // with a list marker (`1)`, `c)`) that a formula does not have. Both were false positives in
+            // the transcription table on the ODM book, and both are cheap to exclude.
+            let shared_edge = spans
+                .iter()
+                .filter(|other| {
+                    (other.x1 - span.x1).abs() <= 2.0 || (other.x0 - span.x0).abs() <= 1.0
+                })
+                .count()
+                >= 3;
+            let list_marker = opens_with_a_list_marker(&span.text);
             crate::math::Run {
                 page: 1,
                 text: span.text.clone(),
@@ -450,11 +462,28 @@ fn regions_of(spans: &[Span]) -> Vec<crate::math::Region> {
                 em: span.em,
                 fonts: span.fonts.clone(),
                 baselines: span.baselines,
-                display: (indented || centred) && !sentence_like,
+                display: (indented || centred) && !sentence_like && !shared_edge && !list_marker,
             }
         })
         .collect();
     crate::math::segment(&runs)
+}
+
+/// Whether a line opens with a list or clause marker: `1)`, `c)`, `No`, `-`, `•`.
+///
+/// A formula never starts with one of these; the numbered rules of a standard start with nothing else.
+fn opens_with_a_list_marker(text: &str) -> bool {
+    let text = text.trim_start();
+    let mut characters = text.chars();
+    let first = characters.next().unwrap_or_default();
+    let second = characters.next().unwrap_or_default();
+    if first.is_ascii_digit() && (second == ')' || second == '.') {
+        return true;
+    }
+    if first.is_ascii_lowercase() && second == ')' {
+        return true;
+    }
+    text.starts_with("No ") || text.starts_with("No\t")
 }
 
 /// The sentence that introduces a region: the nearest text line above it, when there is one close by.
