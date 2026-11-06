@@ -9,6 +9,16 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.80] — Malformed model calls cannot become default actions
+
+### Fixed
+
+- Invalid model tool arguments now fail before any tool is dispatched, including when an earlier
+  call in the same response is valid. Corrupt JSON, missing identifiers and non-object arguments
+  no longer silently become an empty parameter object that could execute a command with defaults.
+- Reporting a malformed response containing Chinese or other multi-byte text no longer risks a
+  string-boundary panic. Valid text answers and valid multiple-tool responses keep their behaviour.
+
 ## [0.1.79] — Development data verifies on Windows
 
 ### Fixed

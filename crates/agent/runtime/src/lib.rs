@@ -394,10 +394,11 @@ pub fn parse_response(text: &str) -> Result<Turn, String> {
         .get("choices")
         .and_then(|choices| choices.get(0))
         .and_then(|choice| choice.get("message"))
+        .and_then(Value::as_object)
         .ok_or_else(|| {
             format!(
                 "the answer has no message: {}",
-                &text[..text.len().min(200)]
+                text.chars().take(200).collect::<String>()
             )
         })?;
     let mut turn = Turn {
@@ -408,27 +409,42 @@ pub fn parse_response(text: &str) -> Result<Turn, String> {
             .to_owned(),
         calls: Vec::new(),
     };
-    if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-        for call in calls {
-            let function = call.get("function").cloned().unwrap_or(Value::Null);
-            let arguments = function
+    if let Some(calls) = message.get("tool_calls").filter(|calls| !calls.is_null()) {
+        let calls = calls
+            .as_array()
+            .ok_or_else(|| "the answer's tool_calls must be an array".to_owned())?;
+        for (index, call) in calls.iter().enumerate() {
+            let id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| format!("tool_calls[{index}].id must be a nonempty string"))?;
+            let function = call
+                .get("function")
+                .and_then(Value::as_object)
+                .ok_or_else(|| format!("tool_calls[{index}].function must be an object"))?;
+            let name = function
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .ok_or_else(|| {
+                    format!("tool_calls[{index}].function.name must be a nonempty string")
+                })?;
+            let raw = function
                 .get("arguments")
                 .and_then(Value::as_str)
-                .map_or_else(
-                    || json!({}),
-                    |raw| serde_json::from_str(raw).unwrap_or_else(|_| json!({})),
-                );
+                .ok_or_else(|| format!("tool_calls[{index}].function.arguments must be a JSON object encoded as a string"))?;
+            let arguments: Value = serde_json::from_str(raw).map_err(|error| {
+                format!("tool_calls[{index}].function.arguments is invalid JSON: {error}")
+            })?;
+            if !arguments.is_object() {
+                return Err(format!(
+                    "tool_calls[{index}].function.arguments must decode to an object"
+                ));
+            }
             turn.calls.push(ToolCall {
-                id: call
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-                name: function
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
+                id: id.to_owned(),
+                name: name.to_owned(),
                 arguments,
             });
         }
@@ -1479,6 +1495,129 @@ mod tests {
         assert_eq!(turn.text, "ok");
         assert_eq!(turn.calls[0].name, "access.compute");
         assert_eq!(turn.calls[0].arguments["step-seconds"], 60);
+    }
+
+    #[test]
+    fn response_boundary_rejects_invalid_tool_fields() {
+        let valid = json!({"id":"c1", "function":{"name":"scenario__rename", "arguments":"{}"}});
+        let mut cases = Vec::new();
+        for arguments in [
+            json!("{"),
+            json!("[]"),
+            json!("null"),
+            json!("3"),
+            json!("true"),
+            json!("\"text\""),
+            json!({}),
+            Value::Null,
+        ] {
+            let mut call = valid.clone();
+            call["function"]["arguments"] = arguments;
+            cases.push((call, "arguments"));
+        }
+        let mut missing_arguments = valid.clone();
+        missing_arguments["function"]
+            .as_object_mut()
+            .expect("object")
+            .remove("arguments");
+        cases.push((missing_arguments, "arguments"));
+        for field in ["id", "name"] {
+            for value in [json!(""), json!("   "), Value::Null, json!(7)] {
+                let mut call = valid.clone();
+                if field == "id" {
+                    call[field] = value;
+                } else {
+                    call["function"][field] = value;
+                }
+                cases.push((call, field));
+            }
+            let mut call = valid.clone();
+            if field == "id" {
+                call.as_object_mut().expect("object").remove(field);
+            } else {
+                call["function"]
+                    .as_object_mut()
+                    .expect("object")
+                    .remove(field);
+            }
+            cases.push((call, field));
+        }
+        for (call, field) in cases {
+            let response = json!({"choices":[{"message":{"tool_calls":[call]}}]});
+            let error = parse_response(&response.to_string()).expect_err("invalid field must fail");
+            assert!(error.contains(field), "{field}: {error}");
+        }
+    }
+
+    #[test]
+    fn response_boundary_requires_message_object_and_call_array() {
+        for message in [Value::Null, json!("text"), json!([]), json!(4)] {
+            let response = json!({"choices":[{"message":message}]});
+            let error = parse_response(&response.to_string()).expect_err("message object required");
+            assert!(error.contains("message"), "{error}");
+        }
+        for calls in [json!({}), json!("calls"), json!(1), json!(true)] {
+            let response = json!({"choices":[{"message":{"tool_calls":calls}}]});
+            let error = parse_response(&response.to_string()).expect_err("array required");
+            assert!(error.contains("tool_calls"), "{error}");
+        }
+    }
+
+    #[test]
+    fn response_boundary_preserves_plain_text_and_multiple_calls() {
+        for message in [
+            json!({"content":"answer"}),
+            json!({"content":"answer", "tool_calls":null}),
+        ] {
+            let turn = parse_response(&json!({"choices":[{"message":message}]}).to_string())
+                .expect("plain answer");
+            assert_eq!(turn.text, "answer");
+            assert_eq!(turn.calls, Vec::<ToolCall>::new());
+        }
+        let calls = json!([
+            {"id":"c1","function":{"name":"scenario__rename","arguments":"{\"name\":\"Gemini\"}"}},
+            {"id":"c2","function":{"name":"scenario__read","arguments":"{}"}}
+        ]);
+        let turn =
+            parse_response(&json!({"choices":[{"message":{"tool_calls":calls}}]}).to_string())
+                .expect("valid calls");
+        assert_eq!(turn.calls.len(), 2);
+        assert_eq!(turn.calls[0].id, "c1");
+        assert_eq!(turn.calls[0].arguments["name"], "Gemini");
+        assert_eq!(turn.calls[1].name, "scenario__read");
+        assert_eq!(turn.calls[1].arguments, json!({}));
+    }
+
+    #[test]
+    fn response_boundary_quotes_unicode_without_panicking() {
+        let response = format!("{{\"padding\":\"{}\"}}", "星".repeat(100));
+        assert!(!response.is_char_boundary(200));
+        let error = parse_response(&response).expect_err("no message");
+        assert!(error.contains("no message"));
+        assert!(error.ends_with(&response.chars().take(200).collect::<String>()));
+    }
+
+    #[test]
+    fn response_boundary_invalid_second_call_cannot_mutate_the_scenario() {
+        struct InvalidResponse;
+        impl ChatModel for InvalidResponse {
+            fn complete(&self, _messages: &[Message], _tools: &[Value]) -> Result<Turn, String> {
+                parse_response(
+                    r#"{"choices":[{"message":{"tool_calls":[
+                    {"id":"c1","function":{"name":"scenario__rename","arguments":"{\"name\":\"Gemini\"}"}},
+                    {"id":"c2","function":{"name":"scenario__rename","arguments":"{"}}
+                ]}}]}"#,
+                )
+            }
+        }
+        let scenario = Scenario::empty("unchanged");
+        let before = serde_json::to_value(&scenario).expect("scenario JSON");
+        let mut agent = Agent::new(InvalidResponse, Server::new(scenario, Vec::new()));
+        assert!(agent.ask("rename").is_err());
+        assert_eq!(
+            serde_json::to_value(agent.server().scenario()).expect("scenario JSON"),
+            before
+        );
     }
 
     #[test]

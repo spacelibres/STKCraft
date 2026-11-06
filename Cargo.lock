@@ -2902,7 +2902,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stkcraft"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "bytemuck",
  "craft-ui",
@@ -2931,7 +2931,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-agent-control"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde_json",
  "sha2",
@@ -2941,7 +2941,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-agent-knowledge"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "craft-pdf",
  "kurbo",
@@ -2950,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-agent-mcp"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde_json",
  "stkcraft-agent-knowledge",
@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-agent-runtime"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
  "serde_json",
@@ -2973,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-astro-access"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
  "stkcraft-astro-body",
@@ -2983,7 +2983,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-astro-body"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
  "stkcraft-framework-core",
@@ -2992,7 +2992,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-astro-engine"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
  "serde_json",
@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-astro-ephemeris"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "stkcraft-astro-body",
  "stkcraft-framework-core",
@@ -3015,7 +3015,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-astro-frames"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
  "stkcraft-framework-core",
@@ -3024,7 +3024,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-astro-sgp4"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
  "stkcraft-framework-core",
@@ -3033,14 +3033,14 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-framework-core"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "stkcraft-framework-extensions"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
  "toml",
@@ -3048,14 +3048,14 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-framework-i18n"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "stkcraft-framework-storage"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-framework-time"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "chrono",
  "serde",
@@ -3076,7 +3076,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-ui-viewport"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "bytemuck",
  "egui",
@@ -4248,7 +4248,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.79"
+version = "0.1.80"
 dependencies = [
  "serde_json",
  "sha2",
