@@ -24,6 +24,28 @@ A rule that cannot name its source here is a rule this project is not entitled t
 - **Naming.** NAIF's body and frame ids are integers with a registry (`naif_ids.html`); CCSDS names frames in strings. The two meet at the scenario document, which carries the NAIF id and the name.
 - **Anything not decided here is not decided.** A disagreement that this page does not name is a gap to fill, not a licence to choose quietly.
 
+## Acquisition status, with the evidence
+
+Each authority has to be *fetchable* before its documents can be a corpus with checksums, and two of the three
+are not, in the way a program can use:
+
+| Authority | Status | Evidence |
+|---|---|---|
+| CCSDS | **fetched** — 495 publications, 548 MB | `cargo xtask standards`, `docs/guides/ccsds-standards.md` |
+| NASA / NAIF | **fetched** — 27 documents, 2.2 MB | `cargo xtask naif`, `docs/guides/naif-corpus.md` |
+| ESA / ECSS | **not fetched** | `ecss.nl` serves its catalogue as pages; the documents themselves are distributed through DOORS (`/doors-download/`), and the `wp-content/uploads/standards/*.pdf` paths answer 404. A program cannot download them without the registration the site asks for, and this repository does not scrape past a registration. |
+
+So the ESA alignment in this release is by **reference, not by corpus**: the rules this project follows from
+ECSS — software assurance (ECSS-E-ST-40C, ECSS-Q-ST-80C) and debris mitigation (ECSS-U-AS-10) — are cited in
+`AGENTS.md` and in the review rules, and the CCSDS 9xx orange books that the corpus *does* hold carry much of
+the same material, because they are joint CCSDS/ESA work. A person who has the ECSS PDFs can drop them into
+`~/.config/stkcraft/knowledge/` and the search will read them like any other document; the repository does not
+carry them and does not pretend to.
+
+**What would change this**: a licence-and-source check that establishes a stable, program-fetchable URL for the
+ECSS set (ESA's own download service, or a mirror with the publisher's permission). Until then the register
+below stays honest about the gap rather than filling it with a screenshot of a login page.
+
 ## The corpora
 
 - `docs/guides/ccsds-standards.md` — every CCSDS publication, 495 documents, hashed and searchable.

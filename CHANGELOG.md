@@ -9,6 +9,33 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.77] — The ECSS gap, stated instead of papered over
+
+The requirement is to take CCSDS, NASA and ESA together. Two of the three are corpora with checksums now; the
+third is not, and this release writes down why rather than adding a folder that suggests otherwise.
+
+**Probed, not assumed:** `ecss.nl` serves its catalogue as *pages* (`/active-standards/` answers 200), the
+documents themselves are distributed through DOORS (`/doors-download/`), and the obvious
+`wp-content/uploads/standards/*.pdf` paths **404**. A program cannot fetch the ECSS set without the
+registration the site asks for, and this repository does not scrape past a registration.
+
+So `docs/guides/sources.md` gains an **acquisition status** table with the evidence for each authority —
+CCSDS fetched (495 publications), NAIF fetched (27 documents), ECSS **not fetched and why** — and the honest
+statement of what the ESA alignment actually is today: by reference (ECSS-E-ST-40C and ECSS-Q-ST-80C for
+software assurance, ECSS-U-AS-10 for debris mitigation are cited in the rules) and through the CCSDS 9xx
+orange books, which are joint CCSDS/ESA work and *are* in the corpus. A person who owns the ECSS PDFs can drop
+them into their knowledge directory and the search reads them like any other document.
+
+### Changed
+
+- **`docs/guides/sources.md`** — the acquisition status, with the probe results, and the single sentence that
+  would change it (a licence-and-source check that establishes a stable, program-fetchable URL).
+
+### Not built yet
+
+- **The ECSS corpus**, for the reason above.
+- Target rendering in the window; the coverage grid.
+
 ## [0.1.76] — NAIF's algorithms are a corpus, and the sources are written down
 
 The requirement: the project follows CCSDS **and** NASA **and** ESA, so the algorithms have to be as available
