@@ -333,7 +333,14 @@ structure Point where
 /// declaration would use, so `√x` and `Real.sqrt` meet at `sqrt`. The table is short on purpose — a
 /// classifier that scored on words would match prose, and the point of classifying *formulas* is that they
 /// are operators.
-pub const OPERATORS: [(&str, &str); 18] = [
+pub const OPERATORS: [(&str, &str); 23] = [
+    // The arithmetic a polynomial is made of. It is here because the first recorded equations were
+    // polynomials: without it, `F(x) = x⁸+x⁷+x²+x+1` had no operator the classifier could name.
+    ("^", "pow"),
+    ("\\^", "pow"),
+    ("+", "add"),
+    ("·", "mul"),
+    ("\\cdot", "mul"),
     ("√", "sqrt"),
     ("\\sqrt", "sqrt"),
     ("∑", "sum"),
@@ -353,6 +360,13 @@ pub const OPERATORS: [(&str, &str); 18] = [
     ("≈", "approx"),
     ("∇", "gradient"),
 ];
+
+/// Operators that are arithmetic but not *evidence*: every equation in the world has them.
+///
+/// Measured, not assumed: with `add` and `pow` in the scoring set, `F(x) = x⁸+x⁷+x²+x+1` matched
+/// `abv_add` — an absolute-value addition lemma — with a score of 1.00. Generic arithmetic says nothing
+/// about which concept a formula is about, so it is counted for reporting and ignored for matching.
+pub const GENERIC: [&str; 4] = ["add", "pow", "mul", "div"];
 
 /// A classification: the declaration a formula was matched to, and how strongly.
 #[derive(Debug, Clone, PartialEq)]
@@ -390,7 +404,11 @@ pub fn operators_in(text: &str) -> Vec<&'static str> {
 /// this project cannot justify is a classification it does not make.
 #[must_use]
 pub fn classify(formula: &str, declarations: &[Declaration]) -> Option<Match> {
-    let formula_operators = operators_in(formula);
+    // Only the operators that distinguish one concept from another take part in a match.
+    let formula_operators: Vec<&'static str> = operators_in(formula)
+        .into_iter()
+        .filter(|token| !GENERIC.contains(token))
+        .collect();
     if formula_operators.is_empty() {
         return None;
     }
@@ -401,13 +419,23 @@ pub fn classify(formula: &str, declarations: &[Declaration]) -> Option<Match> {
             declaration.name, declaration.statement, declaration.docstring
         );
         let haystack = haystack.to_ascii_lowercase();
+        // Words, not substrings: "add" inside "addition" and "pow" inside "power" made a derivative lemma
+        // match a polynomial with a score of 1.00, which is exactly the plausible-but-wrong answer this
+        // project refuses.
+        let words: Vec<&str> = haystack
+            .split(|character: char| !character.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .collect();
         let mut shared: Vec<&'static str> = Vec::new();
         for token in &formula_operators {
             // A declaration names an operator either by its word (`sqrt`, `sum`) or by the symbol.
-            let named = haystack.contains(token)
-                || OPERATORS
-                    .iter()
-                    .any(|(symbol, name)| name == token && haystack.contains(symbol));
+            // A symbol counts only when it cannot be prose: `+` appears in the statement of half of
+            // Analysis, so matching on it made a derivative lemma "cover" a polynomial. `√`, `∑`, `∂` and
+            // their kin do not appear by accident.
+            let named = words.contains(token)
+                || OPERATORS.iter().any(|(symbol, name)| {
+                    name == token && !symbol.is_ascii() && haystack.contains(symbol)
+                });
             if named {
                 shared.push(token);
             }
@@ -469,7 +497,12 @@ structure MonoidHom (M N : Type) where
         assert_eq!(matched.name, "sqrt");
         assert_eq!(matched.domain, "Analysis");
         assert_eq!(matched.shared, vec!["sqrt"]);
-        assert!((matched.score - 1.0).abs() < f64::EPSILON);
+        // `^` is arithmetic and not evidence, so the coverage is the one operator that distinguishes it.
+        assert!(
+            (matched.score - 1.0).abs() < f64::EPSILON,
+            "{}",
+            matched.score
+        );
         // The citation a hit prints: the concept, the taxonomy and the strength.
         assert_eq!(
             matched.module,

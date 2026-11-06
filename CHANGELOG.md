@@ -9,6 +9,51 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.69] — Two false matches found by running it, and the rule that stops them
+
+The wider operator table was supposed to let polynomial formulas match. It did — **wrongly**, twice, and both
+are worth recording because they are the failure mode this project exists to prevent:
+
+1. **Substring matching.** `add` matched inside "addition" and `pow` inside "power", so
+   `F(x) = x⁸+x⁷+x²+x+1` was classified as `HasFDerivWithinAt.lim` with a score of **1.00** — a derivative
+   lemma, for a polynomial, stated with total confidence.
+2. **Symbol matching.** With words fixed, `+` in a statement still counted, because half of `Analysis` is
+   written with `+`; the polynomial then matched `abv_add`, an absolute-value addition lemma, at **1.00**.
+
+Both were caught by `cargo xtask verify-formulas` and by reading what it printed, not by a test — which is
+the argument for the command existing.
+
+### Changed
+
+- **A token matches a whole word** of the declaration (`words`, split on non-alphanumerics), never a
+  substring.
+- **A symbol counts only when it cannot be prose**: non-ASCII ones (`√ ∑ ∏ ∫ ∂ ∇ ∞ ≤ ≥ ≠ ≈`). `+` and `^` are
+  not evidence.
+- **`GENERIC` operators are counted and not scored.** `add`, `pow`, `mul`, `div` are in every equation, so
+  they say nothing about which concept a formula is about. A formula whose only operators are arithmetic is
+  therefore **no match** — the honest answer for a concept this table cannot name.
+
+### Measured after the fix
+
+```
+$ cargo xtask verify-formulas
+verify-formulas: 9 row(s) re-read, 3 formula(s) re-classified, 2 with no match, 0 drifted
+
+document        page  mathlib_name  score  domain
+101x0b3s.pdf    15    -             -      -
+101x0b4s.pdf    15    -             -      -
+101x0b4s.pdf    16    listSum_le    0.50   Algebra
+```
+
+The two polynomials are honestly unclassified. The product-sum definition matches `listSum_le` at **0.50** —
+one of its two distinguishing operators (`∑`, not `∏`) — which is a partial match reported as partial.
+
+### Not built yet
+
+- **The lexicon is four files** (217 declarations). No match means "this lexicon does not cover it", not "this
+  formula has no concept" — that sentence belongs in any answer that quotes a classification.
+- The linked-OCR feature with its CI leg; then F3 and F5.
+
 ## [0.1.68] — Drift is now a command, and the classification says what it cannot know
 
 `cargo xtask verify-formulas` closes step 3: it re-reads every recorded box from the corpus, re-runs the
