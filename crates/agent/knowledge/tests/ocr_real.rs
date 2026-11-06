@@ -55,10 +55,12 @@ fn scanned_pdf(directory: &Path) -> PathBuf {
 #[ignore = "needs tesseract, poppler and imagemagick; the `ocr` workflow job runs it"]
 fn a_scanned_page_is_read_by_the_configured_engine() {
     // The command a person would configure: rasterise the page at 300 dpi and pipe it to the engine.
-    // No `2>/dev/null`: a pipeline that fails silently teaches nothing, and the reason a command refused is
-    // the whole value of the error path.
-    let command = "set -o pipefail; pdftoppm -r 300 -png -f \"$STKCRAFT_OCR_PAGE\" \
-                   -l \"$STKCRAFT_OCR_PAGE\" \"$STKCRAFT_OCR_FILE\" - | tesseract - - -l eng";
+    // Two stages joined by `&&` rather than a pipeline: `/bin/sh` is dash on Linux and has no `pipefail`,
+    // so a pipeline would report only the engine's status and hide a failure to rasterise. Each stage's
+    // failure now surfaces, and neither header line is swallowed.
+    let command = "pdftoppm -r 300 -png -f \"$STKCRAFT_OCR_PAGE\" -l \"$STKCRAFT_OCR_PAGE\" \
+                   \"$STKCRAFT_OCR_FILE\" /tmp/stkcraft-ocr-page \
+                   && tesseract /tmp/stkcraft-ocr-page-*.png - -l eng";
     // The library's own entry point takes the command from the environment; this test hands it over
     // directly so it cannot depend on the order another test sets variables in.
     let directory = std::env::temp_dir().join(format!("stkcraft-ocr-{}", std::process::id()));
