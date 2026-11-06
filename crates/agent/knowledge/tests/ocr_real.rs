@@ -29,34 +29,24 @@ fn run(command: &str, args: &[&str]) -> bool {
 }
 
 /// A one-page PDF whose content is a picture of [`SENTENCE`].
+///
+/// Drawn with `Pillow` rather than `ImageMagick`: `convert` on a bare runner fails with "unable to read font
+/// (null)" unless a face is named, and naming one through its CLI is a moving target across versions. Pillow
+/// takes a font path and is in the same apt list.
 fn scanned_pdf(directory: &Path) -> PathBuf {
-    let png = directory.join("page.png");
-    assert!(
-        run(
-            "convert",
-            &[
-                "-size",
-                "2480x400",
-                "xc:white",
-                "-pointsize",
-                "72",
-                "-fill",
-                "black",
-                "-annotate",
-                "+80+200",
-                SENTENCE,
-                &png.to_string_lossy(),
-            ],
-        ),
-        "imagemagick could not draw the page"
-    );
     let pdf = directory.join("scan.pdf");
+    let script = format!(
+        "from PIL import Image, ImageDraw, ImageFont\n\
+         img = Image.new('RGB', (2480, 400), 'white')\n\
+         font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 72)\n\
+         ImageDraw.Draw(img).text((80, 160), {sentence:?}, fill='black', font=font)\n\
+         img.save({path:?})\n",
+        sentence = SENTENCE,
+        path = pdf.to_string_lossy(),
+    );
     assert!(
-        run(
-            "img2pdf",
-            &[&png.to_string_lossy(), "-o", &pdf.to_string_lossy()]
-        ),
-        "img2pdf could not wrap the picture in a PDF"
+        run("python3", &["-c", &script]),
+        "pillow could not draw the page"
     );
     pdf
 }

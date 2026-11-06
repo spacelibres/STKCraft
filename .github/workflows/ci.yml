@@ -32,8 +32,8 @@ jobs:
 
   # The OCR path against a real engine. `craft-pdf` keeps a C library out of the crate graph and the engine
   # is configuration, so this job is how "the command really reads a scan" is verified rather than assumed.
-  # It runs the `#[ignore]`d test in `crates/agent/knowledge/tests/ocr_real.rs`, which needs the tools
-  # installed here and nothing else.
+  # It runs the `#[ignore]`d test in `crates/agent/knowledge/tests/ocr_real.rs`, which draws its page with
+  # Pillow and reads it with Tesseract.
   ocr:
     runs-on: ubuntu-24.04
     steps:
@@ -44,6 +44,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            tesseract-ocr tesseract-ocr-eng poppler-utils imagemagick img2pdf fonts-dejavu-core
+            tesseract-ocr tesseract-ocr-eng poppler-utils python3-pil fonts-dejavu-core
       - name: OCR a scanned page with a real engine
         run: cargo test -p stkcraft-agent-knowledge --test ocr_real -- --ignored --nocapture
