@@ -244,6 +244,24 @@ impl Store {
         Ok(())
     }
 
+    /// Store one formula, replacing any earlier reading of the same box.
+    ///
+    /// # Errors
+    ///
+    /// A message when the row cannot be written.
+    pub fn record_formula(&mut self, formula: &crate::formula::FormulaRecord) -> Result<()> {
+        crate::formula::record(&self.connection, formula)
+    }
+
+    /// Every formula of a document, by page and then top to bottom.
+    ///
+    /// # Errors
+    ///
+    /// A message when the rows cannot be read.
+    pub fn formulas(&self, document: &str) -> Result<Vec<crate::formula::FormulaRecord>> {
+        crate::formula::of_document(&self.connection, document)
+    }
+
     /// Store one access window against a computation.
     ///
     /// # Errors

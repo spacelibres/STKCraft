@@ -9,6 +9,42 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.54] — Formulas can be written and read back, and the box is the key
+
+0.1.53 added the table; this makes it usable: `Store::record_formula` and `Store::formulas`, with the
+citation form the design specifies.
+
+Two decisions show up as tests rather than sentences:
+
+- **The region is the key.** Recording the same box twice — the second time with a LaTeX reading and a
+  Mathlib classification — leaves **one** row, updated. A classifier run must not duplicate a formula,
+  and two different formulas can never share a box while two formulas can easily share a spelling.
+- **Absence is a fact, not an empty string.** A formula found by the text layer carries
+  `latex: None`, `mathlib_name: None`, `confidence: None`. The test asserts those are `None` rather than
+  `""`, because an empty string is a claim about the recogniser and a `None` is the truth about it.
+
+`FormulaRecord::from_text_layer` is the constructor for the deterministic layer, so nothing can create a
+row that pretends to have been recognised.
+
+### Added
+
+- **`crates/framework/storage/src/formula.rs`** — `FormulaRecord`, `record`, `of_document`, and
+  `cite`, which prints `paper.pdf:page 12, formula at (120,340)-(200,352)`: a box rounded to whole
+  points, because that is what a viewer shows when a person selects the region.
+- **`Store::record_formula` / `Store::formulas`**, and the error path: a write failure names the page
+  and the document rather than surfacing a bare SQLite code.
+
+### Verified
+
+`cargo test -p stkcraft-framework-storage`: 32 tests, including the round trip with its provenance, the
+replace-on-same-box behaviour, and the second-box/second-document controls that prove the query is not
+returning everything.
+
+### Not built yet
+
+- **The wiring**: `pdf.rs` calling `math::segment` so a real document produces these rows, and the
+  `problem` sentence being captured with the region. Then the index over formulas.
+
 ## [0.1.53] — The formula store, with its provenance, as schema version 2
 
 The relational store gains the table `docs/design/mathematics.md` specified: `formula`, keyed by the

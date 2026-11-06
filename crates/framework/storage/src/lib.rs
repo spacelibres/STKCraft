@@ -44,11 +44,13 @@
 #![forbid(unsafe_code)]
 
 pub mod cache;
+pub mod formula;
 pub mod record;
 pub mod schema;
 pub mod vector;
 
 pub use cache::Cache;
+pub use formula::{FormulaRecord, cite};
 pub use record::{
     AccessWindowRecord, Computation, DocumentRecord, Revision, Store, StoredComputation,
 };
