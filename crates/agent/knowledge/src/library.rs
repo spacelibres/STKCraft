@@ -85,6 +85,11 @@ pub struct Document {
     pub pages: Option<usize>,
     /// Whether a bound cut the document short, so the pages read are not all of it.
     pub limited: bool,
+    /// How many pages had no text layer and were recognised by the configured OCR command.
+    ///
+    /// A count rather than a boolean: "eleven of forty pages came from a scan" is the fact a person needs
+    /// to judge how much of an answer rests on OCR.
+    pub ocr_pages: usize,
     /// The regions of this document that are mathematics, with the sentence each answers.
     ///
     /// A formula is not a chunk: it has no line range, it has a box (`docs/design/mathematics.md`). They
@@ -588,6 +593,7 @@ fn read_document(file: &File, limits: Limits) -> Result<Document, String> {
         bytes: text.len(),
         pages: None,
         limited: false,
+        ocr_pages: 0,
         formulas: Vec::new(),
         chunks: chunk(&text),
     })
@@ -597,9 +603,22 @@ fn read_document(file: &File, limits: Limits) -> Result<Document, String> {
 fn read_pdf(path: &str, bytes: &[u8], limits: Limits) -> Result<Document, String> {
     let extracted = crate::pdf::extract(bytes, limits.max_pdf_bytes)
         .map_err(|error| format!("a PDF that could not be read: {error}"))?;
-    if extracted.characters() == 0 {
-        // A scan with no OCR layer: there is text in the picture and none in the file, and indexing
-        // nothing while claiming the file is in the library is the worse answer.
+    // A page with no text is a scan: if an OCR command is configured, it reads them, and the count says how
+    // much of the document came that way. A page the command cannot read stays empty — never invented.
+    let mut ocr_pages: Vec<(usize, String)> = Vec::new();
+    if crate::ocr::available() {
+        for page in &extracted.pages {
+            if page.text.trim().is_empty()
+                && let Ok(text) = crate::ocr::recognise(Path::new(path), page.number)
+                && !text.trim().is_empty()
+            {
+                ocr_pages.push((page.number, text));
+            }
+        }
+    }
+    if extracted.characters() == 0 && ocr_pages.is_empty() {
+        // There is text in the picture and none in the file, and no command to read it: indexing nothing
+        // while claiming the file is in the library is the worse answer.
         return Err(
             "a PDF with no text layer (a scan needs OCR before it can be searched)".to_owned(),
         );
@@ -620,13 +639,29 @@ fn read_pdf(path: &str, bytes: &[u8], limits: Limits) -> Result<Document, String
             problem: problem.clone(),
         })
         .collect();
+    // The recognised pages become passages of their own, cited by page like any other, so a search can
+    // quote a scan and say which page it came from.
+    let mut chunks = crate::chunk::chunk_pages(&extracted.passages());
+    let recognized = ocr_pages.len();
+    if !ocr_pages.is_empty() {
+        chunks.extend(crate::chunk::chunk_pages(&ocr_pages));
+        chunks = chunks
+            .into_iter()
+            .enumerate()
+            .map(|(index, mut chunk)| {
+                chunk.index = index;
+                chunk
+            })
+            .collect();
+    }
     Ok(Document {
         path: path.to_owned(),
         bytes: bytes.len(),
         pages: Some(extracted.pages.len()),
         limited: extracted.skipped > 0,
+        ocr_pages: recognized,
         formulas,
-        chunks: crate::chunk::chunk_pages(&extracted.passages()),
+        chunks,
     })
 }
 
@@ -755,6 +790,7 @@ mod tests {
 
     fn document(path: &str, text: &str) -> Document {
         Document {
+            ocr_pages: 0,
             formulas: Vec::new(),
             path: path.to_owned(),
             bytes: text.len(),

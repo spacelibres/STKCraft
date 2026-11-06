@@ -68,6 +68,7 @@ pub mod chunk;
 pub mod index;
 pub mod library;
 pub mod math;
+pub mod ocr;
 pub mod pdf;
 pub mod tokens;
 

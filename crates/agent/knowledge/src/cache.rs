@@ -213,6 +213,7 @@ fn decode_library(
             // reads during a search yet. A warm open therefore lists no formulas, and the listing says
             // the count it has rather than one it does not.
             formulas: Vec::new(),
+            ocr_pages: 0,
             path,
             bytes: file_bytes,
             pages: (page_count != 0).then_some(page_count),
@@ -237,6 +238,7 @@ mod tests {
 
     fn documents() -> Vec<crate::library::Document> {
         vec![crate::library::Document {
+            ocr_pages: 0,
             formulas: Vec::new(),
             path: "spec.md".to_owned(),
             bytes: 42,
@@ -254,6 +256,7 @@ mod tests {
         // is a citation that changes shape between runs: the page number and the "read in part" flag
         // have to survive the round trip.
         let documents = vec![crate::library::Document {
+            ocr_pages: 0,
             formulas: Vec::new(),
             path: "paper.pdf".to_owned(),
             bytes: 1_024,

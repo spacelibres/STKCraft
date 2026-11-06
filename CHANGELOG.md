@@ -9,6 +9,58 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.62] — OCR that runs, and says how much of a document came from a scan
+
+The OCR interface is no longer a promise: `STKCRAFT_OCR` is a command, and the library runs it on every
+page that has no text layer.
+
+```sh
+STKCRAFT_OCR='pdftoppm -f $STKCRAFT_OCR_PAGE -l $STKCRAFT_OCR_PAGE -r 300 -png "$STKCRAFT_OCR_FILE" - \
+  | tesseract - - -l eng' \
+  stkcraft knowledge
+```
+
+The command gets `STKCRAFT_OCR_FILE` and `STKCRAFT_OCR_PAGE`, writes text on standard output, and is
+otherwise free — rasterising the page is part of the command, because the rasteriser is as much a
+packaging decision as the engine. The engine is therefore configuration, exactly as the model transport
+is `curl`: Tesseract, PaddleOCR or a model-based reader all fit, and none of them decides this project's
+build matrix.
+
+### Verified on a page that is a picture
+
+A PDF whose only content is a filled rectangle — no text layer at all — is **refused as a scan** without a
+command and **read with one**:
+
+```
+without:  scan.pdf (a PDF with no text layer (a scan needs OCR before it can be searched))
+with:     scan.pdf (432 byte(s), 1 page(s), 1 passage(s))
+            1 page(s) had no text layer and were read by OCR
+```
+
+The test command was a stand-in that names the page it was handed, so the plumbing is what was measured;
+the engine is somebody else's program, and its output is passed through unchanged.
+
+### Added
+
+- **`crates/agent/knowledge/src/ocr.rs`** — `available`, `recognise`, `recognise_with`, and a hard bound on
+  output (200 000 characters), because a command is a program and a program can print for ever. A failing
+  command quotes its own stderr rather than returning empty text.
+- **`Document::ocr_pages`** — how many pages came from a scan, printed by `knowledge`. "Eleven of forty
+  pages were recognised" is what lets a person weigh an answer.
+
+### Ordering defect, found by the end-to-end run
+
+The first version rejected a text-less PDF *before* trying OCR, so a scan could never be read however the
+command was configured — the module's tests passed and the feature did not work. The verdict now comes
+after the OCR pass and considers its output: a scan that OCR reads is a document.
+
+### Not built yet
+
+- **The engine itself**: this machine has no Tesseract (no binary, no `libtesseract`, no `tessdata`), so what
+  is verified is the interface and the plumbing. Linking Tesseract is a feature-gate plus a CI leg that
+  actually builds it; it belongs with the packaging work, not ahead of it.
+- The transcription table with negative rows, Mathlib, `verify-formulas`.
+
 ## [0.1.61] — The transcription tool, and what it immediately said about layer 2
 
 `cargo xtask math-regions <pdf>` prints the formula regions of a document as TSV — page, box, introducing

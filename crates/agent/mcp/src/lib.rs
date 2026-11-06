@@ -968,6 +968,7 @@ mod tests {
             std::path::Path::new("/knowledge"),
             vec![
                 stkcraft_agent_knowledge::Document {
+                    ocr_pages: 0,
                     formulas: Vec::new(),
                     path: "sensor-spec.md".to_owned(),
                     bytes: 80,
@@ -978,6 +979,7 @@ mod tests {
                     ),
                 },
                 stkcraft_agent_knowledge::Document {
+                    ocr_pages: 0,
                     formulas: Vec::new(),
                     path: "thermal.txt".to_owned(),
                     bytes: 40,

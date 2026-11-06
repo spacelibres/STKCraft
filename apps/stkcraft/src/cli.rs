@@ -1013,6 +1013,14 @@ fn knowledge(request: &KnowledgeRequest) -> Result<(), String> {
                         document.chunks.len()
                     ),
                 }
+                if document.ocr_pages > 0 {
+                    // How much of the document rests on a recognised page is a fact a person needs when
+                    // they weigh an answer, so it is printed rather than kept in a log.
+                    println!(
+                        "      {} page(s) had no text layer and were read by OCR",
+                        document.ocr_pages
+                    );
+                }
                 if let Some(first) = document.formulas.first() {
                     // The first place, and the count: a listing that said "34 formulas" without one place
                     // to look would be a claim nobody can check in a second.
