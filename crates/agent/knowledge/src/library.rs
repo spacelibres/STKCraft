@@ -35,9 +35,13 @@ pub const DEFAULT_THRESHOLD: f64 = 0.6;
 /// Text, and PDF: the two things a mission's documents actually are. A PDF is not decoded here — the
 /// family's reader is ([`crate::pdf`]) — but it is decided here, so one folder can hold a specification
 /// written in Markdown beside the paper it cites, and both are searchable.
-pub const READABLE_EXTENSIONS: [&str; 13] = [
+pub const READABLE_EXTENSIONS: [&str; 15] = [
     "txt", "md", "markdown", "csv", "tsv", "json", "log", "rst", "tex", "org", "adoc", "text",
     "pdf",
+    // The standards' own documentation is published as pages — NAIF's required reading is the algorithmic
+    // reference this project is checked against — and a knowledge base that could not read them would be
+    // refusing the primary sources.
+    "html", "htm",
 ];
 
 /// Limits applied before anything is read, so pointing the library at `/` is slow rather than fatal.
@@ -588,6 +592,13 @@ fn read_document(file: &File, limits: Limits) -> Result<Document, String> {
         // Not UTF-8: a binary dressed as text, skipped rather than decoded on a guess.
         return Err("not UTF-8 text".to_owned());
     };
+    // A page is stored as the text a reader would see, not as markup: a citation into `<td>` soup is not a
+    // citation, and the tokens of `align="left"` are not words anybody searches for.
+    let text = if is_html(&file.relative) {
+        crate::html::to_text(&text)
+    } else {
+        text
+    };
     Ok(Document {
         path: file.relative.clone(),
         bytes: text.len(),
@@ -767,6 +778,14 @@ fn scan_into(
         });
     }
     Ok(())
+}
+
+/// Whether the extension says the file is a page.
+fn is_html(path: &str) -> bool {
+    // Through the extension, so the comparison is on an identifier rather than on the tail of a path.
+    path.rsplit('.').next().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm")
+    })
 }
 
 /// Whether the extension says the file is a PDF, which decides which size bound applies before the

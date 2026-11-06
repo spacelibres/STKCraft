@@ -63,6 +63,7 @@ fn main() -> ExitCode {
         Some("formulas") => task_formulas(args.get(1..).unwrap_or_default()),
         Some("mathlib") => task_mathlib(args.get(1..).unwrap_or_default()),
         Some("verify-formulas") => task_verify_formulas(),
+        Some("naif" | "fetch-naif") => task_fetch_naif(args.get(1..).unwrap_or_default()),
         Some("standards" | "fetch-standards") => {
             task_fetch_standards(args.get(1..).unwrap_or_default())
         }
@@ -131,11 +132,13 @@ Tasks:
             (`i18n`, `i18n report`, `i18n translate --language de`)
   papers    download the paper corpus the knowledge base is tested against, verified
   standards download every CCSDS publication, verified (the set we align to)
+  naif      download NAIF's required reading, verified (the algorithms behind the standards)
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
   verify-formulas  re-extract every recorded formula, re-classify, fail on drift
   standards download every CCSDS publication, verified (the set we align to)
+  naif      download NAIF's required reading, verified (the algorithms behind the standards)
   math-regions  print the formula regions of a PDF as TSV, for the transcription table
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
@@ -1201,6 +1204,61 @@ fn task_math_regions(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn task_fetch_naif(args: &[String]) -> Result<(), String> {
+    let root = workspace_root();
+    let mut directory = root.join("data").join("naif");
+    let mut jobs = DOWNLOAD_JOBS;
+    let mut force = false;
+    let mut positional = 0_usize;
+    let mut arguments = args.iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--force" || argument == "-f" {
+            force = true;
+            continue;
+        }
+        if argument == "--jobs" || argument == "-j" {
+            let value = arguments
+                .next()
+                .ok_or_else(|| "`--jobs` needs a number".to_owned())?;
+            jobs = value
+                .parse::<usize>()
+                .map_err(|_| format!("`{value}` is not a job count"))?
+                .clamp(1, MAX_DOWNLOAD_JOBS);
+            continue;
+        }
+        if argument.starts_with('-') {
+            return Err(format!("unknown option `{argument}`"));
+        }
+        positional += 1;
+        if positional > 1 {
+            return Err("naif takes one directory".to_owned());
+        }
+        directory = root.join(argument);
+    }
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+    let urls: Vec<String> = NAIF_FILES
+        .iter()
+        .map(|(name, _, _)| format!("{NAIF_REQ}{name}"))
+        .collect();
+    let entries: Vec<(&str, &str, &str)> = NAIF_FILES
+        .iter()
+        .zip(urls.iter())
+        .map(|((name, hash, _), url)| (*name, url.as_str(), *hash))
+        .collect();
+    let (fetched, verified, bytes) = fetch_verified(&entries, &directory, jobs, force)?;
+    println!(
+        "naif: {} document(s), {fetched} fetched, {verified} already present, {} on disk",
+        NAIF_FILES.len(),
+        human_size(bytes)
+    );
+    println!(
+        "next: STKCRAFT_KNOWLEDGE={} cargo run --release -p stkcraft -- knowledge \"<query>\"",
+        directory.display()
+    );
+    Ok(())
+}
+
 fn task_fetch_standards(args: &[String]) -> Result<(), String> {
     let root = workspace_root();
     let mut directory = root.join("data").join("standards");
@@ -1350,6 +1408,158 @@ fn fetch_verified(
     }
     Ok((fetched, verified, bytes))
 }
+
+/// NAIF's required-reading documentation, with the SHA-256 of each page.
+///
+/// This is the *algorithmic* reference the project is checked against: `spk.html` states what an SPK
+/// segment type 2 record contains (a Chebyshev polynomial and its mid-point and radius), `pck.html` the
+/// orientation models, `time.html` the time systems, `frames.html` the frame chain, `daf.html`/`das.html`
+/// the file and array structures a kernel is made of. NASA's decades of practice are what those pages
+/// record, and a claim in this repository about SGP4, an epoch conversion or a frame rotation can point
+/// at the page that defines it.
+///
+/// The URL of each is `https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/<name>`, so only the name,
+/// hash and size are stored.
+static NAIF_FILES: [(&str, &str, usize); 27] = [
+    (
+        "abcorr.html",
+        "c801451d5480c4875e54bc76e9658b74b3decce75eca0576b4a665fdd6869dab",
+        28_058,
+    ),
+    (
+        "cells.html",
+        "2a81da6a56a142332ae35801519f477867d21053f42b57bcf966711432248830",
+        18_982,
+    ),
+    (
+        "ck.html",
+        "a447ec34b113f0400a8315dabd4e338b44192264bb8c20fe3d5e2e282015469f",
+        195_638,
+    ),
+    (
+        "cspice.html",
+        "9c1be8b3afe45a852a82f1274e5daad51440e074429faabceb39ca43055e9dd7",
+        39_631,
+    ),
+    (
+        "daf.html",
+        "f2481e3d121df056037090e6433fd12c9fbfbf9b92bf9eb99da34216ba96338c",
+        90_490,
+    ),
+    (
+        "das.html",
+        "039e49caede4ac1ff36ea4011de46c3e2e6891a15c01ab2872c26272e7ba3bca",
+        79_847,
+    ),
+    (
+        "dla.html",
+        "7a964569c724b4a6c4a4a85cb820d945b693c200fec0002b26ec83a0367fcf9a",
+        22_217,
+    ),
+    (
+        "dsk.html",
+        "f4fac7a104c942a12ae1cd8b6aa14a7b22c7b77b5f3c7200de741c3110ebc763",
+        123_147,
+    ),
+    (
+        "ek.html",
+        "e7784f586127a667be04b9e1a7ad9fbdc6114d54ccd1ced64230c057a48ab08c",
+        117_881,
+    ),
+    (
+        "ellipses.html",
+        "33037d9cf96f6aad7aed1a0f8bf60b18813e126f59c7a8945849dcda4c416a47",
+        28_800,
+    ),
+    (
+        "error.html",
+        "8f1ecc9d0816e2158591836a5b86544f7675d90c58d11c7ee5315a82257c6591",
+        78_112,
+    ),
+    (
+        "frames.html",
+        "c9a03998b4d1c652d7dba8154ae0c90a4c5bf9f4654ac8624c59a8687937df36",
+        203_675,
+    ),
+    (
+        "gf.html",
+        "c96147b444c0c86c508d7017e741573f1553a500f95be30e7d012e62ee6871d3",
+        161_428,
+    ),
+    (
+        "kernel.html",
+        "98ee9e4f6b32cf7b6f87f0127be915299bc6a93f2a29f9954b22ccbf0747c0a5",
+        84_870,
+    ),
+    (
+        "naif_ids.html",
+        "4b647f8cc5f3101dc16011a51fe22c6beb8e5c2db49c7619cd11787a4eaf36c3",
+        54_644,
+    ),
+    (
+        "pck.html",
+        "771177b1c21a448bd81b5b5f872840797d30e0c1400af363aa0fde730bf1585f",
+        89_169,
+    ),
+    (
+        "planes.html",
+        "5f331c64983b88251b9b19089fec85b9ec72fd44fb844dcbc3455f85cb309eb5",
+        24_721,
+    ),
+    (
+        "problems.html",
+        "e18412a0ab82ef7d3066af2c122186487c17739a0a31ed1453c5cc1a06526ae8",
+        64_507,
+    ),
+    (
+        "rotation.html",
+        "729046b42faa732c0f3b0dedb9ca99fbff2a302ee930a288754c7785eacfdcf2",
+        118_680,
+    ),
+    (
+        "scanning.html",
+        "f511c09346e65106d19c93e6a877f2b6a293b242d5e30ac2b8ec0745702462f2",
+        10_292,
+    ),
+    (
+        "sclk.html",
+        "ffe5ad1440bd92822508e1565cae432fc5cc33ba7ab8939b96d5f541766d3ff5",
+        73_244,
+    ),
+    (
+        "sets.html",
+        "f76bd5c7e8b5d12fb1673db156d069e49fa5b28fb3fd4f3b887542673a8ca79c",
+        21_455,
+    ),
+    (
+        "spc.html",
+        "9ebf57fdc6b2af9cf921a65be908d4593ebcf47528bbef5e91a9511b1239190c",
+        32_687,
+    ),
+    (
+        "spk.html",
+        "8aa1f05a4fe60e8ad705f24a840acb4b696d2160ded176bbd585c28440905c88",
+        216_199,
+    ),
+    (
+        "symbols.html",
+        "7fb9ddb395a118a030883779242d860f820106905179e14793560168a06e52e5",
+        26_002,
+    ),
+    (
+        "time.html",
+        "025bd684a9997feca2f51a54550a52898e1d7686d500fee0e7b0ff3c9ebc54a1",
+        122_505,
+    ),
+    (
+        "windows.html",
+        "14e032225ef9b30350872b989f03748a05cd7fb84fd6f5b7ac1315b37af73660",
+        25_220,
+    ),
+];
+
+/// Where NAIF publishes its required reading.
+const NAIF_REQ: &str = "https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/";
 
 /// Every CCSDS publication in the public catalogue, with the SHA-256 of the file as downloaded.
 ///

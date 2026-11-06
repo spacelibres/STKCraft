@@ -9,6 +9,56 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.76] — NAIF's algorithms are a corpus, and the sources are written down
+
+The requirement: the project follows CCSDS **and** NASA **and** ESA, so the algorithms have to be as available
+as the standards are. CCSDS says what a message contains; NAIF's required reading says what the numbers in it
+mean, what a kernel file is made of, and which algorithm turns a record into a state. NASA has spent decades
+writing that down, and a claim in this repository can now point at the page that defines it.
+
+### Fetched, hashed, searchable
+
+`cargo xtask naif` downloads every page of NAIF's required reading from
+`https://naif.jpl.nasa.gov/pub/naif/toolkit_docs/C/req/` into `data/naif/` (`.gitignore`d) and verifies each
+against a SHA-256 in `xtask/src/main.rs`: **27 documents, 2.2 MB**. The knowledge base then reads them —
+**4 661 passages** — and a search answers from the page:
+
+```
+$ STKCRAFT_KNOWLEDGE=data/naif stkcraft knowledge "SPK segment type 2 Chebyshev polynomial"
+[spk.html:lines 717-719] score 18.33
+    The third SPK data type contains Chebyshev polynomial coefficients for the position and velocity …
+    The structure of the segment is nearly identical to that of the SPK data Type 2 (Chebyshev
+    polynomials for position only). …
+```
+
+### Pages are read as text, not as markup
+
+`crates/agent/knowledge/src/html.rs` strips tags, drops `script`/`style`/`head`, turns block boundaries into
+lines and decodes the entities a technical page uses (`&le;`, `&radic;`, `&ne;`, `&nbsp;`). Four rules are
+tested: tags are dropped and blocks keep their lines, entities become the characters a reader sees, script
+content never reaches the text, and **a comparison is not a tag** — `run when a < b` keeps its `<`, which the
+first version deleted along with the rest of the sentence.
+
+### The sources register
+
+`docs/guides/sources.md` states, area by area, which body is the authority and where this project cites it:
+time systems (CCSDS 301.0-B-4 + NAIF `time.html`), ephemeris archives (NAIF), body orientation (NAIF + IAU),
+frames (IAU + CCSDS), orbit/tracking/attitude/conjunction data (CCSDS 5xx), propagation (published SGP4),
+debris mitigation and software assurance (ECSS). It also names the four places the authorities **disagree** —
+units, epoch scale, naming — and what this project does about each. A rule that cannot name its source there is
+a rule the project is not entitled to assert.
+
+### Added
+
+- **`cargo xtask naif`**, `docs/guides/naif-corpus.md` (all 27 rows), `docs/guides/sources.md`.
+- **HTML reading** in the knowledge base, with `.html`/`.htm` among the readable extensions.
+
+### Not built yet
+
+- **ESA/ECSS is registered but not fetched**: ECSS documents need a source and a licence check before they
+  become a corpus with checksums, and that is the next acquisition step.
+- The 5xx formats are still read from the corpus rather than implemented in the engine.
+
 ## [0.1.75] — Targets are in the scenario, and the region's windows are its corners' union
 
 F5's third slice: `target.add` and `access.targets`, with targets in the scenario document.
