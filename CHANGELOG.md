@@ -9,6 +9,40 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.78] — The arc closes with its evidence in one place
+
+A final verification pass, and the roadmap rewritten to say what is shipped rather than what was planned.
+
+### Verified, on the release binary and the corpora as they stand
+
+```
+$ ./target/release/stkcraft version          STKCraft 0.1.77   (tag v0.1.77)
+$ stkcraft mcp | tools/list                  14 tools, including station.sensor, target.add, access.targets,
+                                             and acme.sgp4.madrid from the installed extension
+$ STKCRAFT_KNOWLEDGE=data/standards  knowledge "collision probability definition"
+  → [350x1g3.pdf:page 39, formula at (299,282)-(359,282)]
+$ STKCRAFT_KNOWLEDGE=data/naif       knowledge "Chebyshev coefficients type 2 record"
+  → [spk.html:lines 717-719] "six sets of coefficients instead of three"
+$ stkcraft mcp | tools/call target.add {"name":"Madrid","points":"40.4,-3.7"}
+  → Added target `Madrid` as TargetId(1) with 1 vertex
+```
+
+`cargo xtask formulas` — 9 checked, 9 correct, 0 wrong. `cargo xtask verify-formulas` — 9 re-read, 3
+re-classified, 2 with no match, 0 drifted. `cargo xtask ci` — all gates passed.
+
+### Changed
+
+- **`ROADMAP.md`** now records the arc as shipped (formula pipeline, Mathlib, OCR, extensions, sensors and
+  targets, both corpora, the sources register) and states what remains at the top of *Next*: the window side of
+  F5, targets in the MCP resources, the ECSS corpus and its licence question, the lexicon's size, and a coverage
+  grid.
+- **`plan/NEXT.md`** is rewritten as the handoff for the next session, with the rules that are easy to forget.
+
+### Not built yet
+
+- **The window does not draw targets and does not offer the two newest commands**, though the CLI and MCP do.
+- **ECSS is registered, not fetched** — distributed through DOORS, no program-fetchable URL.
+
 ## [0.1.77] — The ECSS gap, stated instead of papered over
 
 The requirement is to take CCSDS, NASA and ESA together. Two of the three are corpora with checksums now; the

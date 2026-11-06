@@ -41,6 +41,14 @@ Shipped, in the order it landed:
 | The model layer: any OpenAI-compatible endpoint, the credential stored `0600` | done | 0.1.44 |
 | Every CCSDS publication collected, hashed and searchable | done, 495 documents | 0.1.47 |
 | Compaction writes a model-written summary that survives a resume | done | 0.1.46 |
+| Formula region detection, storage, provenance, search, transcription table | done | 0.1.51–0.1.65 |
+| Mathlib lexicon and classifier, with no-match acceptance | done, 217 declarations | 0.1.66–0.1.69 |
+| `cargo xtask verify-formulas` (re-extract, re-classify, fail on drift) | done, 0 drifts | 0.1.68 |
+| OCR through a configured engine, verified in CI | done, `ocr` job green | 0.1.62, 0.1.70 |
+| Extension runtime: packages load and their commands are tools | done | 0.1.71–0.1.72 |
+| Sensors (`station.sensor`) and targets (`target.add`, `access.targets`) | done, hand-computable tests | 0.1.73–0.1.75 |
+| CCSDS and NAIF corpora, hashed and searchable | done | 0.1.47, 0.1.76 |
+| Sources register: who says what, and where they disagree | done | 0.1.76–0.1.77 |
 
 The engine speaks eight commands today: `scenario.rename`, `scenario.set-duration`, `satellite.add`,
 `satellite.remove`, `station.add`, `station.remove`, `access.compute`, `planet.access`.
@@ -101,6 +109,22 @@ against Mathlib** — a pinned declaration index, a scored match, a domain taxon
 stated: classification, never proof; and (5) every formula carries its **provenance chain** — file
 digest, page, box, region digest, reading engine, the introducing sentence, the Mathlib revision — with
 `cargo xtask verify-formulas` re-extracting and re-classifying it and failing on drift.
+
+#### F5. Sensors and targets, and what they can see — mostly shipped (0.1.73–0.1.75)
+
+**Shipped**: `station.sensor` (a cone, a horizon mask, a range), `Target { vertices, sensor }` in the scenario
+document, `target.add` from `lat,lon;lat,lon`, and `access.targets` whose windows are the union of the target's
+vertices' — verified by a test that compares the region's window list to `union(corner, corner)`.
+
+**Still open**: the window does not offer either command, and a target is not drawn on the globe.
+
+#### The corpora, and what each authority is
+
+| Authority | State | Where |
+|---|---|---|
+| CCSDS | 495 publications, 548 MB, hashed | `cargo xtask standards`, `docs/guides/ccsds-standards.md` |
+| NASA / NAIF | 27 documents, 2.2 MB, hashed | `cargo xtask naif`, `docs/guides/naif-corpus.md` |
+| ESA / ECSS | **not fetched**: distributed through DOORS, no program-fetchable URL | `docs/guides/sources.md` records the probe and the condition that would change it |
 
 #### F5. Sensors and targets, and what they can see
 
