@@ -9,6 +9,43 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.67] — A classifier that refuses, and says why it matched
+
+The second half of step 2: `mathlib::classify` scores a formula against the declaration lexicon, and
+`operators_in` normalises both renderings to the words a declaration would use (`√` and `\\sqrt` both become
+`sqrt`, `∑`/`\\sum` become `sum`, `∂`/`\\partial` become `deriv`).
+
+The rule is blunt and it **refuses**:
+
+- a formula **must use an operator** — `Keyword = Value Notation` has none, so it is never classified, which
+  is what keeps prose out of the taxonomy;
+- the score is the share of the formula's operators the declaration covers, and anything under **0.5** is
+  `None`: an operator no declaration names (`∇f = 0` against this lexicon) is a *no match*, not the first
+  declaration that shared nothing;
+- ties are broken by name, so the same input gives the same answer on every machine.
+
+### Acceptance table, both directions
+
+`classifier_tests` carries a lexicon shaped like the part of Mathlib a paper about square roots needs and
+five cases, two of which **must** classify as nothing:
+
+| Formula | Expected |
+|---|---|
+| `√ (x ^ 2) = x` | `sqrt`, score 1.0 |
+| `∫ √x dx = 1` | `sqrt`, score 0.5 (share, not confidence) |
+| `∇f = 0` | **no match** |
+| `Keyword = Value Notation` | **no match** |
+| `8-BIT WORD = OCTET` | **no match** |
+
+`cargo test -p stkcraft-agent-knowledge mathlib`: 8 tests, including the real-file parser test from 0.1.66.
+
+### Not built yet
+
+- **Writing the match into the store**: `classify` exists and is tested, but `FormulaRecord`'s
+  `mathlib_name/score/domain/classifier` columns are not filled by the PDF path yet — that is the next
+  step, together with `verify-formulas`.
+- The linked-OCR feature with its CI leg; then F3 and F5.
+
 ## [0.1.66] — Mathlib becomes a lexicon this program can hold
 
 Step 2 of the mathematics design, first half: `crates/agent/knowledge/src/mathlib.rs` reads Lean source into

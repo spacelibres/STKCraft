@@ -326,3 +326,188 @@ structure Point where
         );
     }
 }
+
+/// The operators a formula and a declaration can share, as canonical tokens.
+///
+/// This is the whole of the normalisation: a symbol in either rendering of a formula becomes the word a
+/// declaration would use, so `√x` and `Real.sqrt` meet at `sqrt`. The table is short on purpose — a
+/// classifier that scored on words would match prose, and the point of classifying *formulas* is that they
+/// are operators.
+pub const OPERATORS: [(&str, &str); 18] = [
+    ("√", "sqrt"),
+    ("\\sqrt", "sqrt"),
+    ("∑", "sum"),
+    ("\\sum", "sum"),
+    ("∏", "product"),
+    ("\\prod", "product"),
+    ("∫", "integral"),
+    ("\\int", "integral"),
+    ("∂", "deriv"),
+    ("\\partial", "deriv"),
+    ("\\frac", "div"),
+    ("\\div", "div"),
+    ("∞", "infinity"),
+    ("≤", "le"),
+    ("≥", "ge"),
+    ("≠", "ne"),
+    ("≈", "approx"),
+    ("∇", "gradient"),
+];
+
+/// A classification: the declaration a formula was matched to, and how strongly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Match {
+    /// The declaration's name, e.g. `Real.sqrt`.
+    pub name: String,
+    /// Its module, which is also the taxonomy.
+    pub module: String,
+    /// The first directory under `Mathlib/`.
+    pub domain: String,
+    /// The operators the formula and the declaration share, for the citation's "why".
+    pub shared: Vec<&'static str>,
+    /// Shared operators divided by the formula's operators: 1.0 means every operator the formula uses is
+    /// one the declaration names.
+    pub score: f64,
+}
+
+/// The operators a piece of text uses, normalised to canonical tokens.
+#[must_use]
+pub fn operators_in(text: &str) -> Vec<&'static str> {
+    let mut found: Vec<&'static str> = Vec::new();
+    for (symbol, token) in OPERATORS {
+        if text.contains(symbol) && !found.contains(&token) {
+            found.push(token);
+        }
+    }
+    found
+}
+
+/// Classify a formula against a lexicon.
+///
+/// The rule is deliberately blunt and deliberately refuses: a formula **must use an operator** that a
+/// declaration names, and the score is the share of the formula's operators the declaration covers. A
+/// formula with no operator, or a lexicon with no declaration for it, returns `None` — a classification
+/// this project cannot justify is a classification it does not make.
+#[must_use]
+pub fn classify(formula: &str, declarations: &[Declaration]) -> Option<Match> {
+    let formula_operators = operators_in(formula);
+    if formula_operators.is_empty() {
+        return None;
+    }
+    let mut best: Option<Match> = None;
+    for declaration in declarations {
+        let haystack = format!(
+            "{} {} {}",
+            declaration.name, declaration.statement, declaration.docstring
+        );
+        let haystack = haystack.to_ascii_lowercase();
+        let mut shared: Vec<&'static str> = Vec::new();
+        for token in &formula_operators {
+            // A declaration names an operator either by its word (`sqrt`, `sum`) or by the symbol.
+            let named = haystack.contains(token)
+                || OPERATORS
+                    .iter()
+                    .any(|(symbol, name)| name == token && haystack.contains(symbol));
+            if named {
+                shared.push(token);
+            }
+        }
+        if shared.is_empty() {
+            continue;
+        }
+        let score = shared.len() as f64 / formula_operators.len() as f64;
+        // A share is a ratio of small integers, so comparing the counts is exact and avoids a float
+        // comparison entirely; ties then break on the name, so the same input always gives the same answer.
+        let matched = shared.len();
+        let total = formula_operators.len();
+        let better = best.as_ref().is_none_or(|current| {
+            let current_matched = (current.score * total as f64).round() as usize;
+            matched > current_matched
+                || (matched == current_matched && declaration.name < current.name)
+        });
+        if better {
+            best = Some(Match {
+                name: declaration.name.clone(),
+                module: declaration.module.clone(),
+                domain: declaration.domain.clone(),
+                shared,
+                score,
+            });
+        }
+    }
+    best.filter(|matched| matched.score >= 0.5)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing)]
+mod classifier_tests {
+    use super::*;
+
+    /// A lexicon shaped like the part of Mathlib a paper about square roots would need.
+    fn lexicon() -> Vec<Declaration> {
+        let source = r"
+/-- The square root of a nonnegative real. -/
+noncomputable def sqrt (x : ℝ) : ℝ := 0
+
+/-- `HasDerivAt f f' x` means `f` has derivative `f'` at `x`. -/
+def HasDerivAt (f : ℝ → ℝ) (f' x : ℝ) : Prop := True
+
+/-- The sum of a finite set. -/
+def Finset.sum (s : Finset ι) (f : ι → α) : α := 0
+
+/-- An unrelated definition: a group homomorphism. -/
+structure MonoidHom (M N : Type) where
+  toFun : M → N
+";
+        parse(source, "Mathlib/Analysis/SpecialFunctions/Sqrt.lean")
+    }
+
+    #[test]
+    fn a_formula_is_matched_to_the_declaration_that_names_its_operators() {
+        let declarations = lexicon();
+        let matched = classify("√ (x ^ 2) = x", &declarations).expect("a square root matches");
+        assert_eq!(matched.name, "sqrt");
+        assert_eq!(matched.domain, "Analysis");
+        assert_eq!(matched.shared, vec!["sqrt"]);
+        assert!((matched.score - 1.0).abs() < f64::EPSILON);
+        // The citation a hit prints: the concept, the taxonomy and the strength.
+        assert_eq!(
+            matched.module,
+            "Mathlib/Analysis/SpecialFunctions/Sqrt.lean"
+        );
+    }
+
+    #[test]
+    fn a_formula_without_an_operator_is_never_classified() {
+        // The rule that keeps prose out of the classification: a keyword line has no operator, and a
+        // classifier that guessed would be labelling sentences with mathematical concepts.
+        let declarations = lexicon();
+        assert_eq!(classify("Keyword = Value Notation", &declarations), None);
+        assert_eq!(classify("", &declarations), None);
+        assert_eq!(classify("8-BIT WORD = OCTET", &declarations), None);
+    }
+
+    #[test]
+    fn an_operator_no_declaration_names_is_a_no_match_rather_than_a_weak_match() {
+        // `∇` is in the operator table and in no declaration of this lexicon: the answer is `None`, not the
+        // first declaration that shared nothing.
+        let declarations = lexicon();
+        assert_eq!(classify("∇f = 0", &declarations), None);
+        // And a partially covered formula scores by share, then must clear the floor.
+        let partial = classify("∫ √x dx = 1", &lexicon()).expect("sqrt is covered");
+        assert_eq!(partial.name, "sqrt");
+        assert!(
+            (partial.score - 0.5).abs() < f64::EPSILON,
+            "{}",
+            partial.score
+        );
+    }
+
+    #[test]
+    fn the_operators_of_a_formula_are_read_in_both_renderings() {
+        assert_eq!(operators_in("√x"), vec!["sqrt"]);
+        assert_eq!(operators_in("\\sqrt{x}"), vec!["sqrt"]);
+        assert_eq!(operators_in("∑ x"), vec!["sum"]);
+        assert_eq!(operators_in("plain words").len(), 0);
+    }
+}
