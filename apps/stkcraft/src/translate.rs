@@ -111,7 +111,7 @@ fn existing_rows(directory: &std::path::Path, locale: &str) -> Vec<Row> {
 /// A message when there is nothing to do or no model to do it with — reported before a thread
 /// starts, because a person who picked a language needs the reason now rather than a spinner.
 pub fn start(locale: &str) -> Result<Run, String> {
-    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    let model = crate::prefs::model_provider()?;
     let locale = locale.to_owned();
     let directory = crate::prefs::Prefs::locales_dir().ok_or_else(|| {
         "this platform has no configuration directory to write a catalog to".to_owned()

@@ -25,6 +25,156 @@ pub struct Prefs {
     /// The interface language, as a lowercase BCP 47 code. `None` means "nothing chosen yet", which
     /// is what the first run starts from: the system's language, or English.
     pub language: Option<String>,
+    /// The model endpoint, when the person chose one. `None` means the shipped default.
+    pub model_endpoint: Option<String>,
+    /// The model name, when the person chose one.
+    pub model: Option<String>,
+}
+
+/// The file the model's credential lives in, beside the preferences.
+///
+/// **Not in `ui.json`.** A key is a secret, and a file a person is likely to paste into a bug report
+/// is the worst place for one; this file is written `0600` on the platforms that have modes, read
+/// with the same leniency as the preferences, and never logged.
+#[must_use]
+pub fn credential_path() -> Option<PathBuf> {
+    Prefs::path().and_then(|path| path.parent().map(|parent| parent.join("model.key")))
+}
+
+/// The stored credential, or `None` when there is not one.
+#[must_use]
+pub fn stored_credential() -> Option<String> {
+    let path = credential_path()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    let text = text.trim().to_owned();
+    (!text.is_empty()).then_some(text)
+}
+
+/// Store the model's credential where only this person can read it.
+///
+/// # Errors
+///
+/// A message when the file cannot be written, because a key that silently did not save is a person
+/// re-typing it every session and assuming the app is broken.
+pub fn store_credential(key: &str) -> Result<(), String> {
+    let path = credential_path().ok_or_else(|| {
+        "this platform has no configuration directory for a credential".to_owned()
+    })?;
+    store_credential_at(&path, key)
+}
+
+/// The same, at an explicit path, so a test can prove the mode without a configuration directory and
+/// so the CLI can report where the key went.
+///
+/// # Errors
+///
+/// A message when the file cannot be written or its permissions cannot be restricted.
+pub fn store_credential_at(path: &std::path::Path, key: &str) -> Result<(), String> {
+    if let Some(directory) = path.parent() {
+        std::fs::create_dir_all(directory)
+            .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+    }
+    std::fs::write(path, key.trim())
+        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    restrict(path)?;
+    Ok(())
+}
+
+/// Make a file readable only by its owner, on the platforms that have modes.
+fn restrict(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("could not restrict {}: {error}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
+/// The model this installation uses: the person's settings first, the environment second.
+///
+/// The order matters. A key typed into the settings is a decision; a key in the environment is a
+/// convenience for a script or a container. The decision wins, and the environment is the fallback so
+/// that a headless run keeps working.
+///
+/// # Errors
+///
+/// A message saying what is missing and where to put it, because "no model" is a state the interface
+/// has to be able to explain.
+pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
+    let prefs = Prefs::load();
+    let stored = stored_credential();
+    let environment = std::env::var("DEEPSEEK_API_KEY").ok();
+    let base_url = std::env::var("DEEPSEEK_BASE_URL").ok();
+    let model = std::env::var("DEEPSEEK_MODEL").ok();
+    model_provider_from(
+        &prefs,
+        stored.as_deref(),
+        &ModelEnvironment {
+            key: environment.as_deref(),
+            base_url: base_url.as_deref(),
+            model: model.as_deref(),
+        },
+    )
+}
+
+/// The environment a provider can also be configured from, named so the resolution is testable.
+///
+/// A test cannot set a process environment variable (`set_var` is unsafe in edition 2024, and this
+/// crate forbids unsafe), so the order of precedence is a pure function of these values instead of
+/// something only a subprocess could check.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModelEnvironment<'a> {
+    /// `DEEPSEEK_API_KEY`.
+    pub key: Option<&'a str>,
+    /// `DEEPSEEK_BASE_URL`.
+    pub base_url: Option<&'a str>,
+    /// `DEEPSEEK_MODEL`.
+    pub model: Option<&'a str>,
+}
+
+/// Resolve the provider from the person's settings and the environment, in that order.
+///
+/// # Errors
+///
+/// A message saying what is missing and where to put it, because "no model" is a state the interface
+/// has to be able to explain.
+pub fn model_provider_from(
+    prefs: &Prefs,
+    stored: Option<&str>,
+    environment: &ModelEnvironment<'_>,
+) -> Result<stkcraft_agent_runtime::Provider, String> {
+    let api_key = stored
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .or_else(|| environment.key.map(str::trim).filter(|key| !key.is_empty()))
+        .ok_or_else(|| {
+            format!(
+                "no model credential: run `stkcraft model --key <KEY>`, or export DEEPSEEK_API_KEY \
+                 (the settings file would be {})",
+                credential_path().map_or_else(
+                    || "in the configuration directory".to_owned(),
+                    |path| path.display().to_string()
+                )
+            )
+        })?;
+    let endpoint = prefs
+        .model_endpoint
+        .clone()
+        .or_else(|| environment.base_url.map(str::to_owned))
+        .unwrap_or_else(|| stkcraft_agent_runtime::DEEPSEEK_BASE_URL.to_owned());
+    let model = prefs
+        .model
+        .clone()
+        .or_else(|| environment.model.map(str::to_owned))
+        .unwrap_or_else(|| stkcraft_agent_runtime::DEEPSEEK_MODEL.to_owned());
+    Ok(stkcraft_agent_runtime::Provider::new(
+        endpoint, model, api_key,
+    ))
 }
 
 impl Prefs {
@@ -210,6 +360,8 @@ mod tests {
     fn preferences_round_trip_through_json() {
         let prefs = Prefs {
             language: Some("de".to_owned()),
+            model_endpoint: Some("https://mine.example/v1/chat/completions".to_owned()),
+            model: Some("mine".to_owned()),
         };
         let text = serde_json::to_string(&prefs).expect("serialised");
         let read: Prefs = serde_json::from_str(&text).expect("deserialised");
@@ -237,5 +389,93 @@ mod tests {
             Some("zh-cn")
         );
         assert_eq!(stkcraft_framework_i18n::parse_system_locale("C"), None);
+    }
+
+    #[test]
+    fn the_stored_credential_wins_over_the_environment() {
+        // A key typed into the settings is a decision; a key in the environment is a convenience for
+        // a script. The decision wins, and the environment is the fallback so a container still works.
+        let prefs = Prefs::default();
+        let environment = ModelEnvironment {
+            key: Some("from-environment"),
+            base_url: Some("https://env.example/v1/chat/completions"),
+            model: Some("env-model"),
+        };
+        let provider =
+            model_provider_from(&prefs, Some("from-settings"), &environment).expect("a provider");
+        assert_eq!(provider.api_key, "from-settings");
+        // The endpoint and model still come from the environment, because nothing overrode them.
+        assert_eq!(provider.base_url, "https://env.example/v1/chat/completions");
+        assert_eq!(provider.model, "env-model");
+        assert!(provider.has_credential());
+    }
+
+    #[test]
+    fn the_environment_is_the_fallback_and_the_defaults_are_shipped() {
+        let prefs = Prefs::default();
+        let provider = model_provider_from(
+            &prefs,
+            None,
+            &ModelEnvironment {
+                key: Some("  spaced-out  "),
+                ..ModelEnvironment::default()
+            },
+        )
+        .expect("a provider");
+        // A pasted key often carries whitespace; a key with a trailing newline is not a different key.
+        assert_eq!(provider.api_key, "spaced-out");
+        assert_eq!(provider.base_url, stkcraft_agent_runtime::DEEPSEEK_BASE_URL);
+        assert_eq!(provider.model, stkcraft_agent_runtime::DEEPSEEK_MODEL);
+        assert_eq!(provider.timeout_seconds, 120);
+
+        // Settings override both, and an empty stored value is not a credential.
+        let chosen = Prefs {
+            language: None,
+            model_endpoint: Some("https://mine.example/v1/chat/completions".to_owned()),
+            model: Some("mine".to_owned()),
+        };
+        let provider = model_provider_from(
+            &chosen,
+            Some("   "),
+            &ModelEnvironment {
+                key: Some("env"),
+                ..ModelEnvironment::default()
+            },
+        )
+        .expect("a provider");
+        assert_eq!(provider.api_key, "env");
+        assert_eq!(
+            provider.base_url,
+            "https://mine.example/v1/chat/completions"
+        );
+        assert_eq!(provider.model, "mine");
+    }
+
+    #[test]
+    fn no_credential_says_how_to_set_one() {
+        let error = model_provider_from(&Prefs::default(), None, &ModelEnvironment::default())
+            .expect_err("no credential anywhere");
+        assert!(error.contains("stkcraft model --key"), "{error}");
+        assert!(error.contains("DEEPSEEK_API_KEY"), "{error}");
+    }
+
+    #[test]
+    fn the_credential_file_is_private_and_trimmed() {
+        let directory = std::env::temp_dir().join("stkcraft-model-key");
+        let _ = std::fs::remove_dir_all(&directory);
+        let path = directory.join("model.key");
+        store_credential_at(&path, "  sk-abc  \n").expect("stored");
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "sk-abc");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&path)
+                .expect("metadata")
+                .permissions()
+                .mode();
+            // 0600: the owner reads and writes, nobody else does anything.
+            assert_eq!(mode & 0o777, 0o600, "mode {mode:o}");
+        }
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

@@ -457,7 +457,9 @@ fn translate_rows(
     sources: &[&Source],
     existing: &[Row],
 ) -> Result<(Vec<(Source, String)>, String), String> {
-    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    // The build tool cannot read the person's settings (they belong to the app), so a catalog is
+    // translated from the environment — `DEEPSEEK_API_KEY`, with the endpoint and model overridable.
+    let model = stkcraft_agent_runtime::Provider::from_environment()?;
     let wanted: Vec<Source> = sources.iter().map(|source| (*source).clone()).collect();
     let catalogue = stkcraft_agent_runtime::translate::translate_catalogue(
         &model,

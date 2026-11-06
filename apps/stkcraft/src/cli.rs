@@ -33,6 +33,8 @@ pub enum Invocation {
     History,
     /// Serve the control channel on a loopback port.
     Control(ControlRequest),
+    /// Show or change the model this installation uses.
+    Model(ModelRequest),
     /// List or search the person's knowledge base.
     Knowledge(KnowledgeRequest),
 }
@@ -84,6 +86,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Extensions => crate::extensions::list(),
         Invocation::History => history(),
         Invocation::Control(request) => control(&request),
+        Invocation::Model(request) => model(&request),
         Invocation::Knowledge(request) => knowledge(&request),
     }
 }
@@ -112,6 +115,8 @@ COMMANDS
     extensions  List the extension packages installed for this person
     history     Show what this installation has computed, newest first
     control     Serve the control channel on loopback (`control --port 7979`)
+    model       Show or change the model this installation uses:
+                `model --key <KEY>`, `--endpoint <URL>`, `--name <MODEL>`, `--clear`
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
     version     Print the version
@@ -178,6 +183,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "extensions" => Ok(Invocation::Extensions),
         "history" => Ok(Invocation::History),
         "control" => parse_control(arguments),
+        "model" => parse_model(arguments),
         "knowledge" => Ok(Invocation::Knowledge(KnowledgeRequest {
             query: arguments.next(),
         })),
@@ -549,7 +555,7 @@ fn mcp() -> Result<(), String> {
 /// request. Every tool call it makes is printed as it happens, because an analysis whose steps a
 /// person cannot see is an analysis nobody can check.
 fn ask(question: &str) -> Result<(), String> {
-    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    let model = crate::prefs::model_provider()?;
     let server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_agent_mcp::load_skills(&skills_directory()),
@@ -630,7 +636,7 @@ fn chat(request: &ChatRequest) -> Result<(), String> {
         }
         return Ok(());
     }
-    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    let model = crate::prefs::model_provider()?;
     let server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
         stkcraft_agent_mcp::load_skills(&skills_directory()),
@@ -701,6 +707,110 @@ pub fn skills_directory() -> std::path::PathBuf {
 pub struct ControlRequest {
     /// The loopback port to listen on.
     port: u16,
+}
+
+/// What `model` was asked to do.
+pub struct ModelRequest {
+    /// A credential to store.
+    key: Option<String>,
+    /// An endpoint to store.
+    endpoint: Option<String>,
+    /// A model name to store.
+    name: Option<String>,
+    /// Remove the stored credential.
+    clear: bool,
+}
+
+/// Parse `model [--key K] [--endpoint URL] [--name M] [--clear]`.
+fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let mut request = ModelRequest {
+        key: None,
+        endpoint: None,
+        name: None,
+        clear: false,
+    };
+    while let Some(flag) = arguments.next() {
+        let mut value = |what: &str| {
+            arguments
+                .next()
+                .ok_or_else(|| format!("`{what}` needs a value"))
+        };
+        match flag.as_str() {
+            "--key" => request.key = Some(value("--key")?),
+            "--endpoint" => request.endpoint = Some(value("--endpoint")?),
+            "--name" => request.name = Some(value("--name")?),
+            "--clear" => request.clear = true,
+            other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
+        }
+    }
+    Ok(Invocation::Model(request))
+}
+
+/// Show or change the model this installation uses.
+///
+/// Three states matter to a person: which endpoint and model are in force, whether a credential is
+/// stored (never the credential itself), and where it is stored. Changing one writes the settings or
+/// the credential file and says which.
+fn model(request: &ModelRequest) -> Result<(), String> {
+    let mut prefs = crate::prefs::Prefs::load();
+    let mut changed = Vec::new();
+    if let Some(endpoint) = &request.endpoint {
+        prefs.model_endpoint = Some(endpoint.trim().to_owned());
+        changed.push(format!("endpoint {endpoint}"));
+    }
+    if let Some(name) = &request.name {
+        prefs.model = Some(name.trim().to_owned());
+        changed.push(format!("model {name}"));
+    }
+    if !changed.is_empty() {
+        prefs.save()?;
+    }
+    if let Some(key) = &request.key {
+        crate::prefs::store_credential(key)?;
+        changed.push("credential stored".to_owned());
+    }
+    if request.clear {
+        if let Some(path) = crate::prefs::credential_path() {
+            let _ = std::fs::remove_file(&path);
+        }
+        changed.push("credential removed".to_owned());
+    }
+
+    // Report the state *after* the change, resolved the same way the agent resolves it, so the
+    // answer to "what will be used" is the answer the next command gets.
+    match crate::prefs::model_provider() {
+        Ok(provider) => {
+            println!(
+                "STKCraft {} — model {} at {}",
+                env!("CARGO_PKG_VERSION"),
+                provider.model,
+                provider.base_url
+            );
+            println!(
+                "  credential: {} ({}-byte stored or environment key, timeout {} s)",
+                if provider.has_credential() {
+                    "present"
+                } else {
+                    "absent"
+                },
+                provider.api_key.len(),
+                provider.timeout_seconds
+            );
+        }
+        Err(message) => println!("STKCraft {} — {message}", env!("CARGO_PKG_VERSION")),
+    }
+    if !changed.is_empty() {
+        println!("  changed: {}", changed.join(", "));
+    }
+    for (label, path) in [
+        ("settings", crate::prefs::Prefs::path()),
+        ("credential", crate::prefs::credential_path()),
+    ] {
+        if let Some(path) = path {
+            println!("  {label}: {}", path.display());
+        }
+    }
+    Ok(())
 }
 
 /// Parse `control --port <p>`.

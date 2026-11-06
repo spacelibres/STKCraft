@@ -9,6 +9,64 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.44] — Your key, in the app, for whichever endpoint you point it at
+
+The foundation had one gap that made every other gap worse: the model was a single hard-wired client.
+`DEEPSEEK_API_KEY` was read from the environment and nowhere else, which on macOS and Windows means a
+person who launches the application from a dock **has no model at all** — and the whole point of this
+platform is that the model drives the engine. This release turns the transport into configuration.
+
+### Added
+
+- **`Provider` replaces `DeepSeek`** in `stkcraft-agent-runtime`: an OpenAI-compatible endpoint, a model
+  name, a credential and a timeout, and nothing else. Every provider that speaks that protocol is
+  therefore supported without a rebuild — which is what "the model is configuration, not code" has to
+  mean for a mission shop with its own gateway. The loop, the tools and the prompt are unchanged.
+- **Settings that hold the model**: `ui.json` gains `model_endpoint` and `model`, and the credential
+  goes in a **separate file, `model.key`, written `0600`** beside it. Not in `ui.json`: a file a person
+  is likely to paste into a bug report is the worst place for a secret.
+- **`stkcraft model`** — shows the endpoint and model in force and whether a credential is stored (never
+  the credential), and changes them: `--key <KEY>`, `--endpoint <URL>`, `--name <MODEL>`, `--clear`.
+  It also prints where both files live, because "where did it save it" is the next question.
+- **Resolution order is a documented rule**: a stored credential beats the environment (a decision beats
+  a convenience), the environment is the fallback so a container and a CI job keep working, and the
+  shipped defaults fill in the rest. `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODEL` and `DEEPSEEK_TIMEOUT_SECONDS`
+  still override for a headless run.
+- **The credential is redacted in `Debug`**: a provider prints `<15 bytes>`, never the value. A key in a
+  log line is a key in a bug report.
+
+### Fixed
+
+- **A model request now has a configurable timeout**, and the refusal message says "the model endpoint
+  refused the request" with the provider's own words instead of naming DeepSeek — a gateway that is not
+  DeepSeek should not read as if it were.
+
+### Verified
+
+With **no `DEEPSEEK_API_KEY` in the environment**:
+
+```text
+$ stkcraft model --key sk-… --name deepseek-chat
+STKCraft 0.1.44 — model deepseek-chat at https://api.deepseek.com/v1/chat/completions
+  credential: present (13-byte stored or environment key, timeout 120 s)
+  changed: model deepseek-chat, credential stored
+  settings: /home/…/.config/stkcraft/ui.json
+  credential: /home/…/.config/stkcraft/model.key        # -rw------- 13 bytes
+
+$ env -u DEEPSEEK_API_KEY stkcraft ask "What is 2+2? Answer in three words."
+Four, exactly, plainly.
+```
+
+A wrong stored key answers with the endpoint's own 401 text, which is the other half of the check: the
+stored credential is what was used, and a failure explains itself.
+
+### Not built yet
+
+- **The window has no model section yet** — the settings exist and the CLI sets them; a person driving
+  the assistant panel still needs the command line for now.
+- **Memory, extensions and the window's agent surface** are the next three foundation steps, in that
+  order (`ROADMAP.md`).
+
 ## [0.1.43] — The window answers the launcher, and hands over the picture
 
 Since 0.1.36 the control channel existed, but only a CLI process could open it. The process that owns

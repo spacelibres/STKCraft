@@ -98,7 +98,7 @@ pub trait Responder: Send {
 
 /// The real responder: `DeepSeek` driving the engine's tools, with the conversation kept.
 struct DeepSeekResponder {
-    agent: stkcraft_agent_runtime::Agent<stkcraft_agent_runtime::DeepSeek>,
+    agent: stkcraft_agent_runtime::Agent<stkcraft_agent_runtime::Provider>,
 }
 
 impl Responder for DeepSeekResponder {
@@ -120,7 +120,7 @@ impl Responder for DeepSeekResponder {
 
 /// Build the real responder, or say why it cannot exist.
 fn deepseek(skills: &std::path::Path, scenario: &Scenario) -> Result<Box<dyn Responder>, String> {
-    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    let model = crate::prefs::model_provider()?;
     let server =
         stkcraft_agent_mcp::Server::new(scenario.clone(), stkcraft_agent_mcp::load_skills(skills));
     Ok(Box::new(DeepSeekResponder {
@@ -360,7 +360,7 @@ impl Assistant {
                 }
             });
         }
-        match stkcraft_agent_runtime::DeepSeek::from_environment() {
+        match crate::prefs::model_provider() {
             Ok(model) => {
                 let host = model
                     .base_url

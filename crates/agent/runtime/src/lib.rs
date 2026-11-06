@@ -108,12 +108,6 @@ pub fn command_id(function: &str) -> String {
     function.replace(FUNCTION_NAME_SEPARATOR, ".")
 }
 
-/// The `DeepSeek` endpoint the default configuration points at.
-pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1/chat/completions";
-
-/// The model used when the caller does not name one.
-pub const DEFAULT_MODEL: &str = "deepseek-chat";
-
 /// One message in the conversation the model sees.
 ///
 /// The same values are what a [`session::Session`] writes to disk, so a conversation survives the
@@ -174,20 +168,75 @@ pub trait ChatModel {
     fn complete(&self, messages: &[Message], tools: &[Value]) -> Result<Turn, String>;
 }
 
-/// `DeepSeek`'s chat-completions API, spoken over `curl`.
-#[derive(Debug, Clone)]
-pub struct DeepSeek {
-    /// The endpoint.
+/// A chat-completions endpoint, spoken over `curl`.
+///
+/// One type for every OpenAI-compatible provider, because the shape of the protocol is the shape
+/// every one of them implements: a base URL, a model name and a credential. Which provider a person
+/// uses is therefore *configuration*, not code — the platform ships `DeepSeek` as the default and
+/// nothing in the loop knows the difference, which is what lets a mission shop point it at its own
+/// gateway without a rebuild.
+///
+/// Nothing is retried silently and nothing is streamed: a request that fails is an error with the
+/// provider's own words in it (see `--fail-with-body` below), because a model call that quietly
+/// retried four times turns a wrong key into a two-minute hang.
+#[derive(Clone)]
+pub struct Provider {
+    /// The endpoint: an OpenAI-compatible `/chat/completions` URL.
     pub base_url: String,
-    /// The model name.
+    /// The model name, as the endpoint spells it.
     pub model: String,
-    /// The credential, read from the environment rather than stored in a document.
+    /// The credential.
     pub api_key: String,
+    /// How long one request may take, in seconds.
+    pub timeout_seconds: u64,
 }
 
-impl DeepSeek {
+impl std::fmt::Debug for Provider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // A key in a log line is a key in a bug report. The length is enough to tell "set" from
+        // "empty" without leaking anything.
+        formatter
+            .debug_struct("Provider")
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("api_key", &format_args!("<{} bytes>", self.api_key.len()))
+            .field("timeout_seconds", &self.timeout_seconds)
+            .finish()
+    }
+}
+
+/// The default provider, so a person who sets only a key gets a working model.
+pub const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1/chat/completions";
+/// The default model name.
+pub const DEEPSEEK_MODEL: &str = "deepseek-chat";
+
+impl Provider {
+    /// A provider with an explicit endpoint, model and credential.
+    #[must_use]
+    pub fn new(
+        base_url: impl Into<String>,
+        model: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Self {
+        Self {
+            base_url: base_url.into(),
+            model: model.into(),
+            api_key: api_key.into(),
+            timeout_seconds: 120,
+        }
+    }
+
+    /// Whether a credential is present at all.
+    #[must_use]
+    pub fn has_credential(&self) -> bool {
+        !self.api_key.trim().is_empty()
+    }
+
     /// Read the configuration from `DEEPSEEK_API_KEY`, with the endpoint and model overridable by
     /// `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL`.
+    ///
+    /// This is the fallback, not the primary path: the application reads the person's settings
+    /// first, so a key stored in the settings works with no environment at all.
     ///
     /// # Errors
     ///
@@ -201,9 +250,10 @@ impl DeepSeek {
         };
         Ok(Self {
             base_url: std::env::var("DEEPSEEK_BASE_URL")
-                .unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned()),
-            model: std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_owned()),
+                .unwrap_or_else(|_| DEEPSEEK_BASE_URL.to_owned()),
+            model: std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| DEEPSEEK_MODEL.to_owned()),
             api_key,
+            timeout_seconds: 120,
         })
     }
 
@@ -256,7 +306,7 @@ impl DeepSeek {
     }
 }
 
-impl ChatModel for DeepSeek {
+impl ChatModel for Provider {
     fn complete(&self, messages: &[Message], tools: &[Value]) -> Result<Turn, String> {
         let body = self.body(messages, tools).to_string();
         let mut child = std::process::Command::new("curl")
@@ -267,7 +317,7 @@ impl ChatModel for DeepSeek {
                 // bare status code, which is what made `Invalid 'tools[0].function.name'` invisible.
                 "--fail-with-body",
                 "--max-time",
-                "120",
+                &self.timeout_seconds.to_string(),
                 "-X",
                 "POST",
                 &self.base_url,
@@ -295,9 +345,9 @@ impl ChatModel for DeepSeek {
             let body = String::from_utf8_lossy(&output.stdout);
             let body = body.trim();
             return Err(if body.is_empty() {
-                format!("DeepSeek refused the request: {detail}")
+                format!("the model endpoint refused the request: {detail}")
             } else {
-                format!("DeepSeek refused the request: {detail}: {body}")
+                format!("the model endpoint refused the request: {detail}: {body}")
             });
         }
         parse_response(&String::from_utf8_lossy(&output.stdout))
@@ -1268,7 +1318,8 @@ mod tests {
 
     #[test]
     fn the_request_body_maps_tools_and_messages_to_the_documented_shape() {
-        let deepseek = DeepSeek {
+        let deepseek = Provider {
+            timeout_seconds: 120,
             base_url: "https://example.invalid".to_owned(),
             model: "deepseek-chat".to_owned(),
             api_key: "k".to_owned(),
@@ -1336,7 +1387,7 @@ mod tests {
         // The message must say which variable a caller has to set. (The environment is read, not
         // modified: `remove_var` is unsafe in this toolchain and removing another test's key would
         // be a race.)
-        let message = match DeepSeek::from_environment() {
+        let message = match Provider::from_environment() {
             Ok(config) => format!("a key is set for {} ", config.model),
             Err(error) => error,
         };
@@ -1347,5 +1398,26 @@ mod tests {
         } else {
             assert!(message.contains("DEEPSEEK_API_KEY"), "{message}");
         }
+    }
+
+    #[test]
+    fn a_provider_never_prints_its_credential() {
+        // A key in a log line is a key in a bug report: `Debug` shows that one is present and
+        // nothing about what it is.
+        let provider = Provider::new(
+            "https://example/v1/chat/completions",
+            "m",
+            "sk-secret-value",
+        );
+        let printed = format!("{provider:?}");
+        assert!(!printed.contains("sk-secret-value"), "{printed}");
+        // The length is stated so "set" and "empty" can be told apart in a log without the value.
+        assert!(
+            printed.contains(&format!("<{} bytes>", "sk-secret-value".len())),
+            "{printed}"
+        );
+        assert!(printed.contains("https://example"), "{printed}");
+        assert!(provider.has_credential());
+        assert!(!Provider::new("u", "m", "   ").has_credential());
     }
 }
