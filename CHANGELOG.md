@@ -9,6 +9,42 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.70] — OCR verified by a real engine, in CI, without a C dependency in the crate graph
+
+The OCR path had plumbing tests and a stand-in command; what it lacked was a run against a real engine.
+This release adds the leg that does it — and it is a **workflow job, not a linked library**, which is the
+design's own answer to "why not use a mature OCR library": use one, through configuration, so that Tesseract
+cannot decide this project's build matrix or break its wasm gate.
+
+- **`crates/agent/knowledge/tests/ocr_real.rs`** — draws a sentence with ImageMagick, wraps the picture in a
+  one-page PDF with img2pdf, and asks the library to read the document. The page has **no text layer**, so
+  the only way text can appear is the configured command:
+  `pdftoppm -r 300 -png … | tesseract - - -l eng`. It asserts the words it drew are the words it read.
+- **`.github/workflows/ci.yml` gains a job `ocr`** that installs `tesseract-ocr`, `tesseract-ocr-eng`,
+  `poppler-utils`, `imagemagick` and `img2pdf`, and runs that test with `--ignored`.
+
+The test is `#[ignore]`d because the engine is not on a developer's machine by default — this one has
+`pdftoppm` and neither `convert`, `img2pdf` nor Tesseract — so locally it reports `1 ignored` and CI is where
+it runs. That is the honest split: a developer is not asked to install an OCR stack, and the project does not
+claim the path works without one.
+
+### Added
+
+- **The `ocr` CI job**, and the integration test it runs.
+
+### Deliberately not done
+
+- **No `ocr-tesseract` Cargo feature.** Linking Tesseract would put a C toolchain, leptonica and per-language
+  data on every platform's build, and would have to be `cfg`-gated off wasm — for an engine the design already
+  treats as configuration. The workflow leg is the evidence; a linked feature would be a second, unverified
+  path.
+
+### Not built yet
+
+- **OCR quality** is not measured: the test proves the words are read, not that a hard page is read well.
+  That is what the transcription table does for formulas.
+- F3 (extension runtime) and F5 (sensors/targets) remain.
+
 ## [0.1.69] — Two false matches found by running it, and the rule that stops them
 
 The wider operator table was supposed to let polynomial formulas match. It did — **wrongly**, twice, and both

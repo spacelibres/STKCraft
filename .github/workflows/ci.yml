@@ -29,3 +29,21 @@ jobs:
         pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
         libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
         fonts-noto-cjk
+
+  # The OCR path against a real engine. `craft-pdf` keeps a C library out of the crate graph and the engine
+  # is configuration, so this job is how "the command really reads a scan" is verified rather than assumed.
+  # It runs the `#[ignore]`d test in `crates/agent/knowledge/tests/ocr_real.rs`, which needs the tools
+  # installed here and nothing else.
+  ocr:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the OCR stack
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng poppler-utils imagemagick img2pdf
+      - name: OCR a scanned page with a real engine
+        run: cargo test -p stkcraft-agent-knowledge --test ocr_real -- --ignored --nocapture
