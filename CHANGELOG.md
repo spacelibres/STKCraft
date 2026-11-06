@@ -9,6 +9,33 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.65] — The table proves both directions now
+
+`share/math/transcriptions.tsv` has **positive rows**: equations the pipeline must find, not only regions it
+must refuse. `cargo xtask formulas` reads **9 rows checked, 9 correct, 0 wrong**.
+
+The three positives came from a run, not from memory: `cargo xtask math-regions` over the CCSDS 101-series
+books, filtered for regions that read as equations, and then read by eye before being pinned:
+
+| Document | Page | What it is |
+|---|---|---|
+| `101x0b3s.pdf` | 15 | the field generator polynomial `F(x) = x⁸+x⁷+x²+x+1` |
+| `101x0b4s.pdf` | 15 | the same polynomial, set on its own line |
+| `101x0b4s.pdf` | 16 | a product-sum definition with `∏` and `∑` |
+
+The arXiv SGP4 paper was tried first and rejected as a source: it is a two-column paper whose equations are
+*inline* inside paragraphs, so the regions the pipeline finds there are prose blocks — a separate defect
+(the two-column merge) and not evidence for a transcription table.
+
+### Verified
+
+`cargo xtask formulas` — nine rows, both kinds, and the six negative rows from 0.1.64 still pass. The table
+now fails when the pipeline stops finding an equation **and** when it starts inventing one.
+
+### Not built yet
+
+- **Mathlib classification**, `verify-formulas`, and the linked-OCR feature with its CI leg.
+
 ## [0.1.64] — The table went green, and the false positives are gone
 
 `cargo xtask formulas` reads **6 rows checked, 6 correct, 0 wrong** — the six regions the ODM book used to

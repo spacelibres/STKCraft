@@ -18,3 +18,6 @@
 502x0b1s.pdf	23	144	247	543	323	not-formula	numbered rules prose, centred, full of + and -
 502x0b1s.pdf	33	117	585	543	693	not-formula	numbered rules prose: integer and float notation
 502x0b1s.pdf	43	198	456	332	456	not-formula	a keyword line: Keyword = Value Notation
+101x0b3s.pdf	15	337	614	392	614	formula	(4) Field generator polynomial: F(x) = x^8+x^7+x^2+x+1
+101x0b4s.pdf	15	254	612	358	612	formula	the same field generator polynomial, set on its own line
+101x0b4s.pdf	16	240	134	394	147	formula	a product-sum definition with a product and a sum operator
