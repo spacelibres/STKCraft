@@ -60,6 +60,40 @@ pub const MAX_HISTORY: usize = 40;
 /// The tool the model calls to read a skill in full.
 pub const SKILL_TOOL: &str = "skill.read";
 
+/// The tool the model calls to read the scenario document.
+///
+/// Without it the agent can change the scenario and cannot see it: asked "how many satellites are
+/// there?", a model with only add/remove tools answers that it cannot know, which is honest and
+/// useless. The document is already an MCP resource; this is the model's way to reach it.
+pub const SCENARIO_TOOL: &str = "scenario.read";
+
+/// The separator a tool name uses where a command id has a dot.
+///
+/// An `OpenAI`-compatible function name must match `^[a-zA-Z0-9_-]+$`, and every `STKCraft` command id is
+/// `namespace.verb`, so `access.compute` is refused by the provider before a single token is
+/// generated: `400 Invalid 'tools[0].function.name'`. The ids stay dotted — MCP allows it, and they
+/// are the stable public names — so the agent translates at its own boundary.
+///
+/// A double underscore and not a hyphen: an id may itself contain a hyphen (`scenario.set-duration`),
+/// so `a.b-c` and `a-b.c` would both become `a-b-c`. Ids never contain `_`, which makes this
+/// injective.
+pub const FUNCTION_NAME_SEPARATOR: &str = "__";
+
+/// The name a model sees for a command id: `access.compute` → `access__compute`.
+#[must_use]
+pub fn function_name(id: &str) -> String {
+    id.replace('.', FUNCTION_NAME_SEPARATOR)
+}
+
+/// The command id a model's tool name stands for: `access__compute` → `access.compute`.
+///
+/// A name that is not a translated id is returned as it is, so an unknown tool still reaches the
+/// server's own "no such tool" error instead of being silently rewritten into one.
+#[must_use]
+pub fn command_id(function: &str) -> String {
+    function.replace(FUNCTION_NAME_SEPARATOR, ".")
+}
+
 /// The `DeepSeek` endpoint the default configuration points at.
 pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1/chat/completions";
 
@@ -211,7 +245,10 @@ impl ChatModel for DeepSeek {
         let mut child = std::process::Command::new("curl")
             .args([
                 "-sS",
-                "--fail",
+                // `--fail` throws the response away with the status; `--fail-with-body` keeps it, and
+                // the body is where the provider says *what* it did not like. Without it a 400 is a
+                // bare status code, which is what made `Invalid 'tools[0].function.name'` invisible.
+                "--fail-with-body",
                 "--max-time",
                 "120",
                 "-X",
@@ -237,8 +274,14 @@ impl ChatModel for DeepSeek {
             .wait_with_output()
             .map_err(|error| format!("the model request did not finish: {error}"))?;
         if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("DeepSeek refused the request: {}", detail.trim()));
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            let body = String::from_utf8_lossy(&output.stdout);
+            let body = body.trim();
+            return Err(if body.is_empty() {
+                format!("DeepSeek refused the request: {detail}")
+            } else {
+                format!("DeepSeek refused the request: {detail}: {body}")
+            });
         }
         parse_response(&String::from_utf8_lossy(&output.stdout))
     }
@@ -516,11 +559,29 @@ impl<M: ChatModel> Agent<M> {
             .retain(|message| matches!(message, Message::System(_)));
     }
 
-    /// The engine's tools plus the skill reader.
+    /// The engine's tools plus the skill reader, named the way a model's function call allows.
+    ///
+    /// The server's tool list is MCP's, where an id may be `access.compute`; a model's function name
+    /// may not, so every name is translated here and translated back when a call arrives. This is the
+    /// only place the two vocabularies meet, which is what keeps the registry the single source of
+    /// truth for what a tool is.
     fn tools_with_skill_reader(&self) -> Vec<Value> {
-        let mut tools = self.server.tools_json();
+        let mut tools: Vec<Value> = self
+            .server
+            .tools_json()
+            .into_iter()
+            .map(|mut tool| {
+                if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                    let mapped = function_name(name);
+                    if let Some(object) = tool.as_object_mut() {
+                        object.insert("name".to_owned(), Value::String(mapped));
+                    }
+                }
+                tool
+            })
+            .collect();
         tools.push(json!({
-            "name": SKILL_TOOL,
+            "name": function_name(SKILL_TOOL),
             "description": "Read a skill — a procedure for a job — in full. Call it before \
                             attempting a job whose steps you are unsure of.",
             "inputSchema": {
@@ -531,12 +592,43 @@ impl<M: ChatModel> Agent<M> {
                 "required": ["name"],
             },
         }));
+        tools.push(json!({
+            "name": function_name(SCENARIO_TOOL),
+            "description": "Read the current scenario document as JSON: its name, epoch, duration, \
+                            satellites and stations. Call it before answering anything about what \
+                            the scenario contains.",
+            "inputSchema": {"type": "object", "properties": {}},
+        }));
         tools
     }
 
     /// Execute one tool call, returning the content for the model and a line for the trace.
     fn run_tool(&mut self, call: &ToolCall) -> (String, String) {
-        if call.name == SKILL_TOOL {
+        let id = command_id(&call.name);
+        if id == SCENARIO_TOOL {
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "resources/read",
+                "params": {"uri": "stkcraft://scenario"},
+            });
+            let content = self
+                .server
+                .handle(&request)
+                .and_then(|answer| {
+                    answer
+                        .get("result")
+                        .and_then(|result| result.get("contents"))
+                        .and_then(|contents| contents.get(0))
+                        .and_then(|first| first.get("text"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| "the scenario could not be read".to_owned());
+            // The summary is one line: the trace is a log, and a document is not a log line.
+            return (content, format!("{SCENARIO_TOOL}()"));
+        }
+        if id == SKILL_TOOL {
             let name = call
                 .arguments
                 .get("name")
@@ -567,7 +659,7 @@ impl<M: ChatModel> Agent<M> {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": call.name, "arguments": call.arguments},
+            "params": {"name": id, "arguments": call.arguments},
         });
         match self.server.handle(&request) {
             Some(answer) if answer.get("error").is_none() => {
@@ -581,7 +673,7 @@ impl<M: ChatModel> Agent<M> {
                     .to_owned();
                 let summary = format!(
                     "{}({}) → {}",
-                    call.name,
+                    id,
                     call.arguments,
                     text.lines().next().unwrap_or_default()
                 );
@@ -784,6 +876,104 @@ mod tests {
         }
         agent.forget();
         assert_eq!(agent.history_len(), 1);
+    }
+
+    #[test]
+    fn a_model_sees_a_name_the_provider_accepts_and_the_registry_still_answers() {
+        // The defect this pins: every command id is `namespace.verb`, and an OpenAI-compatible
+        // function name must match `^[a-zA-Z0-9_-]+$`, so the provider refused the whole request
+        // before generating a token. The translation has to be injective as well as legal.
+        let separator_free = |name: &str| {
+            !name.is_empty()
+                && name.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+                })
+        };
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for command in stkcraft_engine::Registry::builtin().iter() {
+            let mapped = function_name(command.descriptor.id);
+            assert!(
+                separator_free(&mapped),
+                "{mapped} is not a legal function name"
+            );
+            assert_eq!(command_id(&mapped), command.descriptor.id);
+            assert!(!mapped.contains('.'), "{mapped} still has a dot");
+            assert!(seen.insert(mapped), "two ids map to the same function name");
+        }
+        // Ids that would collide under a hyphen still do not under the separator.
+        assert_ne!(function_name("a.b-c"), function_name("a-b.c"));
+        assert_eq!(function_name(SKILL_TOOL), "skill__read");
+    }
+
+    #[test]
+    fn a_call_named_the_way_the_model_sees_it_reaches_the_command() {
+        let mut agent = agent(vec![
+            Turn {
+                text: String::new(),
+                calls: vec![ToolCall {
+                    id: "call-1".to_owned(),
+                    name: "scenario__rename".to_owned(),
+                    arguments: json!({"name": "Gemini"}),
+                }],
+            },
+            Turn {
+                text: "Renamed.".to_owned(),
+                calls: Vec::new(),
+            },
+        ]);
+        let answer = agent.ask("Rename it").expect("an answer");
+        assert_eq!(agent.server().scenario().name, "Gemini");
+        assert!(
+            answer.trace[0].starts_with("scenario.rename("),
+            "{:?}",
+            answer.trace
+        );
+    }
+
+    #[test]
+    fn the_model_can_read_the_scenario_it_is_asked_about() {
+        // Asked "how many satellites are there?", a model with only add/remove tools can only say it
+        // cannot know. The document is an MCP resource; this tool is how the model reaches it.
+        let mut agent = agent(vec![
+            Turn {
+                text: String::new(),
+                calls: vec![ToolCall {
+                    id: "call-1".to_owned(),
+                    name: function_name(SCENARIO_TOOL),
+                    arguments: json!({}),
+                }],
+            },
+            Turn {
+                text: "It has none.".to_owned(),
+                calls: Vec::new(),
+            },
+        ]);
+        agent.ask("How many satellites?").expect("an answer");
+        let tool_message = agent
+            .messages
+            .iter()
+            .find_map(|message| match message {
+                Message::Tool { content, .. } => Some(content.as_str()),
+                _ => None,
+            })
+            .expect("a tool result");
+        // The document, not a summary of it: the model can count what is in it.
+        assert!(tool_message.contains("\"satellites\""), "{tool_message}");
+        assert!(tool_message.contains("\"stations\""), "{tool_message}");
+        assert!(tool_message.contains("agent test"), "{tool_message}");
+    }
+
+    #[test]
+    fn the_tool_schemas_a_model_receives_carry_mapped_names() {
+        let agent = agent(vec![]);
+        let tools = agent.tools_with_skill_reader();
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+            .collect();
+        assert!(names.contains(&"access__compute"), "{names:?}");
+        assert!(names.contains(&"skill__read"), "{names:?}");
+        assert!(names.iter().all(|name| !name.contains('.')), "{names:?}");
     }
 
     #[test]

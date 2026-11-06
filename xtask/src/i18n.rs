@@ -410,6 +410,14 @@ fn string_literals(text: &str) -> Vec<String> {
                 '\\' => match characters.next() {
                     Some((_, 'n')) => literal.push('\n'),
                     Some((_, 't')) => literal.push('\t'),
+                    // A backslash at the end of a line is Rust's line continuation: it removes the
+                    // newline and the next line's leading whitespace, so a long literal split across
+                    // two lines is one string and not one string with a hole in it.
+                    Some((_, '\n')) => {
+                        while matches!(characters.clone().next(), Some((_, ' ' | '\t'))) {
+                            characters.next();
+                        }
+                    }
                     Some((_, other)) => literal.push(other),
                     None => break,
                 },
@@ -661,7 +669,7 @@ fn translate_rows(
             eprintln!("i18n: no translation for `{}`", source.text);
             continue;
         };
-        if let Err(problem) = check_translation(source, translation) {
+        if let Err(problem) = check_translation(source, translation, locale) {
             eprintln!("i18n: refused `{}`: {problem}", source.text);
             continue;
         }
@@ -675,7 +683,7 @@ fn translate_rows(
 }
 
 /// Refuse a translation the format or the placeholders make unusable.
-fn check_translation(source: &Source, translation: &str) -> Result<(), String> {
+fn check_translation(source: &Source, translation: &str, locale: &str) -> Result<(), String> {
     if translation.trim().is_empty() {
         return Err("the translation is empty".to_owned());
     }
@@ -694,8 +702,10 @@ fn check_translation(source: &Source, translation: &str) -> Result<(), String> {
             translation: translation.to_owned(),
         }]
     };
+    // Parsed as the language it is for: a plural row's form count is the locale's, and Chinese has
+    // one form where English has two.
     match catalog::parse(
-        "check",
+        locale,
         &rows
             .iter()
             .map(catalog::row_text)
@@ -861,6 +871,16 @@ mod tests {
     }
 
     #[test]
+    fn a_line_continuation_is_not_a_newline() {
+        // Rust's `\` at the end of a line joins two source lines into one string, dropping the
+        // newline and the next line's indentation. Treating it as a newline put a hole in a
+        // translated sentence and made the catalog row unrecognisable to the extraction.
+        let text = "tr!(h, l, \"one \\\n             two\");";
+        let calls = macro_calls(text);
+        assert_eq!(calls, vec![(None, vec!["one two".to_owned()])], "{calls:?}");
+    }
+
+    #[test]
     fn literals_are_read_without_their_quotes() {
         assert_eq!(
             string_literals(r#""One" "Two \"quoted\"" "#),
@@ -874,9 +894,9 @@ mod tests {
             context: String::new(),
             text: "Added {name}".to_owned(),
         };
-        assert!(check_translation(&source, "{name} hinzugefügt").is_ok());
-        assert!(check_translation(&source, "Hinzugefügt").is_err());
-        assert!(check_translation(&source, "  ").is_err());
+        assert!(check_translation(&source, "{name} hinzugefügt", "de").is_ok());
+        assert!(check_translation(&source, "Hinzugefügt", "de").is_err());
+        assert!(check_translation(&source, "  ", "de").is_err());
     }
 
     #[test]

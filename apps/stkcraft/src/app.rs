@@ -673,4 +673,32 @@ mod tests {
             "the graticule was drawn with the toggle off"
         );
     }
+
+    #[test]
+    fn the_embedded_catalogs_are_well_formed_and_translate() {
+        // `cargo xtask i18n` is the gate; this is the smoke test that the catalogs a build embeds
+        // actually answer. A catalog that parses in the task but not here would be a build-input
+        // problem, which is exactly the failure mode of an embedded file.
+        let translations = stkcraft_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+        for locale in translations.locales() {
+            assert!(
+                translations.len(locale) > 0,
+                "{locale} embeds an empty catalog"
+            );
+        }
+        if translations.has_locale("zh") {
+            let clock = translations.tr("zh", "Clock");
+            assert_ne!(
+                clock, "Clock",
+                "the Chinese catalog does not translate `Clock`"
+            );
+            assert!(!clock.is_ascii(), "`{clock}` is not Chinese");
+            // The chain has to reach it from what an operating system reports.
+            assert_eq!(
+                translations.resolve("zh_CN.UTF-8").code(),
+                "zh",
+                "a Chinese system locale does not resolve to the Chinese catalog"
+            );
+        }
+    }
 }

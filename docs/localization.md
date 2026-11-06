@@ -75,6 +75,21 @@ source, and refuses any row that breaks the format: a dropped placeholder, an in
 missing ellipsis, an empty translation. A refused row is reported by name and left untranslated
 rather than written wrong.
 
+## What ships
+
+`locales/zh/stkcraft.tsv` is the first catalog. It was produced with
+`cargo xtask i18n translate --language zh` — the pipeline above, run against the maintainer's own
+key — and then read row by row before it was committed, which is the rule: a wrong translation is
+worse than a missing one, because the missing one shows English and the wrong one is believed.
+
+Two defects surfaced only when a *real* model and a *real* language met the pipeline, and both are
+now pinned by tests:
+
+- a Chinese plural row was refused for listing one form where English lists two, although Chinese has
+  exactly one CLDR form — the check now counts the locale's forms, not the source's;
+- a Rust line continuation inside a translated literal was extracted as a newline plus indentation,
+  putting a hole in the middle of a sentence — the extractor now joins the lines the way rustc does.
+
 ## Using a language
 
 The window reads `ui.json` from the platform's configuration directory and offers a language picker

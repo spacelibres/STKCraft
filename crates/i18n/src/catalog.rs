@@ -135,7 +135,7 @@ pub fn parse(locale: &str, text: &str) -> (Catalog, Vec<Problem>) {
             });
             continue;
         }
-        if let Some(message) = row_problem(&row) {
+        if let Some(message) = row_problem(&row, locale) {
             problems.push(Problem {
                 line: number,
                 message,
@@ -166,7 +166,7 @@ pub fn parse(locale: &str, text: &str) -> (Catalog, Vec<Problem>) {
 /// These are the checks the shared catalog project runs on every pull request. A translation that
 /// drops a `{name}` cannot be filled in, and one that drops a trailing ellipsis is a sentence whose
 /// ending went missing — both produce a worse interface than showing English.
-fn row_problem(row: &Row) -> Option<String> {
+fn row_problem(row: &Row, locale: &str) -> Option<String> {
     let (source_forms, translation_forms) = if row.is_plural() {
         (
             row.source.split('|').collect::<Vec<_>>(),
@@ -175,13 +175,18 @@ fn row_problem(row: &Row) -> Option<String> {
     } else {
         (vec![row.source.as_str()], vec![row.translation.as_str()])
     };
-    if row.is_plural() && translation_forms.len() < source_forms.len().min(2) {
-        return Some(format!(
-            "`{}` is a plural row with {} form(s) in the source and {} in the translation",
-            row.source,
-            source_forms.len(),
-            translation_forms.len()
-        ));
+    if row.is_plural() {
+        // The count is the *locale's*, not the source's: Chinese has one form for every count and
+        // Russian has three, so demanding two of a Chinese row would refuse a correct translation.
+        let wanted = crate::plurals::plural_categories(locale).len();
+        if translation_forms.len() != wanted {
+            return Some(format!(
+                "`{}` is a plural row and `{locale}` has {wanted} CLDR form(s), but the translation \
+                 lists {}",
+                row.source,
+                translation_forms.len()
+            ));
+        }
     }
     // Every form of a plural says the same thing with a different shape, so the placeholders of the
     // first form are the placeholders of them all.
@@ -425,6 +430,30 @@ mod tests {
             1,
             "a one-form Russian plural must be refused"
         );
+    }
+
+    #[test]
+    fn a_plural_row_lists_the_locales_forms_and_not_the_sources() {
+        // The regression: a Chinese row with one form was refused because English has two, which
+        // would have made every correct CJK plural untranslatable.
+        let (catalog, problems) = parse("zh", "@plural\t{n} page|{n} pages\t{n} 页\n");
+        assert_eq!(problems, Vec::new(), "{problems:?}");
+        assert!(catalog.rows[0].is_plural());
+        // Japanese is the same; Russian still needs its three.
+        assert_eq!(
+            parse("ja", "@plural\t{n} page|{n} pages\t{n} ページ\n").1,
+            Vec::new()
+        );
+        let (_, problems) = parse(
+            "ru",
+            "@plural\t{n} page|{n} pages\t{n} страница|{n} страницы\n",
+        );
+        assert_eq!(problems.len(), 1, "Russian with two forms must be refused");
+        let (_, problems) = parse(
+            "ru",
+            "@plural\t{n} page|{n} pages\t{n} страница|{n} страницы|{n} страниц\n",
+        );
+        assert_eq!(problems, Vec::new());
     }
 
     #[test]

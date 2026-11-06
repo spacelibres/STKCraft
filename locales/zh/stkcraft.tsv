@@ -1,0 +1,43 @@
+# 中文 (zh) interface catalog for STKCraft.
+# Columns, separated by a TAB:  context <TAB> English source text <TAB> translation
+#   context  usually empty. `@plural`, `@id` and `@msg` mean something to the apps; any other
+#            word is a label that tells apart two meanings of the same English.
+#   escapes  \n  \t  \\  inside a column. `{name}` placeholders must appear in both columns (in
+#            any order), and a trailing "…" in one needs one in the other.
+#   @plural  English `one|other`; the translation lists this language's plural forms, `|`-separated.
+#   Lines starting with # and blank lines are ignored. A missing entry shows in English.
+#
+# Clean room: every entry is written from the plain meaning of the English text, never copied
+# from another product's translated interface.
+@id	language.name	中文
+	+1 h	+1 小时
+	Access	访问
+	Answer	回答
+	Ask	提问
+	Assistant	助手
+	Assistant panel	助手面板
+	Clock	时钟
+	Compute passes	计算过境
+	Diagnostics	诊断
+	Forget the discussion; keep the scenario	忘记讨论；保留场景
+	Graticule	经纬网
+	Language	语言
+	New conversation	新对话
+	Pause	暂停
+	Reset	重置
+	Reset camera	重置相机
+	Running the engine's commands…	正在运行引擎命令…
+	Scenario	场景
+	The assistant answers by running the engine's commands, so it needs a model to choose them.	助手通过运行引擎命令来回答，因此需要一个模型来选择命令。
+	View	视图
+	What it did	它做了什么
+	When can the station see the satellite?	地面站何时能看到卫星？
+	azimuth, elevation:	方位角、仰角：
+	distance:	距离：
+	search step	搜索步长
+	time rate	时间速率
+	version	版本
+	−1 h	−1 小时
+@plural	{n} answer in this conversation|{n} answers in this conversation	此对话中有 {n} 条回答
+@plural	{n} satellite|{n} satellites	{n} 颗卫星
+@plural	{n} station|{n} stations	{n} 个地面站

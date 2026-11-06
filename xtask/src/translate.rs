@@ -39,7 +39,9 @@ pub fn chat_completion(key: &str, prompt: &str) -> Result<String, String> {
     let mut child = std::process::Command::new("curl")
         .args([
             "-sS",
-            "--fail",
+            // The body is the only place a provider says what it disliked; `--fail` would throw it
+            // away and leave a bare status code.
+            "--fail-with-body",
             "--max-time",
             "300",
             "-X",
@@ -65,8 +67,14 @@ pub fn chat_completion(key: &str, prompt: &str) -> Result<String, String> {
         .wait_with_output()
         .map_err(|error| format!("the translation request did not finish: {error}"))?;
     if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("the model refused the request: {}", detail.trim()));
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let body = String::from_utf8_lossy(&output.stdout);
+        let body = body.trim();
+        return Err(if body.is_empty() {
+            format!("the model refused the request: {detail}")
+        } else {
+            format!("the model refused the request: {detail}: {body}")
+        });
     }
     let answer: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| format!("the model's answer is not JSON: {error}"))?;
