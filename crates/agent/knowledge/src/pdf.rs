@@ -571,6 +571,14 @@ fn span(run: &[Placed], names: &[String]) -> Span {
                 .advance
                 .map_or(0.0, |advance| advance * glyph.em / 1000.0)
     });
+    // A glyph whose font reports no advance would give the fragment a zero-width box, and a citation
+    // that points at a line is not a citation: the region is widened by half an em, which is where the
+    // ink of a single character actually is.
+    let x1 = if x1 > x0 {
+        x1
+    } else {
+        x0 + run.last().map_or(0.0, |glyph| glyph.em / 2.0)
+    };
     let text = assemble(run);
     // The faces, deduplicated and in first-seen order; and how many baselines the run used, which is
     // the evidence a sub- or superscript gives and a body-face sentence does not.
@@ -1106,5 +1114,22 @@ mod tests {
         let extracted = extract(&single(&content), 1 << 20).expect("a readable page");
         assert_eq!(extracted.regions.len(), 0, "{:?}", extracted.regions);
         assert_eq!(extracted.problems.len(), 0);
+    }
+
+    #[test]
+    fn a_region_is_never_zero_wide() {
+        // Found by measuring the SANA registry: a lone operator whose font reported no advance produced
+        // boxes like (491,146)-(491,146). The region is widened by half an em, so the citation names a
+        // place with an area rather than a line.
+        let content = "BT /F1 12 Tf 300 500 Td (\\261) Tj ET\n";
+        let extracted = extract(&single(content), 1 << 20).expect("a page");
+        assert_eq!(extracted.regions.len(), 1, "{:?}", extracted.regions);
+        let region = &extracted.regions[0];
+        assert!(
+            region.x1 > region.x0,
+            "the box is zero wide: ({},{})",
+            region.x0,
+            region.x1
+        );
     }
 }

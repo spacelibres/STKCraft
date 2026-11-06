@@ -9,6 +9,28 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.58] — A box with an area, not a line
+
+The zero-width citation defect 0.1.57's measurement found is fixed: when a glyph's font reports no
+advance, the fragment's box was `(x0)…(x0)` — a *line*, which is what the SANA registry's 24 regions
+contained. A citation that points at a line points at nothing a person can select.
+
+The box is now widened by half an em when the advance gives it no width, because half an em is where the
+ink of a single character actually is. The regression test draws a lone `±` and asserts the box has an
+area — the exact shape of the defect, from the document that found it.
+
+### Fixed
+
+- **`pdf::span`** — a fragment can no longer be zero wide.
+- **`a_region_is_never_zero_wide`** — a single-glyph region, the case that produced the defect.
+
+### Not built yet
+
+- **Layer 2 (layout)**, which is what the ODM book needs: its equations are set in the body face with no
+  operator, no Greek and no baseline shift, so no glyph evidence distinguishes `r = a (1 - e cos E)` from
+  a sentence. Centring and indentation off the body margin are page properties, and they are the next
+  step.
+
 ## [0.1.57] — The face and the baseline become evidence, and the numbers move
 
 Layer 1 asked the text layer two new questions: **which face drew this** and **how many baselines does the
