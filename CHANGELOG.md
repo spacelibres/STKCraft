@@ -9,6 +9,59 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.21] — The assistant panel, and a screenshot that proves panels draw
+
+The model reaches the window. A checkbox opens an **Assistant** panel: type a question, and the
+engine's own commands run on a worker thread while the panel lists each call as it happens, then
+shows the answer and adopts the scenario the model produced. It is the same loop as `stkcraft ask`,
+so nothing new can happen in the panel that a command line could not already do.
+
+The second half of this release is that the panels are now *tested*. Until now nothing drew them:
+both screenshot paths rendered the scene and skipped the interface around it, so a panel could lay
+out at zero height, clip its labels or swallow its own resize handle and every gate would still be
+green.
+
+### Added
+
+- **The assistant panel** in the desktop app, closed by default (a window that opened with a model
+  in it would make a network call on start). It runs the question on a thread of its own — a
+  question is a network round trip around real engine calls, and a frozen clock is worse than a
+  failure — and reports each `name(args) → summary` line through a channel the frame drains without
+  blocking, so the trace appears while the work happens rather than after it.
+- **`STKCRAFT_SCREENSHOT_PANELS`**, the third offscreen path: it draws the left panel and the
+  assistant panel and checks the result numerically — each side must have content that is neither
+  space nor the panel's flat fill, and enough label pixels for its text — with a blank image as the
+  control that the check can fail at all.
+- **`Agent::ask_observing`**, which reports each tool call as it happens; `ask` calls it with an
+  observer that ignores the lines, so a caller that shows progress and a caller that does not share
+  one loop. `stkcraft ask` prints the lines as they arrive for the same reason.
+
+### Changed
+
+- **The window adopts what the model did.** The worker answers against a copy of the scenario, and
+  when the loop finishes the window takes that copy and rebuilds its frame — so "add a satellite
+  called Kepler" leaves a satellite on screen, and a question still running cannot half-edit the
+  document while a person keeps working.
+- **`App::panels` is one function** for the left panel, the assistant panel and the adoption, shared
+  by the window and the verification path, so the image cannot show a layout the window does not
+  have.
+
+### Fixed
+
+- **The panels had never been rendered by anything.** Adding the assistant panel exposed why: the
+  left panel's frame was being drawn by a call the screenshot paths did not make, so the interface
+  around the scene had no evidence at all. The panel image is that evidence now, and the first run
+  of it failed — the left panel drew zero lit pixels, because the panel wrapper had been dropped in
+  the refactor that added the second panel.
+
+### Not built yet
+
+- **No streaming of the model's prose**: the trace streams, the answer arrives whole.
+- **No conversation history**: each question starts from a fresh context, so a follow-up question
+  cannot refer to the previous answer. That needs a `messages` list the panel owns and a decision
+  about how much of it to send.
+- **`resources/updated` notifications and dynamic third-party plugins** are unchanged.
+
 ## [0.1.20] — The model drives the engine
 
 `stkcraft ask "<question>"` puts a model in front of the tools 0.1.19 published. `DeepSeek` reads

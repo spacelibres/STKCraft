@@ -394,6 +394,24 @@ impl<M: ChatModel> Agent<M> {
     /// A message when the model fails, when a tool fails in a way the model cannot correct, or when
     /// the loop reaches [`Self::max_turns`] without a final answer.
     pub fn ask(&mut self, question: &str) -> Result<Answer, String> {
+        self.ask_observing(question, &mut |_| {})
+    }
+
+    /// Run one question, reporting each tool call as it happens.
+    ///
+    /// The observer exists because a question can take a minute and a half: a caller that only
+    /// learned the trace at the end would show a spinner and nothing else, and an analysis whose
+    /// steps a person cannot follow while it runs is one they cannot interrupt either. The trace in
+    /// the [`Answer`] is the same sequence, so a caller may use one, the other, or both.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::ask`].
+    pub fn ask_observing<F: FnMut(&str)>(
+        &mut self,
+        question: &str,
+        observer: &mut F,
+    ) -> Result<Answer, String> {
         let system = self.system_prompt();
         let mut messages = vec![Message::System(system), Message::User(question.to_owned())];
         let mut answer = Answer::default();
@@ -410,6 +428,7 @@ impl<M: ChatModel> Agent<M> {
             });
             for call in turn.calls {
                 let (content, summary) = self.run_tool(&call);
+                observer(&summary);
                 answer.trace.push(summary);
                 messages.push(Message::Tool {
                     call_id: call.id,
@@ -546,6 +565,41 @@ mod tests {
             },
             server,
         )
+    }
+
+    #[test]
+    fn the_observer_sees_each_tool_call_as_it_happens() {
+        // A caller that shows progress needs the lines while the loop runs, not afterwards: the
+        // same sequence arrives in `answer.trace`, in the same order.
+        let mut agent = agent(vec![
+            Turn {
+                text: String::new(),
+                calls: vec![
+                    ToolCall {
+                        id: "call-1".to_owned(),
+                        name: "scenario.rename".to_owned(),
+                        arguments: json!({"name": "Gemini"}),
+                    },
+                    ToolCall {
+                        id: "call-2".to_owned(),
+                        name: "skill.read".to_owned(),
+                        arguments: json!({"name": "compute-passes"}),
+                    },
+                ],
+            },
+            Turn {
+                text: "Done.".to_owned(),
+                calls: Vec::new(),
+            },
+        ]);
+        let mut seen = Vec::new();
+        let answer = agent
+            .ask_observing("Rename it", &mut |line| seen.push(line.to_owned()))
+            .expect("an answer");
+        assert_eq!(seen, answer.trace);
+        assert_eq!(seen.len(), 2);
+        assert!(seen[0].starts_with("scenario.rename("), "{}", seen[0]);
+        assert_eq!(seen[1], "skill.read(compute-passes)");
     }
 
     #[test]

@@ -156,11 +156,13 @@ the workspace version disagree, and when an `[Unreleased]` heading is present. T
 ### Looking at the viewport without a window
 
 A build machine has no window system, so the app can render one frame offscreen and write it as a
-PNG. There are two paths, because the window has two layers and either can be the broken one:
+PNG. There are three paths, because the window has three layers and any of them can be the broken
+one:
 
 ```sh
 STKCRAFT_SCREENSHOT=/tmp/frame.png cargo run --release -p stkcraft        # the scene renderer
 STKCRAFT_SCREENSHOT_EGUI=/tmp/window.png cargo run --release -p stkcraft  # the window's own path
+STKCRAFT_SCREENSHOT_PANELS=/tmp/panels.png cargo run --release -p stkcraft # the panels around it
 ```
 
 The first opens its own `wgpu` pass and asks whether the pipelines and the geometry are right. The
@@ -171,10 +173,20 @@ built from the wrong aspect ratio all pass the first path and leave the window b
 margin on the panel the two images are byte-identical, which is the check that says the window and
 the verified render agree.
 
-Both print the adapter they chose, so a software Vulkan fallback is visible rather than hidden, and
-both check the depth buffer numerically: every ground-track sample that is geometrically behind the
-globe must be hidden, with the samples in front as the control that proves the check can see a line
-at all. `STKCRAFT_SCREENSHOT` is how the viewport image in `CHANGELOG.md` was produced.
+The third path draws the panels and leaves the middle of the image as space, because the scene over
+it needs a render pass it does not open. It opens the assistant panel first — the panel whose job is
+to run the engine — and then checks the image numerically: each side must have content that is
+neither space nor the panel's flat fill, and enough label pixels to prove its text landed, with a
+blank image as the control that the check can fail at all. A panel that laid out at zero height or
+clipped its labels still exits successfully and still writes a PNG, which is exactly the failure an
+unexamined image hides.
+
+All three print the adapter they chose, so a software Vulkan fallback is visible rather than hidden.
+The first two check the depth buffer numerically: every ground-track sample that is geometrically
+behind the globe must be hidden, with the samples in front as the control that proves the check can
+see a line at all. `STKCRAFT_SCREENSHOT` is how the viewport image in `CHANGELOG.md` was produced, and
+`STKCRAFT_SCREENSHOT_EGUI` must stay byte-identical to it when no panel is open — that equality is the
+check that the window and the verified render agree, and the panel path is deliberately outside it.
 
 **A passing test is not evidence that the drawing is right.** Five defects in the 0.1.0
 viewport — an invisible star field, an invisible graticule, a ground track hidden behind the

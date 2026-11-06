@@ -27,6 +27,7 @@ use stkcraft_time::Epoch;
 use stkcraft_viewport::scene::SceneData;
 use stkcraft_viewport::{Camera, Frame, SceneCallback};
 
+use crate::assistant::Assistant;
 use crate::frame_builder::{build_frame, clamp_rate, step_duration};
 use crate::render;
 
@@ -61,6 +62,8 @@ pub struct App {
     access_step_seconds: f64,
     /// Whether to draw the graticule. A display toggle, not a command: nothing is computed.
     show_graticule: bool,
+    /// The assistant panel: a model driving this scenario through the engine's commands.
+    assistant: Assistant,
 }
 
 impl App {
@@ -81,6 +84,7 @@ impl App {
             status: None,
             access_step_seconds,
             show_graticule: true,
+            assistant: Assistant::default(),
         }
     }
 
@@ -180,8 +184,48 @@ impl App {
         self.refresh();
     }
 
+    /// Open the assistant panel, for a caller that wants it visible from the start.
+    ///
+    /// Only the verification path uses this: the window opens with the panel closed, because a
+    /// panel that starts open is a panel that starts asking a model for a key.
+    pub fn open_assistant(&mut self) {
+        self.assistant.open = true;
+    }
+
+    /// The panels, without the viewport: the window draws these and then the scene, and the
+    /// verification path draws these alone so a panel can be looked at on a machine with no window.
+    ///
+    /// Kept as one function for the same reason the scene is: an image that laid the panels out
+    /// itself would be evidence of a layout the window does not have.
+    pub fn panels(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::left("controls")
+            .resizable(true)
+            .default_size(300.0)
+            .show(ui, |ui| self.left_panels(ui));
+
+        if self.assistant.open {
+            let skills = crate::cli::skills_directory();
+            let mut adopted = None;
+            egui::Panel::right("assistant")
+                .resizable(true)
+                .default_size(360.0)
+                .show(ui, |ui| {
+                    adopted = self.assistant.ui(ui, &self.scenario, &skills);
+                });
+            if let Some(scenario) = adopted {
+                self.scenario = scenario;
+                self.refresh();
+            }
+        }
+        // While a question runs there is a worker to collect from, so keep drawing even when the
+        // clock is paused; otherwise the answer would sit in the channel until the next input.
+        if self.assistant.is_running() {
+            ui.ctx().request_repaint();
+        }
+    }
+
     /// The `egui` side panel: clock, scenario contents, parameters and results.
-    fn side_panel(&mut self, ui: &mut egui::Ui) {
+    fn left_panels(&mut self, ui: &mut egui::Ui) {
         ui.heading("STKCraft");
         ui.label(format!("version {}", env!("CARGO_PKG_VERSION")));
         ui.separator();
@@ -278,6 +322,7 @@ impl App {
         ui.separator();
         ui.heading("View");
         ui.checkbox(&mut self.show_graticule, "Graticule");
+        ui.checkbox(&mut self.assistant.open, "Assistant panel");
         if ui.button("Reset camera").clicked() {
             self.camera = Camera::default_view();
         }
@@ -308,10 +353,7 @@ impl eframe::App for App {
         // advance a minute of simulated time. Clamped to a quarter second.
         self.advance(elapsed.min(0.25));
 
-        egui::Panel::left("controls")
-            .resizable(true)
-            .default_size(300.0)
-            .show(ui, |ui| self.side_panel(ui));
+        self.panels(ui);
 
         // No panel frame: the viewport is the whole area, and a theme-coloured margin around it
         // would look like a letterbox rather than space.

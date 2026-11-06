@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod assistant;
 mod cli;
 mod frame_builder;
 mod render;
@@ -74,6 +75,33 @@ fn run_egui_screenshot(path: &str) -> ExitCode {
     }
 }
 
+/// Render the interface's panels to a file, and exit.
+///
+/// The third verification path, for the third layer of the window: the scene image proves the
+/// geometry, the `egui` image proves the window's own drawing of it, and this one proves that the
+/// panels around it lay out — with the assistant panel open, because that is the panel whose job is
+/// to run the engine.
+fn run_panel_screenshot(path: &str) -> ExitCode {
+    let scenario = match app::demo_scenario() {
+        Ok(scenario) => scenario,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut application = app::App::new(scenario, 30.0);
+    match screenshot::screenshot_panels(&mut application, path) {
+        Ok(()) => {
+            println!("wrote {path}");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Render the first frame to a file, using an adapter that needs no display, and exit.
 ///
 /// This is a *verification* path, not a feature: it exists so that a build with no window system
@@ -112,6 +140,9 @@ fn run_window() -> ExitCode {
     }
     if let Ok(path) = std::env::var("STKCRAFT_SCREENSHOT_EGUI") {
         return run_egui_screenshot(&path);
+    }
+    if let Ok(path) = std::env::var("STKCRAFT_SCREENSHOT_PANELS") {
+        return run_panel_screenshot(&path);
     }
     let scenario = match app::demo_scenario() {
         Ok(scenario) => scenario,

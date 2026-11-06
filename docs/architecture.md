@@ -128,8 +128,16 @@ turns the registry into a protocol and knows nothing about models. `stkcraft-age
 Desktop connected to the same stdin. The agent therefore cannot reach a capability the protocol
 does not expose, which keeps "the model can do anything the user can" a property of the design
 rather than a promise. Swapping `DeepSeek` for another model, or moving the agent into another
-process, changes nothing below it; `stkcraft mcp` and `stkcraft ask` are two clients of one
-surface.
+process, changes nothing below it; `stkcraft mcp`, `stkcraft ask` and the window's assistant panel
+are three clients of one surface.
+
+The panel is the window's client, and it follows the same rule as every other panel here: it owns
+no analysis. It asks a question on a worker thread and shows the tool calls as they arrive, because
+a question is a network round trip around real engine calls and a frozen clock would be worse than
+a failure. The worker gets a copy of the scenario, and the window adopts what the model produced
+only when the loop has finished — so an answer describes the scenario it was asked about, and a
+question in flight cannot half-edit the document while a person keeps working. Nothing in the
+engine knows the panel exists.
 
 The model's transport is `curl` on standard input rather than an HTTP crate: no TLS stack in the
 build, no client to audit, and the request and response stay text a person can read when a number

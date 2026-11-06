@@ -389,11 +389,11 @@ fn ask(question: &str) -> Result<(), String> {
         stkcraft_mcp::load_skills(&skills_directory()),
     );
     let mut agent = stkcraft_agent::Agent::new(model, server);
-    match agent.ask(question) {
+    // Printed as they happen rather than collected and printed at the end: a question can take a
+    // minute, and a step nobody can see while it runs is a step nobody can interrupt.
+    let mut print = |line: &str| println!("  · {line}");
+    match agent.ask_observing(question, &mut print) {
         Ok(answer) => {
-            for line in &answer.trace {
-                println!("  · {line}");
-            }
             println!("{}", answer.text);
             Ok(())
         }
@@ -402,7 +402,7 @@ fn ask(question: &str) -> Result<(), String> {
 }
 
 /// Where the skill documents live, if they are anywhere this build can find them.
-fn skills_directory() -> std::path::PathBuf {
+pub fn skills_directory() -> std::path::PathBuf {
     let beside_executable = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join("skills")));

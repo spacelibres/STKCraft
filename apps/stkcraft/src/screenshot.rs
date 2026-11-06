@@ -334,6 +334,27 @@ pub fn screenshot_through_egui(app: &App, path: &str) -> Result<(), String> {
                 }
             });
     });
+    let rgb = render_output(&gpu, &context, output)?;
+    assert_occlusion(&scene, &camera, &rgb)?;
+    write_rgb(&rgb, path)?;
+    eprintln!(
+        "scene at {}: {} track vertices, {} markers, through egui",
+        epoch_label,
+        scene.tracks.len(),
+        scene.markers.len()
+    );
+    Ok(())
+}
+
+/// Tessellate and rasterise one `egui` frame into an RGB image.
+///
+/// Shared by the scene image and the panel image, so both go through the window's own
+/// `egui-wgpu` renderer with the depth attachment the window configures.
+fn render_output(
+    gpu: &Gpu,
+    context: &egui::Context,
+    output: egui::FullOutput,
+) -> Result<Vec<u8>, String> {
     let pixels_per_point = output.pixels_per_point;
     let primitives = context.tessellate(output.shapes, pixels_per_point);
 
@@ -413,15 +434,120 @@ pub fn screenshot_through_egui(app: &App, path: &str) -> Result<(), String> {
             .chain(std::iter::once(encoder.finish())),
     );
 
-    let rgb = gpu.read_rgb(&color_texture)?;
-    assert_occlusion(&scene, &camera, &rgb)?;
+    gpu.read_rgb(&color_texture)
+}
+
+/// Render the window's panels — and only the panels — to a file.
+///
+/// The viewport image proves the drawing of the scene; this one proves the layout of the interface
+/// around it, which `egui` renders on the CPU and a machine with no window can therefore still be
+/// shown. The middle of the image is left as space: the scene over it needs a render pass this path
+/// does not open, and nothing here is a claim about the scene.
+///
+/// The assistant panel is opened for the image so the panel a person reaches through a checkbox is
+/// the panel this proves draws.
+///
+/// # Errors
+///
+/// A message for the user: no adapter, no device, or a file that cannot be written.
+pub fn screenshot_panels(app: &mut App, path: &str) -> Result<(), String> {
+    app.open_assistant();
+    let gpu = Gpu::open()?;
+    let context = egui::Context::default();
+    let screen = egui::vec2(WIDTH as f32, HEIGHT as f32);
+    let raw_input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),
+        ..Default::default()
+    };
+    let output = context.run_ui(raw_input, |ui| {
+        // The panels first, then the middle, which is the order the window uses: a side panel
+        // added inside the central panel's closure would lay out against the wrong rectangle and
+        // draw nothing, which is exactly the failure this image exists to catch.
+        app.panels(ui);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::hover());
+                painter.rect_filled(response.rect, 0.0, egui::Color32::from_rgb(4, 6, 12));
+            });
+    });
+    let rgb = render_output(&gpu, &context, output)?;
+    let verdict = assert_panels_rendered(&rgb);
     write_rgb(&rgb, path)?;
-    eprintln!(
-        "scene at {}: {} track vertices, {} markers, through egui",
-        epoch_label,
-        scene.tracks.len(),
-        scene.markers.len()
-    );
+    verdict
+}
+
+/// Space, as a byte per channel, for the checks that need to build a blank image.
+const SPACE_U8: u8 = 4;
+
+/// How much a side of the image has on it.
+///
+/// `content` counts pixels that are neither space nor the panel's flat background; `labels` counts
+/// pixels bright enough to be text rather than a fill. Both are needed because a panel that drew
+/// only its background and a panel whose labels were clipped away produce different failures, and
+/// an image that looks like a rectangle is evidence of neither.
+fn panel_content(rgb: &[u8], columns: std::ops::Range<u32>) -> (usize, usize) {
+    // Space, and the theme's panel fill: a pixel of either is a pixel that says nothing.
+    const SPACE_SUM: u32 = SPACE_U8 as u32 * 3;
+    const PANEL_SUM: u32 = 27 + 27 + 27;
+    // Labels are grey, not white: the theme draws them at 138-140 per channel, and a near-white
+    // threshold would only catch the one button caption.
+    const LABEL_SUM: u32 = 300;
+    let mut content = 0;
+    let mut labels = 0;
+    for y in 0..HEIGHT {
+        for x in columns.clone() {
+            let offset = ((y * WIDTH + x) * 3) as usize;
+            let Some(pixel) = rgb.get(offset..offset + 3) else {
+                continue;
+            };
+            let sum: u32 = pixel.iter().map(|value| u32::from(*value)).sum();
+            if sum != SPACE_SUM && sum != PANEL_SUM {
+                content += 1;
+            }
+            if sum > LABEL_SUM {
+                labels += 1;
+            }
+        }
+    }
+    (content, labels)
+}
+
+/// Check that both panels drew, and that they drew text.
+///
+/// The failure this catches is the one an empty image hides: a panel that laid out at zero height,
+/// or one whose labels were clipped away, still exits successfully and still writes a PNG. The
+/// thresholds are the measured counts minus a wide margin — the point is to catch a panel that drew
+/// nothing, not to pin a pixel budget that every font change would break.
+fn assert_panels_rendered(rgb: &[u8]) -> Result<(), String> {
+    let (left_content, left_labels) = panel_content(rgb, 0..WIDTH / 8);
+    let (right_content, right_labels) = panel_content(rgb, WIDTH - WIDTH / 8..WIDTH);
+    // The control: a blank image must fail this check. A check that passes everything is not a
+    // check, and the occlusion test next to this one is written the same way.
+    let blank = vec![SPACE_U8; (WIDTH * HEIGHT * 3) as usize];
+    let (blank_content, blank_labels) = panel_content(&blank, 0..WIDTH / 8);
+    if blank_content != 0 || blank_labels != 0 {
+        return Err(format!(
+            "the panel check counts {blank_content}/{blank_labels} pixel(s) on a blank image, so \
+             it cannot tell a drawn panel from an empty one"
+        ));
+    }
+    for (side, content, labels) in [
+        ("left", left_content, left_labels),
+        ("right", right_content, right_labels),
+    ] {
+        if content < 1_000 {
+            return Err(format!(
+                "the {side} panel has {content} pixel(s) of content in its column range; a panel \
+                 that drew nothing still writes an image, so this is not evidence"
+            ));
+        }
+        if labels < 100 {
+            return Err(format!(
+                "the {side} panel has {labels} text pixel(s); its labels are missing or clipped"
+            ));
+        }
+    }
     Ok(())
 }
 
