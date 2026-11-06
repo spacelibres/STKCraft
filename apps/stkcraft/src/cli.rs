@@ -7,9 +7,9 @@
 
 use std::fmt::Write as _;
 
+use stkcraft_astro_engine::{Arg, Args, Registry, Scenario};
+use stkcraft_astro_sgp4::TwoLineElement;
 use stkcraft_core::Angle;
-use stkcraft_engine::{Arg, Args, Registry, Scenario};
-use stkcraft_sgp4::TwoLineElement;
 
 use crate::render;
 
@@ -523,9 +523,11 @@ fn instant_at(epoch: stkcraft_time::Epoch, offset_seconds: f64) -> stkcraft_time
 /// runs from the repository root. Absent skills are not an error: the tools still work.
 fn mcp() -> Result<(), String> {
     let skills = skills_directory();
-    let mut server =
-        stkcraft_mcp::Server::new(app_demo_scenario()?, stkcraft_mcp::load_skills(&skills))
-            .with_knowledge(knowledge_library()?);
+    let mut server = stkcraft_agent_mcp::Server::new(
+        app_demo_scenario()?,
+        stkcraft_agent_mcp::load_skills(&skills),
+    )
+    .with_knowledge(knowledge_library()?);
     server.serve()
 }
 
@@ -535,13 +537,13 @@ fn mcp() -> Result<(), String> {
 /// request. Every tool call it makes is printed as it happens, because an analysis whose steps a
 /// person cannot see is an analysis nobody can check.
 fn ask(question: &str) -> Result<(), String> {
-    let model = stkcraft_agent::DeepSeek::from_environment()?;
-    let server = stkcraft_mcp::Server::new(
+    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    let server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
-        stkcraft_mcp::load_skills(&skills_directory()),
+        stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
     .with_knowledge(knowledge_library()?);
-    let mut agent = stkcraft_agent::Agent::new(model, server);
+    let mut agent = stkcraft_agent_runtime::Agent::new(model, server);
     // Printed as they happen rather than collected and printed at the end: a question can take a
     // minute, and a step nobody can see while it runs is a step nobody can interrupt.
     let mut print = |line: &str| println!("  · {line}");
@@ -607,7 +609,7 @@ fn chat(request: &ChatRequest) -> Result<(), String> {
             env!("CARGO_PKG_VERSION"),
             directory.display()
         );
-        let sessions = stkcraft_agent::session::Session::list(&directory);
+        let sessions = stkcraft_agent_runtime::session::Session::list(&directory);
         if sessions.is_empty() {
             println!("  none yet: `stkcraft chat` starts one");
         }
@@ -616,21 +618,21 @@ fn chat(request: &ChatRequest) -> Result<(), String> {
         }
         return Ok(());
     }
-    let model = stkcraft_agent::DeepSeek::from_environment()?;
-    let server = stkcraft_mcp::Server::new(
+    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    let server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
-        stkcraft_mcp::load_skills(&skills_directory()),
+        stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
     .with_knowledge(knowledge_library()?);
     // A conversation is a session on disk, so closing the terminal does not lose it: `--session`
     // resumes one and the id is printed for next time. This is the same shape a harness keeps its own
     // sessions in — a transcript that outlives the process.
     let session = match &request.session {
-        Some(id) => stkcraft_agent::session::Session::open(&directory, id)?,
-        None => stkcraft_agent::session::Session::create(&directory)?,
+        Some(id) => stkcraft_agent_runtime::session::Session::open(&directory, id)?,
+        None => stkcraft_agent_runtime::session::Session::create(&directory)?,
     };
     let id = session.id.clone();
-    let mut agent = stkcraft_agent::Agent::new(model, server).with_session(session);
+    let mut agent = stkcraft_agent_runtime::Agent::new(model, server).with_session(session);
     println!(
         "STKCraft {} — session {id}; `exit` ends it, `stkcraft chat --session {id}` resumes it.",
         env!("CARGO_PKG_VERSION")
@@ -716,13 +718,13 @@ fn parse_control<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocat
 /// The token is written where a client looks (`$XDG_RUNTIME_DIR/stkcraft/control-<port>.token`) and
 /// printed nowhere else: a token on standard output ends up in a terminal scrollback and a log.
 fn control(request: &ControlRequest) -> Result<(), String> {
-    let server = stkcraft_mcp::Server::new(
+    let server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
-        stkcraft_mcp::load_skills(&skills_directory()),
+        stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
     .with_knowledge(knowledge_library()?);
-    let session = stkcraft_control::Control::new(server, stkcraft_control::new_token());
-    stkcraft_control::serve(request.port, session)
+    let session = stkcraft_agent_control::Control::new(server, stkcraft_agent_control::new_token());
+    stkcraft_agent_control::serve(request.port, session)
 }
 
 /// Print what this installation has computed, newest first.
@@ -773,12 +775,12 @@ fn history() -> Result<(), String> {
 /// A `--knowledge` path that does not exist is an error with the path in it: a person who pointed the
 /// platform at their documents deserves to know it read nothing, rather than getting answers that
 /// silently came from memory.
-fn knowledge_library() -> Result<stkcraft_knowledge::Library, String> {
+fn knowledge_library() -> Result<stkcraft_agent_knowledge::Library, String> {
     Ok(knowledge_opened()?.library)
 }
 
 /// The library and what opening it cost, so the command can say whether the cache worked.
-fn knowledge_opened() -> Result<stkcraft_knowledge::Opened, String> {
+fn knowledge_opened() -> Result<stkcraft_agent_knowledge::Opened, String> {
     let explicit = std::env::var("STKCRAFT_KNOWLEDGE")
         .ok()
         .map(std::path::PathBuf::from);
@@ -796,9 +798,9 @@ fn knowledge_opened() -> Result<stkcraft_knowledge::Opened, String> {
             ));
         }
         // No library yet is the normal state of a fresh install, and it is not an error.
-        return Ok(stkcraft_knowledge::Opened {
-            library: stkcraft_knowledge::Library::default(),
-            reuse: stkcraft_knowledge::Reuse::default(),
+        return Ok(stkcraft_agent_knowledge::Opened {
+            library: stkcraft_agent_knowledge::Library::default(),
+            reuse: stkcraft_agent_knowledge::Reuse::default(),
         });
     }
     // The derived index is cached under the data directory, so a second run over a paper corpus is a
@@ -806,9 +808,9 @@ fn knowledge_opened() -> Result<stkcraft_knowledge::Opened, String> {
     let cache = stkcraft_storage::Paths::for_user()
         .ok()
         .map(|paths| stkcraft_storage::Cache::at(paths.cache().join("knowledge")));
-    stkcraft_knowledge::Library::open_cached(
+    stkcraft_agent_knowledge::Library::open_cached(
         &directory,
-        stkcraft_knowledge::Limits::default(),
+        stkcraft_agent_knowledge::Limits::default(),
         cache.as_ref(),
     )
 }
@@ -874,7 +876,7 @@ pub struct KnowledgeRequest {
 }
 
 /// The scenario an MCP session starts with.
-fn app_demo_scenario() -> Result<stkcraft_engine::Scenario, String> {
+fn app_demo_scenario() -> Result<stkcraft_astro_engine::Scenario, String> {
     crate::app::demo_scenario()
 }
 

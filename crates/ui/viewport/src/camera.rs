@@ -3,7 +3,7 @@
 //! Four 4x4 matrices, written out rather than pulled from a math crate: the viewport needs
 //! exactly these four and adding a dependency for them would be more surface than it saves.
 //! Everything is in kilometres and right-handed, with `+z` toward the north pole, which is the
-//! convention `stkcraft-frames` already uses for GCRF.
+//! convention `stkcraft-astro-frames` already uses for GCRF.
 //!
 //! Column-major storage, because that is what WGSL and every GPU API expect. A test checks the
 //! convention against a known transform, since a transposed matrix still "looks like a matrix"

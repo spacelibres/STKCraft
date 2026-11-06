@@ -17,9 +17,9 @@
 
 use std::collections::BTreeMap;
 
-use stkcraft_access::Sensor;
+use stkcraft_astro_access::Sensor;
+use stkcraft_astro_sgp4::TwoLineElement;
 use stkcraft_core::{Angle, Duration, Error, Result};
-use stkcraft_sgp4::TwoLineElement;
 
 use crate::analysis::{SatelliteAccess, compute_all_access};
 use crate::central::PlanetOrbit;
@@ -442,7 +442,7 @@ const BUILTIN: [Builtin; 8] = [
             let mask = args
                 .required("minimum-elevation")?
                 .as_angle("minimum-elevation")?;
-            let site = stkcraft_access::GroundSite::new(latitude, longitude, 0.0)?;
+            let site = stkcraft_astro_access::GroundSite::new(latitude, longitude, 0.0)?;
             let sensor = Sensor::above_horizon(mask);
             let id = scenario.add_station(name.clone(), site, sensor)?;
             Ok(CommandOutcome::new(format!(
@@ -496,7 +496,7 @@ const BUILTIN: [Builtin; 8] = [
             let step = match args.get("step-seconds") {
                 Some(argument) => argument.as_number("step-seconds")?,
                 // The default is the access crate's own: one minute.
-                None => stkcraft_access::DEFAULT_STEP.as_seconds(),
+                None => stkcraft_astro_access::DEFAULT_STEP.as_seconds(),
             };
             if step <= 0.0 {
                 return Err(Error::out_of_range(
@@ -580,7 +580,7 @@ const BUILTIN: [Builtin; 8] = [
                 .get("body")
                 .ok_or_else(|| Error::invalid("body", "required: the IAU name of a body"))?
                 .as_text("body")?;
-            let body = stkcraft_body::Body::ALL
+            let body = stkcraft_astro_body::Body::ALL
                 .into_iter()
                 .find(|candidate| candidate.name().eq_ignore_ascii_case(body_name))
                 .ok_or_else(|| Error::NotFound {
@@ -621,9 +621,9 @@ const BUILTIN: [Builtin; 8] = [
                 .epoch
                 .to_scale(stkcraft_time::TimeScale::Tdb, None)?;
             let orbit = PlanetOrbit::circular(body, radius_km, inclination.as_rad(), epoch_tdb)?;
-            let access = stkcraft_access::PlanetAccess {
+            let access = stkcraft_astro_access::PlanetAccess {
                 body,
-                site: stkcraft_access::GroundSite::new(latitude, longitude, 0.0)?,
+                site: stkcraft_astro_access::GroundSite::new(latitude, longitude, 0.0)?,
                 sensor: Sensor::above_horizon(mask),
             };
             let passes = find_passes(&orbit, &access, epoch_tdb, hours, step_seconds)?;

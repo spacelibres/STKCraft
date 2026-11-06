@@ -48,7 +48,7 @@ passing as though they had run. To run them:
 
 ```sh
 cargo xtask fetch-data
-STKCRAFT_EPHEMERIS_KERNEL=data/de440s.bsp cargo test -p stkcraft-ephemeris
+STKCRAFT_EPHEMERIS_KERNEL=data/de440s.bsp cargo test -p stkcraft-astro-ephemeris
 ```
 
 Reference states in that test are transcriptions of CSPICE's `spkezr` output and name the kernel's

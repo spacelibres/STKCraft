@@ -15,11 +15,11 @@
 //! The choice is made here, not in the viewport, and it is one `Propagator::itrf` call away from
 //! being the other way round.
 
-use stkcraft_access::Ellipsoid;
+use stkcraft_astro_access::Ellipsoid;
+use stkcraft_astro_engine::{Propagator, Scenario};
 use stkcraft_core::Duration;
-use stkcraft_engine::{Propagator, Scenario};
 use stkcraft_time::Epoch;
-use stkcraft_viewport::{Frame, SatelliteGlyph, StationGlyph, color_from_bytes};
+use stkcraft_ui_viewport::{Frame, SatelliteGlyph, StationGlyph, color_from_bytes};
 
 use crate::render;
 
@@ -50,7 +50,7 @@ pub const DEFAULT_SATELLITE_COLOR: [f32; 3] = [0.95, 0.35, 0.25];
 pub fn build_frame(scenario: &Scenario, at: Epoch) -> (Frame, Vec<String>) {
     let mut problems = Vec::new();
     let mut frame = Frame::empty(render::format_instant(at));
-    frame.earth_radius_km = stkcraft_viewport::EARTH_EQUATORIAL_RADIUS_KM;
+    frame.earth_radius_km = stkcraft_ui_viewport::EARTH_EQUATORIAL_RADIUS_KM;
 
     // Stations first: they are cheap and they never fail to converge.
     for station in &scenario.stations {
@@ -124,7 +124,7 @@ pub fn build_frame(scenario: &Scenario, at: Epoch) -> (Frame, Vec<String>) {
 /// sample a ground track; it is never reported as a physical answer. The *units* still have to be
 /// right, or a track covers a day instead of an orbit — which is the mistake this comment exists
 /// to prevent, and which the test caught when it was made.
-fn orbit_period_seconds(element_set: &stkcraft_sgp4::TwoLineElement) -> f64 {
+fn orbit_period_seconds(element_set: &stkcraft_astro_sgp4::TwoLineElement) -> f64 {
     let radians_per_minute = element_set.elements().map_or(0.065, |e| e.mean_motion);
     if !radians_per_minute.is_finite() || radians_per_minute <= 0.0 {
         return 5_400.0;
@@ -168,8 +168,8 @@ pub fn step_duration(seconds: f64) -> Duration {
 #[expect(clippy::expect_used)]
 mod tests {
     use super::*;
-    use stkcraft_engine::Scenario;
-    use stkcraft_sgp4::TwoLineElement;
+    use stkcraft_astro_engine::Scenario;
+    use stkcraft_astro_sgp4::TwoLineElement;
 
     const ISS: &str = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009";
     const ISS_LINE2: &str = "2 25544  51.6400 208.9163 0006317  69.9862  25.2906 15.49569600 12343";
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn a_station_is_drawn_on_the_ellipsoid_surface() {
         let mut scenario = Scenario::empty("test");
-        let site = stkcraft_access::GroundSite::new(
+        let site = stkcraft_astro_access::GroundSite::new(
             stkcraft_core::Angle::from_deg(51.5),
             stkcraft_core::Angle::from_deg(-0.13),
             0.0,
@@ -266,7 +266,7 @@ mod tests {
             .add_station(
                 "London",
                 site,
-                stkcraft_access::Sensor::above_horizon(stkcraft_core::Angle::from_deg(10.0)),
+                stkcraft_astro_access::Sensor::above_horizon(stkcraft_core::Angle::from_deg(10.0)),
             )
             .expect("added");
         let (frame, problems) = build_frame(&scenario, scenario.epoch);

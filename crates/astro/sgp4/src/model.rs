@@ -49,7 +49,7 @@ const AFSPC_MODE: bool = true;
 /// The frame is TEME — True Equator, Mean Equinox of date — which is the frame SGP4 is
 /// defined in and the only frame in which its output is meaningful. Converting to ICRF or to
 /// an Earth-fixed frame needs precession, nutation and Earth rotation, which live in
-/// `stkcraft-frames`.
+/// `stkcraft-astro-frames`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StateVector {
     /// Position, km, in TEME.

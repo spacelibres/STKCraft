@@ -9,6 +9,43 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.37] — A crate name you can read without opening the file
+
+No behaviour changed in this release. Every crate in the workspace was renamed so that its package name
+repeats the directory it lives in, and the gate now refuses a name that does not.
+
+The problem was smaller than it sounds and worse than it looks. `crates/agent/runtime` was named
+`stkcraft-agent`, so the directory and the name disagreed: a reader looking for "the runtime" found
+nothing, and a reader looking for "the agent" found the runtime. Worse, the names carried no group at
+all — `stkcraft-engine`, `stkcraft-access`, `stkcraft-viewport` said nothing about where they sat, and
+`use stkcraft_engine::analysis` did not tell a professional reader whether that was the platform or the
+astronomy. In a suite whose whole claim is that the engine, the agent and the UI are separate, the
+names were the one place that separation was invisible.
+
+### Changed
+
+- **`crates/<group>/<leaf>` is now `stkcraft-<group>-<leaf>`**: `stkcraft-astro-body`,
+  `stkcraft-astro-frames`, `stkcraft-astro-ephemeris`, `stkcraft-astro-sgp4`, `stkcraft-astro-access`,
+  `stkcraft-astro-engine`, `stkcraft-agent-knowledge`, `stkcraft-agent-mcp`, `stkcraft-agent-runtime`,
+  `stkcraft-agent-control`, `stkcraft-ui-viewport`.
+- **The platform keeps a bare name.** `crates/framework/` is `stkcraft-core`, `stkcraft-time`,
+  `stkcraft-i18n`, `stkcraft-storage` and `stkcraft-extensions`: that is the layer a sibling app shares,
+  named for its subject rather than its group, and a `stkcraft-framework-` prefix would be noise on the
+  five crates everything depends on. **This is the release's one breaking change** — `use
+  stkcraft_agent::…` becomes `use stkcraft_agent_runtime::…`, and every other old name maps the same way.
+- **`cargo xtask layers` enforces the naming rule**, not only the layering: the layer table pairs every
+  package with its path, and a name that does not match what the path implies is a violation. The check
+  is tested with a control case — the old `stkcraft-body` under `crates/astro/` fails it — so it cannot
+  be satisfied by a rule that accepts everything.
+- **`docs/standards.md` §7** states the four naming rules, including why the hyphen is the delimiter
+  (`stkcraft-astro-frames` in the manifest, `stkcraft_astro_frames` in code) and that a group directory
+  is never itself a package.
+
+### Not built yet
+
+- **PDF ingestion** and the **paper corpus fetcher** are still the next two steps.
+- **The window does not open the control channel**, and `ui.screenshot` is not a method yet.
+
 ## [0.1.36] — The launcher's socket, sessions that outlive the process, and the machine-freeze bug
 
 Three things this release, and the third is the one that mattered most.
@@ -72,10 +109,10 @@ So the index was rewritten before it was cached:
 
 ### Added
 
-- **`stkcraft-knowledge::index`** — the inverted index: a dictionary of interned terms, one posting per
+- **`stkcraft-agent-knowledge::index`** — the inverted index: a dictionary of interned terms, one posting per
   passage, document frequencies, and BM25 scoring by term id. It serialises and reads back with a
   bounds-checked reader, so a truncated cache file is a rebuild rather than a panic or a wrong answer.
-- **`stkcraft_knowledge::cache`** — the derived library in the key-value store, with the key changing
+- **`stkcraft_agent_knowledge::cache`** — the derived library in the key-value store, with the key changing
   when any file's metadata does, and the manifest kept so the cache holds one corpus rather than every
   revision of it.
 - **`Library::open_cached`**, and `stkcraft knowledge` reports `parsed / reused` so a person can see
@@ -182,7 +219,7 @@ the tree, before more code makes the wrong shape permanent.
   model-facing surface: the knowledge base, the MCP server, the runtime. `crates/ui/` is presentation.
   A reader can now tell which is which without opening a file, and a crate that needs a higher layer
   than its directory implies is in the wrong directory.
-- **Crate names keep the `stkcraft-` prefix**, so `use stkcraft_body::Body` is unchanged and the family's
+- **Crate names keep the `stkcraft-` prefix**, so `use stkcraft_astro_body::Body` is unchanged and the family's
   one-prefix convention holds; it is the *directory* that carries the taxonomy.
 
 ### Added
@@ -216,7 +253,7 @@ built around now — not a feature beside the model but the order in which it is
 
 ### Added
 
-- **`stkcraft-knowledge`** — a directory of documents, chunked by paragraph with line ranges kept, and
+- **`stkcraft-agent-knowledge`** — a directory of documents, chunked by paragraph with line ranges kept, and
   BM25 search over it. Deterministic, local, no embeddings and no network: the same library and query
   rank the same way on every machine, which is what lets a test assert that a specification value is
   found and a guess is not.
@@ -325,7 +362,7 @@ proposal with the same rules the gate applies, and the interface changes languag
   know what to translate; `build.rs` extracts the strings from this crate's sources with the same
   scanner `cargo xtask i18n` uses, so a self-translation and a translator's catalog describe the same
   interface.
-- **`stkcraft_agent::translate`** — the batch, the prompt and the acceptance rules, once, for both
+- **`stkcraft_agent_runtime::translate`** — the batch, the prompt and the acceptance rules, once, for both
   callers: the developer task and the window. Two implementations would be two prompts and two
   acceptance rules, and the one that drifts is the one a user meets.
 - **`stkcraft_i18n::extract`** — the macro scanner, moved out of `xtask` so the build script, the
@@ -584,7 +621,7 @@ follow-up was a new problem rather than the next step of one.
 - **`stkcraft chat`** — read a question, answer it, read the next, until `exit`, `quit` or end of
   input. One agent for the session, so the conversation and the scenario persist; a failed question
   does not end it, because the next question is usually the correction.
-- **A conversation in `stkcraft-agent`** — messages are kept between questions, with the system
+- **A conversation in `stkcraft-agent-runtime`** — messages are kept between questions, with the system
   prompt written once. `Agent::history_len` reports the length and `Agent::forget` empties the
   conversation while keeping the system prompt: the scenario lives in the server, so forgetting a
   discussion does not forget what the tools built.
@@ -718,7 +755,7 @@ network call, and `stkcraft mcp` and `stkcraft ask` are two clients of one proto
 
 ### Added
 
-- **`stkcraft-agent`** — a chat-completions client and the loop over it: system prompt, tool
+- **`stkcraft-agent-runtime`** — a chat-completions client and the loop over it: system prompt, tool
   schema from `Server::tools_json`, tool calls executed through `Server::handle`, and the result
   fed back until the model answers or [`MAX_TURNS`] is reached. `ChatModel` is a trait so the loop
   is tested with a scripted model — ten tests cover a plain answer, a tool call whose result comes
@@ -772,7 +809,7 @@ usable from there, and swapping the model changes nothing in the analysis.
 
 ### Added
 
-- **`stkcraft-mcp`** — a JSON-RPC 2.0 server over standard input and output, implementing
+- **`stkcraft-agent-mcp`** — a JSON-RPC 2.0 server over standard input and output, implementing
   `initialize`, `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list` and
   `prompts/get`. `Server::handle` is a pure function of a request and the session, so the whole
   protocol is tested without a pipe; nine tests cover the handshake, the tool catalogue, a real
@@ -931,7 +968,7 @@ or an ellipsoid — both of which the body crate already checks against CSPICE.
 
 ### Changed
 
-- **`stkcraft-access` takes `stkcraft-body`** (L2 → L3, allowed by the layer rule), which is what
+- **`stkcraft-astro-access` takes `stkcraft-astro-body`** (L2 → L3, allowed by the layer rule), which is what
   lets a station sit on any body instead of only on WGS-84.
 
 ## [0.1.10] — Moons
@@ -1087,7 +1124,7 @@ reads any number of kernels as one ephemeris and walks each chain across them, w
 
 ## [0.1.3] — The ephemeris reads a trajectory
 
-The SPK reader evaluates type-2 segments, and `stkcraft-ephemeris` now answers the question it was
+The SPK reader evaluates type-2 segments, and `stkcraft-astro-ephemeris` now answers the question it was
 built for: where is a body at a TDB instant, in barycentric ICRF coordinates, out of a JPL kernel.
 
 ### Added
@@ -1113,14 +1150,14 @@ built for: where is a body at a TDB instant, in barycentric ICRF coordinates, ou
 
 ## [0.1.2] — The ephemeris crate, and the layout it will not guess
 
-`stkcraft-ephemeris` exists: the trait every backend will fill, a Chebyshev evaluator, and a reader
+`stkcraft-astro-ephemeris` exists: the trait every backend will fill, a Chebyshev evaluator, and a reader
 for the NAIF container the JPL ephemerides are published in. What it does *not* do is read a
 trajectory out of a segment, because that layout did not check out, and a wrong ephemeris produces
 a wrong mission timeline quietly.
 
 ### Added
 
-- **`stkcraft-ephemeris` (L3), with an `Ephemeris` trait** — barycentric ICRF position and velocity
+- **`stkcraft-astro-ephemeris` (L3), with an `Ephemeris` trait** — barycentric ICRF position and velocity
   for a `Body` at a TDB instant, and nothing else. Keeping the contract that narrow is what makes a
   second backend a drop-in later. A TDB epoch is required rather than converted silently, because
   the kernel's argument is TDB and the conversion belongs to `stkcraft-time`.
@@ -1169,7 +1206,7 @@ reaches TDB, and a new crate carries the solar-system bodies with the IAU's own 
 
 ### Changed
 
-- **The pipelines, the shader and the buffers moved into `stkcraft-viewport`.** `SceneRenderer`
+- **The pipelines, the shader and the buffers moved into `stkcraft-ui-viewport`.** `SceneRenderer`
   owns the two pipelines, the uniform and one growable buffer per drawable, so the window and
   the screenshot path share them by construction rather than by both happening to create the
   same descriptors. Buffer writes go through `queue.write_buffer` into a buffer that is
@@ -1193,7 +1230,7 @@ reaches TDB, and a new crate carries the solar-system bodies with the IAU's own 
   (2005), USNO Circular 179. Tests compare it with ERFA's full series at eight epochs from 1985
   to 2025: worst disagreement 5.2 µs. `TDB → TT` is a fixed-point inversion, because the series
   argument is a TT quantity that is not known until the correction is.
-- **`stkcraft-body`, a new crate beside `stkcraft-frames`,** answers three questions about a
+- **`stkcraft-astro-body`, a new crate beside `stkcraft-astro-frames`,** answers three questions about a
   solar-system body and no others: how massive and how large it is (DE440 masses, IAU 2015
   radii), how it is oriented at a TDB instant (IAU 2015 pole and prime-meridian models, with the
   periodic terms the kernel carries), and where a point on its surface is (planetocentric and
@@ -1244,7 +1281,7 @@ the engine's number.
 
 ### Added
 
-- **`stkcraft-viewport`, a new crate at the UI layer** (`APP_LAYER - 1`), depending only on
+- **`stkcraft-ui-viewport`, a new crate at the UI layer** (`APP_LAYER - 1`), depending only on
   `stkcraft-core`, `wgpu`, `egui` and `bytemuck`:
   - `camera` — a turntable camera and the four matrices the viewport needs, written out rather
     than pulled from a maths crate. `Mat4` is column-major, which is what WGSL expects.
@@ -1349,7 +1386,7 @@ are listed because each cost real time and each has a lesson:
 ## [0.0.6] — The engine: from a TLE to an access report
 
 The four numerical layers are now joined into something that runs. A new crate,
-`stkcraft-engine`, holds a scenario document, turns each satellite's two-line element set into
+`stkcraft-astro-engine`, holds a scenario document, turns each satellite's two-line element set into
 an Earth-fixed position through the frame chain, runs access over the timeline, and exposes
 every user-visible action as a command.
 
@@ -1358,12 +1395,12 @@ it reports when the satellite is visible and for how long.
 
 ### Added
 
-- **`stkcraft-engine` at L4**, above `stkcraft-access`:
+- **`stkcraft-astro-engine` at L4**, above `stkcraft-astro-access`:
   - `scenario` — the document: satellites with their element sets, stations with their sites
     and sensors, a start epoch and a duration. Data, not behaviour, so a saved scenario never
     changes meaning when the physics improves.
   - `propagate` — the join that had no home: TLE → SGP4 → TEME → ITRF/GCRF. It belongs here
-    because `stkcraft-sgp4` and `stkcraft-frames` are both L2 and cannot depend on each other.
+    because `stkcraft-astro-sgp4` and `stkcraft-astro-frames` are both L2 and cannot depend on each other.
   - `analysis` — access over a scenario, one satellite-to-station pair at a time or all pairs.
   - `commands` — the command table: seven commands, each with an id, label, menu path,
     documented parameters, an `enabled` predicate and a `run` function.
@@ -1431,7 +1468,7 @@ Every claim names the test that holds it.
 
 ## [0.0.5] — When can this satellite see that station
 
-The product's central question is now answerable. A new crate, `stkcraft-access`, turns a
+The product's central question is now answerable. A new crate, `stkcraft-astro-access`, turns a
 station, a sensor and a target position over time into **access windows with start and end
 times**, and every piece of it is held to a case that can be checked by hand.
 
@@ -1440,7 +1477,7 @@ caller. Joining SGP4 to this is the engine's job and is the next arc.
 
 ### Added
 
-- **`stkcraft-access` at L3**, above `stkcraft-frames`. Six modules, each independently tested:
+- **`stkcraft-astro-access` at L3**, above `stkcraft-astro-frames`. Six modules, each independently tested:
   - `ellipsoid` — the WGS-84 Earth, so a station is where it really is rather than where a
     sphere would put it. The two defining constants are written down and everything else is
     derived, because a derived constant typed from memory is a transcription error waiting to
@@ -1488,7 +1525,7 @@ a satellite on the far side as not visible, because occultation is checked separ
 
 - `cargo xtask ci --offline` passes all six gates: fmt, clippy `-D warnings`, **170 tests**
   workspace-wide, assets, layers, and the wasm build of all five portable crates.
-- 49 of those tests are in `stkcraft-access`, a new crate with no test debt.
+- 49 of those tests are in `stkcraft-astro-access`, a new crate with no test debt.
 
 ### Known limitations
 
@@ -1510,12 +1547,12 @@ a satellite on the far side as not visible, because occultation is checked separ
 
 0.0.3 could compute where a satellite is but nothing could use the answer: SGP4 is defined in
 TEME, a frame tied to the mean equinox of date, so the position was not comparable with a
-ground station, a star or a 3D view. `stkcraft-frames` now carries the whole conversion
+ground station, a star or a 3D view. `stkcraft-astro-frames` now carries the whole conversion
 chain, and both of its endpoints reproduce the published worked example to `1e-6 km`.
 
 ### Added
 
-- **`stkcraft-frames` gains the frame chain, in five tested layers.** Each is a separate module
+- **`stkcraft-astro-frames` gains the frame chain, in five tested layers.** Each is a separate module
   with its own reference, so a mistake is caught where it is made rather than at the end:
   - `arguments` — the five IAU-80 Delaunay arguments, checked against ERFA and Vallado to
     `1e-13 rad`.
@@ -1571,7 +1608,7 @@ Every claim names the test that holds it.
 
 - `cargo xtask ci --offline` passes all six gates: fmt, clippy `-D warnings`, **121 tests**
   workspace-wide, assets, layers, and the wasm build of all four portable crates.
-- 41 of those tests are in `stkcraft-frames`, up from 17.
+- 41 of those tests are in `stkcraft-astro-frames`, up from 17.
 
 ### Known limitations
 
@@ -1581,7 +1618,7 @@ Every claim names the test that holds it.
 - **The ground-station local horizon is not here yet.** It needs an ellipsoid and a site,
   which belong with the access geometry rather than the frame chain.
 - **No single call from TLE to GCRF.** The conversion takes a `CartesianState`; joining it to
-  `stkcraft_sgp4`'s output is the engine's job, and there is no engine yet.
+  `stkcraft_astro_sgp4`'s output is the engine's job, and there is no engine yet.
 - **TEME only in.** There is no inverse (`gcrf_to_teme`) because nothing needs one yet.
 
 ## [0.0.3] — Deep-space propagation made exact
@@ -1662,7 +1699,7 @@ for deep-space orbits** — see *Known limitations* before trusting a high-orbit
 
 ### Added
 
-- **`stkcraft-sgp4` (L2).** A from-scratch implementation of SGP4 and SDP4, written against
+- **`stkcraft-astro-sgp4` (L2).** A from-scratch implementation of SGP4 and SDP4, written against
   the published theory: Vallado, Crawford, Hujsak and Kelso, *Revisiting Spacetrack Report 3*,
   AIAA 2006-6753, together with its reference source code, courtesy of CelesTrak, and the
   original Hoots and Roehrich Spacetrack Report 3 (1980). Every constant and every
@@ -1683,7 +1720,7 @@ for deep-space orbits** — see *Known limitations* before trusting a high-orbit
 - **The full verification suite.** All 33 element sets and all 667 expected rows from
   `tforverf.out` are transcribed into `crates/sgp4/src/tests/vectors/data.rs`, byte for byte,
   with their source named.
-- **`cargo xtask`** now checks `stkcraft-sgp4` builds for `wasm32-unknown-unknown`, and the
+- **`cargo xtask`** now checks `stkcraft-astro-sgp4` builds for `wasm32-unknown-unknown`, and the
   crate is registered in the layering table at L2.
 
 ### Correctness
@@ -1726,7 +1763,7 @@ Each claim names the test that holds it.
   transcription of the reference, so it is asserted to succeed.
 - **TEME only.** The output frame is the one SGP4 is defined in. Converting to ICRF or to an
   Earth-fixed frame needs precession, nutation and Earth rotation, which belong to
-  `stkcraft-frames` and are not wired up yet.
+  `stkcraft-astro-frames` and are not wired up yet.
 - **WGS-72 only in practice.** `GravityField::Wgs84` exists for reproducing comparison runs,
   but an operational element set propagated with WGS-84 is subtly wrong and the type says so.
 - **No access, coverage, scenario document, viewport or UI.** The `stkcraft` binary still
@@ -1758,7 +1795,7 @@ rest of the product is built on. **It cannot yet propagate an orbit, find an acc
 - **`stkcraft-time` (L1).** The reference time scales (UTC, TAI, TT, TDB, TCB, TCG, UT1, GPS)
   as a type, the IAU SOFA / ERFA constants with their sources cited, and the published
   `TAI - UTC` leap-second table from the IERS `tai-utc.dat` file.
-- **`stkcraft-frames` (L2).** `Rotation3`, which refuses to exist unless its rows are
+- **`stkcraft-astro-frames` (L2).** `Rotation3`, which refuses to exist unless its rows are
   orthonormal and its determinant is +1, so a reflection or a scaled matrix cannot be mistaken
   for a rotation.
 - **CI wiring.** `.github/workflows/` calls the shared `storytold/craft-common-actions`
@@ -1788,7 +1825,7 @@ These are the properties the numerical layers guarantee, each with a regression 
 
 ### Known limitations
 
-- **No propagation yet.** `stkcraft-sgp4` does not exist, so no orbit can be computed.
+- **No propagation yet.** `stkcraft-astro-sgp4` does not exist, so no orbit can be computed.
 - **No access or coverage.** The geometry that answers "when can this see that" is not built.
 - **No scenario document, viewport or UI.** The `stkcraft` binary prints its version and exits.
 - **TDB, TCG and TCB are approximated by TT.** The periodic TDB term (under 2 ms) and the

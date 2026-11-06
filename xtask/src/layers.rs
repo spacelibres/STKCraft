@@ -6,18 +6,31 @@
 //! and it has to be enforced mechanically because a single convenient `use` can undo it.
 //!
 //! ```text
-//! L0  core      units, errors, vectors
-//! L1  time      time scales, leap seconds, epochs
-//! L2  frames    reference frames and rotations
-//! L2  sgp4      orbit propagation
-//! L3  access    access and coverage geometry
-//! L4  engine    scenario, commands and analysis
-//! L5  mcp       the command registry spoken to an outside client
-//! L5  viewport  3D rendering (GPU), above the analysis layers
-//! L6  agent     a model driving the engine through the MCP tools
+//! L0  stkcraft-core               units, errors, vectors
+//! L0  stkcraft-i18n               interface translations
+//! L1  stkcraft-time               time scales, leap seconds, epochs
+//! L1  stkcraft-storage            the record, the cache and the vector store
+//! L2  stkcraft-astro-body         body constants and rotation models
+//! L2  stkcraft-astro-frames       reference frames and rotations
+//! L2  stkcraft-astro-sgp4         orbit propagation
+//! L3  stkcraft-astro-access       access and coverage geometry
+//! L3  stkcraft-astro-ephemeris    SPICE kernels and analytic ephemerides
+//! L3  stkcraft-agent-knowledge    the user's documents, and the search over them
+//! L3  stkcraft-extensions         the extension package contract
+//! L4  stkcraft-astro-engine       scenario, commands and analysis
+//! L5  stkcraft-agent-mcp          the command registry spoken to an outside client
+//! L5  stkcraft-ui-viewport        3D rendering (GPU), above the analysis layers
+//! L6  stkcraft-agent-runtime      a model driving the engine through the MCP tools
+//! L6  stkcraft-agent-control      a launcher driving the same registry
 //! ...
-//!     apps      the desktop app, CLI and web shell
+//!     stkcraft                    the desktop app, CLI and web shell
 //! ```
+//!
+//! The name of a crate states what it is, and the directory above it states the same thing: a
+//! package is `stkcraft-<group>-<leaf>` when it belongs to a group (`astro`, `agent`, `ui`) and
+//! bare `stkcraft-<subject>` only for the platform, which is the part a sibling app shares rather
+//! than the part that knows what an orbit is. The table below is the check: a name that disagrees
+//! with its directory, or a directory that disagrees with its layer, fails the gate.
 //!
 //! A crate may depend only on a strictly lower layer. The apps sit at
 //! [`FIRST_LAYER`] + [`LAYER_COUNT`] and may use anything.
@@ -36,6 +49,29 @@ pub struct CrateSpec {
 /// The lowest layer number used by any crate.
 #[cfg_attr(not(test), allow(dead_code))]
 pub const FIRST_LAYER: u32 = 0;
+
+/// The package name a crate's directory implies, or `None` for a path the rule does not cover.
+///
+/// `crates/<group>/<leaf>` is `stkcraft-<group>-<leaf>`, except under `crates/framework/`, which is
+/// the platform — what a sibling app shares, rather than the part that knows what an orbit is — and
+/// keeps the bare `stkcraft-<leaf>`. The apps and the build tool sit outside `crates/` and are named
+/// by their own rule, so they have no implied name. Rules: `docs/standards.md` §7.
+pub fn implied_name(path: &str) -> Option<String> {
+    let mut segments = path.split('/');
+    if segments.next()? != "crates" {
+        return None;
+    }
+    let group = segments.next()?;
+    let leaf = segments.next()?;
+    if segments.next().is_some() || leaf.is_empty() {
+        return None;
+    }
+    Some(if group == "framework" {
+        format!("stkcraft-{leaf}")
+    } else {
+        format!("stkcraft-{group}-{leaf}")
+    })
+}
 
 /// How many layers the analysis crates occupy. The apps sit just above the top one.
 ///
@@ -104,49 +140,51 @@ pub const LAYOUT: &[CrateSpec] = &[
         layer: 1,
     },
     // Body constants and rotation models sit beside the frame machinery: both are L2, and
-    // neither depends on the other, which is why `stkcraft-body` does not need `Rotation3`
-    // from `stkcraft-frames`.
+    // neither depends on the other, which is why `stkcraft-astro-body` does not need `Rotation3`
+    // from `stkcraft-astro-frames`.
     CrateSpec {
-        name: "stkcraft-body",
+        name: "stkcraft-astro-body",
         path: "crates/astro/body",
         layer: 2,
     },
     CrateSpec {
-        name: "stkcraft-frames",
+        name: "stkcraft-astro-frames",
         path: "crates/astro/frames",
         layer: 2,
     },
     CrateSpec {
-        name: "stkcraft-sgp4",
+        name: "stkcraft-astro-sgp4",
         path: "crates/astro/sgp4",
         layer: 2,
     },
     CrateSpec {
-        name: "stkcraft-access",
+        name: "stkcraft-astro-access",
         path: "crates/astro/access",
         layer: 3,
     },
     CrateSpec {
-        name: "stkcraft-ephemeris",
+        name: "stkcraft-astro-ephemeris",
         path: "crates/astro/ephemeris",
+        layer: 3,
+    },
+    // The user's own documents and the search over them. Pure text processing: no network, no
+    // model, so it sits with the analysis layers and can be tested without either. The crate name
+    // says `agent` because a model is what reads the answers, and the layer says 3 because the
+    // engine's knowledge commands call the same search with no model in the picture.
+    CrateSpec {
+        name: "stkcraft-agent-knowledge",
+        path: "crates/agent/knowledge",
         layer: 3,
     },
     // The extension package contract: manifests, ids and trust tiers. Pure data and validation, so
     // it sits with the analysis layers even though only the app consumes it.
-    // The user's own documents and the search over them. Pure text processing: no network, no
-    // model, so it sits with the analysis layers and can be tested without either.
-    CrateSpec {
-        name: "stkcraft-knowledge",
-        path: "crates/agent/knowledge",
-        layer: 3,
-    },
     CrateSpec {
         name: "stkcraft-extensions",
         path: "crates/framework/extensions",
         layer: 3,
     },
     CrateSpec {
-        name: "stkcraft-engine",
+        name: "stkcraft-astro-engine",
         path: "crates/astro/engine",
         layer: 4,
     },
@@ -154,7 +192,7 @@ pub const LAYOUT: &[CrateSpec] = &[
     // the same command registry, and nothing below knows any of them exists. It sits with the
     // viewport, one below the agent, because it consumes the engine and nothing consumes it.
     CrateSpec {
-        name: "stkcraft-mcp",
+        name: "stkcraft-agent-mcp",
         path: "crates/agent/mcp",
         layer: APP_LAYER - 2,
     },
@@ -162,7 +200,7 @@ pub const LAYOUT: &[CrateSpec] = &[
     // `wgpu` and `egui`, which `LAST_NON_UI_LAYER` forbids below. It still depends only on
     // `stkcraft-core`, so it can be replaced without touching the engine.
     CrateSpec {
-        name: "stkcraft-viewport",
+        name: "stkcraft-ui-viewport",
         path: "crates/ui/viewport",
         layer: APP_LAYER - 2,
     },
@@ -170,14 +208,14 @@ pub const LAYOUT: &[CrateSpec] = &[
     // server and knows nothing the protocol does not expose. Replacing the model, or talking to the
     // server from another process, leaves this crate out of the picture entirely.
     CrateSpec {
-        name: "stkcraft-agent",
+        name: "stkcraft-agent-runtime",
         path: "crates/agent/runtime",
         layer: APP_LAYER - 1,
     },
     // The control channel is the same relationship for a launcher instead of a model: it drives the
     // registry through the MCP server, so it sits at the agent's height rather than the server's.
     CrateSpec {
-        name: "stkcraft-control",
+        name: "stkcraft-agent-control",
         path: "crates/agent/control",
         layer: APP_LAYER - 1,
     },

@@ -26,7 +26,7 @@
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use eframe::egui;
-use stkcraft_engine::Scenario;
+use stkcraft_astro_engine::Scenario;
 
 /// What the panel is doing.
 #[derive(Debug, Default)]
@@ -98,7 +98,7 @@ pub trait Responder: Send {
 
 /// The real responder: `DeepSeek` driving the engine's tools, with the conversation kept.
 struct DeepSeekResponder {
-    agent: stkcraft_agent::Agent<stkcraft_agent::DeepSeek>,
+    agent: stkcraft_agent_runtime::Agent<stkcraft_agent_runtime::DeepSeek>,
 }
 
 impl Responder for DeepSeekResponder {
@@ -120,10 +120,11 @@ impl Responder for DeepSeekResponder {
 
 /// Build the real responder, or say why it cannot exist.
 fn deepseek(skills: &std::path::Path, scenario: &Scenario) -> Result<Box<dyn Responder>, String> {
-    let model = stkcraft_agent::DeepSeek::from_environment()?;
-    let server = stkcraft_mcp::Server::new(scenario.clone(), stkcraft_mcp::load_skills(skills));
+    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
+    let server =
+        stkcraft_agent_mcp::Server::new(scenario.clone(), stkcraft_agent_mcp::load_skills(skills));
     Ok(Box::new(DeepSeekResponder {
-        agent: stkcraft_agent::Agent::new(model, server),
+        agent: stkcraft_agent_runtime::Agent::new(model, server),
     }))
 }
 
@@ -359,7 +360,7 @@ impl Assistant {
                 }
             });
         }
-        match stkcraft_agent::DeepSeek::from_environment() {
+        match stkcraft_agent_runtime::DeepSeek::from_environment() {
             Ok(model) => {
                 let host = model
                     .base_url

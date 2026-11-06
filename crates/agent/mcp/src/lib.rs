@@ -37,10 +37,10 @@ use std::path::Path;
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
+use stkcraft_astro_engine::commands::{Arg, Args, Parameter, ParameterKind, Registry};
+use stkcraft_astro_engine::scenario::Scenario;
+use stkcraft_astro_engine::{PlanetPass, SatelliteAccess};
 use stkcraft_core::Angle;
-use stkcraft_engine::commands::{Arg, Args, Parameter, ParameterKind, Registry};
-use stkcraft_engine::scenario::Scenario;
-use stkcraft_engine::{PlanetPass, SatelliteAccess};
 use stkcraft_time::{Epoch, julian_to_utc_naive};
 
 /// The MCP revision this server implements.
@@ -129,7 +129,7 @@ pub struct Server {
     scenario: Scenario,
     skills: Vec<Skill>,
     /// The user's own documents, searched before the model answers.
-    knowledge: stkcraft_knowledge::Library,
+    knowledge: stkcraft_agent_knowledge::Library,
 }
 
 impl Server {
@@ -140,7 +140,7 @@ impl Server {
             registry: Registry::builtin(),
             scenario,
             skills,
-            knowledge: stkcraft_knowledge::Library::default(),
+            knowledge: stkcraft_agent_knowledge::Library::default(),
         }
     }
 
@@ -150,14 +150,14 @@ impl Server {
     /// library is the normal case — an empty library answers every search with "nothing here", which
     /// is the truth — and two constructors would fork a call that has one meaning.
     #[must_use]
-    pub fn with_knowledge(mut self, knowledge: stkcraft_knowledge::Library) -> Self {
+    pub fn with_knowledge(mut self, knowledge: stkcraft_agent_knowledge::Library) -> Self {
         self.knowledge = knowledge;
         self
     }
 
     /// The knowledge base this session searches.
     #[must_use]
-    pub fn knowledge(&self) -> &stkcraft_knowledge::Library {
+    pub fn knowledge(&self) -> &stkcraft_agent_knowledge::Library {
         &self.knowledge
     }
 
@@ -327,7 +327,7 @@ impl Server {
 
     /// Every command as an MCP tool, with a schema built from its documented parameters.
     ///
-    /// Public because a second client — the `DeepSeek` agent in `stkcraft-agent` — must build its
+    /// Public because a second client — the `DeepSeek` agent in `stkcraft-agent-runtime` — must build its
     /// function schema from the same source of truth. Two copies of a schema is two things to keep
     /// in step, and the one that falls behind is always the one an agent uses.
     #[must_use]
@@ -966,21 +966,21 @@ mod tests {
     }
 
     /// A library over two hand-written documents, so the knowledge tools are tested without files.
-    fn library() -> stkcraft_knowledge::Library {
-        stkcraft_knowledge::Library::from_documents(
+    fn library() -> stkcraft_agent_knowledge::Library {
+        stkcraft_agent_knowledge::Library::from_documents(
             std::path::Path::new("/knowledge"),
             vec![
-                stkcraft_knowledge::Document {
+                stkcraft_agent_knowledge::Document {
                     path: "sensor-spec.md".to_owned(),
                     bytes: 80,
-                    chunks: stkcraft_knowledge::chunk(
+                    chunks: stkcraft_agent_knowledge::chunk(
                         "Sensor\n\nMaximum off-nadir angle is 45 degrees.",
                     ),
                 },
-                stkcraft_knowledge::Document {
+                stkcraft_agent_knowledge::Document {
                     path: "thermal.txt".to_owned(),
                     bytes: 40,
-                    chunks: stkcraft_knowledge::chunk(
+                    chunks: stkcraft_agent_knowledge::chunk(
                         "Thermal\n\nRadiator area 2.4 square metres.",
                     ),
                 },

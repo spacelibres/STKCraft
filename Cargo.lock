@@ -2709,7 +2709,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stkcraft"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "bytemuck",
  "craft-ui",
@@ -2719,147 +2719,147 @@ dependencies = [
  "pollster",
  "serde",
  "serde_json",
- "stkcraft-access",
- "stkcraft-agent",
- "stkcraft-control",
+ "stkcraft-agent-control",
+ "stkcraft-agent-knowledge",
+ "stkcraft-agent-mcp",
+ "stkcraft-agent-runtime",
+ "stkcraft-astro-access",
+ "stkcraft-astro-engine",
+ "stkcraft-astro-frames",
+ "stkcraft-astro-sgp4",
  "stkcraft-core",
- "stkcraft-engine",
  "stkcraft-extensions",
- "stkcraft-frames",
  "stkcraft-i18n",
- "stkcraft-knowledge",
- "stkcraft-mcp",
- "stkcraft-sgp4",
  "stkcraft-storage",
  "stkcraft-time",
- "stkcraft-viewport",
+ "stkcraft-ui-viewport",
  "wgpu",
 ]
 
 [[package]]
-name = "stkcraft-access"
-version = "0.1.36"
-dependencies = [
- "serde",
- "stkcraft-body",
- "stkcraft-core",
- "stkcraft-time",
-]
-
-[[package]]
-name = "stkcraft-agent"
-version = "0.1.36"
-dependencies = [
- "serde",
- "serde_json",
- "stkcraft-engine",
- "stkcraft-i18n",
- "stkcraft-mcp",
-]
-
-[[package]]
-name = "stkcraft-body"
-version = "0.1.36"
-dependencies = [
- "serde",
- "stkcraft-core",
- "stkcraft-time",
-]
-
-[[package]]
-name = "stkcraft-control"
-version = "0.1.36"
+name = "stkcraft-agent-control"
+version = "0.1.37"
 dependencies = [
  "serde_json",
  "sha2",
- "stkcraft-engine",
- "stkcraft-mcp",
+ "stkcraft-agent-mcp",
+ "stkcraft-astro-engine",
+]
+
+[[package]]
+name = "stkcraft-agent-knowledge"
+version = "0.1.37"
+dependencies = [
+ "stkcraft-storage",
+]
+
+[[package]]
+name = "stkcraft-agent-mcp"
+version = "0.1.37"
+dependencies = [
+ "serde_json",
+ "stkcraft-agent-knowledge",
+ "stkcraft-astro-engine",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
+name = "stkcraft-agent-runtime"
+version = "0.1.37"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stkcraft-agent-mcp",
+ "stkcraft-astro-engine",
+ "stkcraft-i18n",
+]
+
+[[package]]
+name = "stkcraft-astro-access"
+version = "0.1.37"
+dependencies = [
+ "serde",
+ "stkcraft-astro-body",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
+name = "stkcraft-astro-body"
+version = "0.1.37"
+dependencies = [
+ "serde",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
+name = "stkcraft-astro-engine"
+version = "0.1.37"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stkcraft-astro-access",
+ "stkcraft-astro-body",
+ "stkcraft-astro-frames",
+ "stkcraft-astro-sgp4",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
+name = "stkcraft-astro-ephemeris"
+version = "0.1.37"
+dependencies = [
+ "stkcraft-astro-body",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
+name = "stkcraft-astro-frames"
+version = "0.1.37"
+dependencies = [
+ "serde",
+ "stkcraft-core",
+ "stkcraft-time",
+]
+
+[[package]]
+name = "stkcraft-astro-sgp4"
+version = "0.1.37"
+dependencies = [
+ "serde",
+ "stkcraft-core",
+ "stkcraft-time",
 ]
 
 [[package]]
 name = "stkcraft-core"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "stkcraft-engine"
-version = "0.1.36"
-dependencies = [
- "serde",
- "serde_json",
- "stkcraft-access",
- "stkcraft-body",
- "stkcraft-core",
- "stkcraft-frames",
- "stkcraft-sgp4",
- "stkcraft-time",
-]
-
-[[package]]
-name = "stkcraft-ephemeris"
-version = "0.1.36"
-dependencies = [
- "stkcraft-body",
- "stkcraft-core",
- "stkcraft-time",
 ]
 
 [[package]]
 name = "stkcraft-extensions"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "serde",
  "toml",
 ]
 
 [[package]]
-name = "stkcraft-frames"
-version = "0.1.36"
-dependencies = [
- "serde",
- "stkcraft-core",
- "stkcraft-time",
-]
-
-[[package]]
 name = "stkcraft-i18n"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "stkcraft-knowledge"
-version = "0.1.36"
-dependencies = [
- "stkcraft-storage",
-]
-
-[[package]]
-name = "stkcraft-mcp"
-version = "0.1.36"
-dependencies = [
- "serde_json",
- "stkcraft-core",
- "stkcraft-engine",
- "stkcraft-knowledge",
- "stkcraft-time",
-]
-
-[[package]]
-name = "stkcraft-sgp4"
-version = "0.1.36"
-dependencies = [
- "serde",
- "stkcraft-core",
- "stkcraft-time",
 ]
 
 [[package]]
 name = "stkcraft-storage"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -2869,7 +2869,7 @@ dependencies = [
 
 [[package]]
 name = "stkcraft-time"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "chrono",
  "serde",
@@ -2879,8 +2879,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "stkcraft-viewport"
-version = "0.1.36"
+name = "stkcraft-ui-viewport"
+version = "0.1.37"
 dependencies = [
  "bytemuck",
  "egui",
@@ -4026,11 +4026,11 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.36"
+version = "0.1.37"
 dependencies = [
  "serde_json",
- "stkcraft-agent",
- "stkcraft-engine",
+ "stkcraft-agent-runtime",
+ "stkcraft-astro-engine",
  "stkcraft-i18n",
  "toml",
 ]

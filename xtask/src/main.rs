@@ -231,6 +231,19 @@ fn task_layers() -> Result<(), String> {
     let seen: BTreeMap<&str, &CrateSpec> = LAYOUT.iter().map(|spec| (spec.name, spec)).collect();
 
     for spec in LAYOUT {
+        // The name repeats the directory: `crates/astro/body` is `stkcraft-astro-body`. Without this
+        // the table would accept any pairing of name and path, and a crate could be called
+        // `stkcraft-body` while sitting under `crates/astro/` — which is exactly the disagreement
+        // docs/standards.md §7 forbids.
+        if let Some(expected) = layers::implied_name(spec.path)
+            && expected != spec.name
+        {
+            violations.push(format!(
+                "{} sits in `{}`, which implies the name `{expected}`",
+                spec.name, spec.path
+            ));
+        }
+
         let manifest = root.join(spec.path).join("Cargo.toml");
         let text = fs::read_to_string(&manifest)
             .map_err(|e| format!("could not read {}: {e}", manifest.display()))?;
@@ -505,10 +518,10 @@ fn collect_assets(dir: &Path, skip: &[String], visit: &mut dyn FnMut(&Path)) -> 
 const PORTABLE_CRATES: [&str; 6] = [
     "stkcraft-core",
     "stkcraft-time",
-    "stkcraft-frames",
-    "stkcraft-sgp4",
-    "stkcraft-access",
-    "stkcraft-engine",
+    "stkcraft-astro-frames",
+    "stkcraft-astro-sgp4",
+    "stkcraft-astro-access",
+    "stkcraft-astro-engine",
 ];
 
 fn task_wasm() -> Result<(), String> {
@@ -1133,5 +1146,56 @@ mod tests {
             assert!(seen.insert(spec.name), "{} appears twice", spec.name);
             assert!(!spec.path.is_empty(), "{} has no path", spec.name);
         }
+    }
+
+    #[test]
+    fn every_crate_name_repeats_its_directory() {
+        // The table is the check, so the table itself has to satisfy it: a spec whose name does not
+        // repeat its path is a name a reader cannot trace back to a file.
+        for spec in LAYOUT {
+            let Some(expected) = layers::implied_name(spec.path) else {
+                continue;
+            };
+            assert_eq!(
+                expected, spec.name,
+                "{} sits in `{}`, which implies `{expected}`",
+                spec.name, spec.path
+            );
+        }
+    }
+
+    #[test]
+    fn a_group_crate_is_named_for_its_group_and_the_platform_is_not() {
+        // The two halves of the rule: a grouped crate spells the group out, and the platform — the
+        // part a sibling app shares — does not.
+        assert_eq!(
+            layers::implied_name("crates/astro/body").as_deref(),
+            Some("stkcraft-astro-body")
+        );
+        assert_eq!(
+            layers::implied_name("crates/agent/runtime").as_deref(),
+            Some("stkcraft-agent-runtime")
+        );
+        assert_eq!(
+            layers::implied_name("crates/ui/viewport").as_deref(),
+            Some("stkcraft-ui-viewport")
+        );
+        assert_eq!(
+            layers::implied_name("crates/framework/time").as_deref(),
+            Some("stkcraft-time")
+        );
+        // Paths outside `crates/` are named by their own rule, and a path that is not a crate at all
+        // yields nothing rather than a guess.
+        assert_eq!(layers::implied_name("apps/stkcraft"), None);
+        assert_eq!(layers::implied_name("xtask"), None);
+        assert_eq!(layers::implied_name("crates/astro"), None);
+        assert_eq!(layers::implied_name("crates/astro/body/deep"), None);
+        assert_eq!(layers::implied_name(""), None);
+        // The control case: the disagreement this check exists to catch. A crate under `crates/astro/`
+        // named for its subject alone is what `stkcraft-body` was before 0.1.37.
+        assert_ne!(
+            layers::implied_name("crates/astro/body").as_deref(),
+            Some("stkcraft-body")
+        );
     }
 }

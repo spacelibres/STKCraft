@@ -8,7 +8,7 @@
 //! # What is out of scope here
 //!
 //! The caller supplies the target's Earth-fixed position at a given time. Turning a two-line
-//! element set into that position is `stkcraft-sgp4` plus `stkcraft-frames`, and belongs to the
+//! element set into that position is `stkcraft-astro-sgp4` plus `stkcraft-astro-frames`, and belongs to the
 //! engine, which is the next layer. Keeping the dependency out means this module is testable
 //! with a hand-written closure and no orbital machinery, which is exactly what the tests below
 //! do.

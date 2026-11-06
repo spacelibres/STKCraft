@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-frames"
+name = "stkcraft-astro-frames"
 description = "Reference frames and coordinate transforms for STKCraft"
 version.workspace = true
 edition.workspace = true

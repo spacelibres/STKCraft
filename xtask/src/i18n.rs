@@ -447,7 +447,7 @@ fn suggested_name(locale: &str) -> String {
 
 /// Ask the model for the translations of one language's missing rows.
 ///
-/// The batch size, the prompt and the acceptance rules are the shared ones in `stkcraft-agent`, so a
+/// The batch size, the prompt and the acceptance rules are the shared ones in `stkcraft-agent-runtime`, so a
 /// catalog generated here and one a window generates for itself cannot disagree about what a valid
 /// row is. What stays here is the part that is this task's job: reading the answer into the catalog
 /// representation a file is written from.
@@ -457,9 +457,9 @@ fn translate_rows(
     sources: &[&Source],
     existing: &[Row],
 ) -> Result<(Vec<(Source, String)>, String), String> {
-    let model = stkcraft_agent::DeepSeek::from_environment()?;
+    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
     let wanted: Vec<Source> = sources.iter().map(|source| (*source).clone()).collect();
-    let catalogue = stkcraft_agent::translate::translate_catalogue(
+    let catalogue = stkcraft_agent_runtime::translate::translate_catalogue(
         &model,
         locale,
         language_name,

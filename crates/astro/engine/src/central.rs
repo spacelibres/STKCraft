@@ -21,7 +21,7 @@
 //! [`Body::orientation`] rotates into the body's equator and prime meridian when a caller wants a
 //! planet-fixed answer.
 
-use stkcraft_body::Body;
+use stkcraft_astro_body::Body;
 use stkcraft_core::{Error, Result};
 use stkcraft_time::Epoch;
 

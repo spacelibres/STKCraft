@@ -5,7 +5,7 @@
 //! what makes the viewport swappable — see `AGENTS.md`, "the UI is thin and swappable".
 //!
 //! Units are kilometres and the frame is GCRF (geocentric, right-handed, `+z` toward the mean
-//! north pole of J2000), matching `stkcraft-frames`.
+//! north pole of J2000), matching `stkcraft-astro-frames`.
 //!
 //! # Why plain `f32`
 //!
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn the_earth_radii_agree_with_wgs84() {
-        // The same two numbers `stkcraft-access` flattens the Earth with.
+        // The same two numbers `stkcraft-astro-access` flattens the Earth with.
         let flattening = 1.0 / 298.257_223_563_f64;
         let polar = f64::from(EARTH_EQUATORIAL_RADIUS_KM) * (1.0 - flattening);
         assert!(

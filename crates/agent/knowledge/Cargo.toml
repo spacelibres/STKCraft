@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-knowledge"
+name = "stkcraft-agent-knowledge"
 description = "The user's own documents, searched before the model answers"
 version.workspace = true
 edition.workspace = true

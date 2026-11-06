@@ -62,7 +62,7 @@ extension, or a different model revision — and neither is being guessed at. Un
 report's F-angle table is transcribed and checked the same way, Mars ships with its polynomial
 terms only and a test that pins the known mismatch. This is the first thing to finish in phase 2.
 
-### Phase 2 — `stkcraft-body` (L2, beside `frames`) — **done except Mars**
+### Phase 2 — `stkcraft-astro-body` (L2, beside `frames`) — **done except Mars**
 
 - `Body`: Sun, Mercury, Venus, Earth, Moon, Mars, Jupiter, Saturn, Uranus, Neptune, keyed by both
   NAIF ID and IAU name (the NAIF key is what phase 3's kernel backend will need).
@@ -85,7 +85,7 @@ terms only and a test that pins the known mismatch. This is the first thing to f
   is the ICRF pole at J2000, and a day advances its prime meridian by 0.9856°, which is the
   sidereal-to-solar day difference.
 
-### Phase 3 — `stkcraft-ephemeris` (L3) — **in progress**
+### Phase 3 — `stkcraft-astro-ephemeris` (L3) — **in progress**
 
 - `trait Ephemeris { fn state(&self, body: Body, t: Epoch) -> Result<StateVector>; }` returning
   ICRF position and velocity, with a TDB time argument.
@@ -164,7 +164,7 @@ but a degenerate one: the target *is* its centre, which is how DE440 writes a ba
 its planet. Reading the two counts as integers from the low half of their words is what made the
 Sun appear to have no records at all.
 
-### Phase 4 — central body in the engine (`stkcraft-engine`)
+### Phase 4 — central body in the engine (`stkcraft-astro-engine`)
 
 - `Scenario` gains `central_body`; satellites support planet-centred two-body plus J2/J4 in
   addition to Earth TLEs; sites sit on the body's ellipsoid in its body-fixed frame; occultation
@@ -178,7 +178,7 @@ Sun appear to have no records at all.
 
 ### Phase 5 — planetary systems — **core landed**
 
-### Phase 4 — central body in the engine (`stkcraft-engine`) — **core landed**
+### Phase 4 — central body in the engine (`stkcraft-astro-engine`) — **core landed**
 
 - **Landed:** Phobos, Deimos, Io, Europa, Ganymede, Callisto and Titan are bodies with IAU 2015
   constants and rotation models, and their ephemerides are in the CSPICE table (eight planets and

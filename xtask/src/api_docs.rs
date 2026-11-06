@@ -5,7 +5,7 @@
 //! already says:
 //!
 //! 1. **The command registry** — every command's id, label, menu path and parameters, including the
-//!    [`ParameterKind`](stkcraft_engine::commands::ParameterKind) that decides how a caller's value
+//!    [`ParameterKind`](stkcraft_astro_engine::commands::ParameterKind) that decides how a caller's value
 //!    is converted. This is the surface an agent, an MCP client and the CLI all use.
 //! 2. **The crate manifests and module documentation** — each crate's name, layer and description,
 //!    and the `//!` documentation at its root.
@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use stkcraft_engine::commands::{Parameter, ParameterKind, Registry};
+use stkcraft_astro_engine::commands::{Parameter, ParameterKind, Registry};
 use stkcraft_i18n::catalog::{self, Catalog, Row};
 
 use crate::layers::{APP_LAYER, LAYOUT};
@@ -705,7 +705,7 @@ mod tests {
             crates
                 .rows
                 .iter()
-                .any(|row| matches!(&row[0], Cell::Code(name) if name == "stkcraft-engine"))
+                .any(|row| matches!(&row[0], Cell::Code(name) if name == "stkcraft-astro-engine"))
         );
         // The version is in the banner, so a reader knows which release the page describes.
         assert!(document.banner.contains("Generated"), "{}", document.banner);

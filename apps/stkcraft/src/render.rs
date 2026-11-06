@@ -5,7 +5,7 @@
 
 use std::fmt::Write as _;
 
-use stkcraft_engine::SatelliteAccess;
+use stkcraft_astro_engine::SatelliteAccess;
 use stkcraft_time::{Epoch, julian_to_utc_naive};
 
 /// What a pass table describes, so the formatter takes one value instead of eight.
@@ -117,7 +117,7 @@ fn epoch_at(epoch: Epoch, offset_seconds: f64) -> Epoch {
 /// something a reader can interpret.
 #[must_use]
 pub fn format_epoch(epoch: Epoch) -> String {
-    // The scenario runs on the element set's scale, which `stkcraft-sgp4` records as TAI.
+    // The scenario runs on the element set's scale, which `stkcraft-astro-sgp4` records as TAI.
     // `to_utc` reads the leap table to get back to a calendar time; a numeric fallback keeps
     // an out-of-range epoch printing something interpretable rather than nothing.
     let utc = epoch.to_utc().ok();
@@ -161,18 +161,18 @@ mod tests {
 
     use super::*;
 
-    fn window(start: f64, end: f64) -> stkcraft_access::AccessWindow {
-        stkcraft_access::AccessWindow {
+    fn window(start: f64, end: f64) -> stkcraft_astro_access::AccessWindow {
+        stkcraft_astro_access::AccessWindow {
             start: EpochOffset::from_seconds(start),
             end: EpochOffset::from_seconds(end),
         }
     }
 
-    fn access(windows: Vec<stkcraft_access::AccessWindow>) -> SatelliteAccess {
+    fn access(windows: Vec<stkcraft_astro_access::AccessWindow>) -> SatelliteAccess {
         let total: f64 = windows.iter().map(|w| w.duration().as_seconds()).sum();
         SatelliteAccess {
-            satellite: stkcraft_engine::SatelliteId(1),
-            station: stkcraft_engine::StationId(1),
+            satellite: stkcraft_astro_engine::SatelliteId(1),
+            station: stkcraft_astro_engine::StationId(1),
             windows,
             total: Duration::from_seconds(total),
         }

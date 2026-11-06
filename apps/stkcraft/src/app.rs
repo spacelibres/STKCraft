@@ -22,11 +22,11 @@ use std::fmt::Write as _;
 use std::time::Instant;
 
 use eframe::egui;
+use stkcraft_astro_engine::{Registry, Scenario};
 use stkcraft_core::Angle;
-use stkcraft_engine::{Registry, Scenario};
 use stkcraft_time::Epoch;
-use stkcraft_viewport::scene::SceneData;
-use stkcraft_viewport::{Camera, Frame, SceneCallback};
+use stkcraft_ui_viewport::scene::SceneData;
+use stkcraft_ui_viewport::{Camera, Frame, SceneCallback};
 
 use crate::assistant::Assistant;
 use crate::frame_builder::{build_frame, clamp_rate, step_duration};
@@ -57,7 +57,7 @@ pub struct App {
     /// Problems encountered building the last frame.
     problems: Vec<String>,
     /// The access table, recomputed only when the user asks.
-    accesses: Vec<stkcraft_engine::SatelliteAccess>,
+    accesses: Vec<stkcraft_astro_engine::SatelliteAccess>,
     /// Status text for the panel: what happened last, and whether it worked.
     status: Option<(bool, String)>,
     /// The search step for the access table, seconds.
@@ -247,9 +247,9 @@ impl App {
         match registry.run(
             "access.compute",
             &mut analysis,
-            &stkcraft_engine::Args::none().with(
+            &stkcraft_astro_engine::Args::none().with(
                 "step-seconds",
-                stkcraft_engine::Arg::Number(step.as_seconds()),
+                stkcraft_astro_engine::Arg::Number(step.as_seconds()),
             ),
         ) {
             Ok(outcome) => {
@@ -678,7 +678,7 @@ pub fn run(options: eframe::NativeOptions, app: App) -> Result<(), String> {
 /// The demo scenario the app opens with when no file is given.
 ///
 /// One ISS element set and one station, both from public data: the element set is the one in
-/// `stkcraft-sgp4`'s verification fixtures and the station is London's well-known coordinate.
+/// `stkcraft-astro-sgp4`'s verification fixtures and the station is London's well-known coordinate.
 /// Chosen so that the very first frame is computed rather than empty.
 ///
 /// # Errors
@@ -686,8 +686,8 @@ pub fn run(options: eframe::NativeOptions, app: App) -> Result<(), String> {
 /// Returns the parse error if either built-in element set is malformed, which would be a bug in
 /// this crate rather than a user error, but is reported rather than unwrapped.
 pub fn demo_scenario() -> Result<Scenario, String> {
-    use stkcraft_access::{Ellipsoid, GroundSite, Sensor};
-    use stkcraft_sgp4::TwoLineElement;
+    use stkcraft_astro_access::{Ellipsoid, GroundSite, Sensor};
+    use stkcraft_astro_sgp4::TwoLineElement;
 
     let iss = TwoLineElement::parse(
         "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009",
@@ -731,7 +731,7 @@ pub fn native_options() -> eframe::NativeOptions {
         // The viewport draws a depth-tested globe, so the window's pass needs a depth attachment.
         // `eframe` takes bits and `wgpu` takes a format; the constant ties the two together and a
         // test in the viewport crate pins the mapping.
-        depth_buffer: stkcraft_viewport::renderer::WINDOW_DEPTH_BITS,
+        depth_buffer: stkcraft_ui_viewport::renderer::WINDOW_DEPTH_BITS,
         ..eframe::NativeOptions::default()
     }
 }
@@ -810,7 +810,7 @@ mod tests {
         let (_, with_graticule, _) = app.scene_for_verification();
         assert_ne!(
             with_graticule.graticule,
-            [] as [stkcraft_viewport::Vertex; 0]
+            [] as [stkcraft_ui_viewport::Vertex; 0]
         );
 
         let mut without = App::new(app.scenario.clone(), 30.0);

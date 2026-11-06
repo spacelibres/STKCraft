@@ -14,7 +14,7 @@
 //! would be to reimplement the finder as a forward-only sweep, which would trade that cost for
 //! a weaker guarantee. The guarantee is worth more.
 
-use stkcraft_access::{AccessProblem, AccessWindow};
+use stkcraft_astro_access::{AccessProblem, AccessWindow};
 use stkcraft_core::{Duration, EpochOffset, Error, Result};
 use stkcraft_time::Epoch;
 
@@ -133,12 +133,12 @@ pub fn compute_all_access(scenario: &Scenario, step: Duration) -> Result<Vec<Sat
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 mod tests {
-    use stkcraft_access::Sensor;
+    use stkcraft_astro_access::Sensor;
+    use stkcraft_astro_sgp4::TwoLineElement;
     use stkcraft_core::Angle;
-    use stkcraft_sgp4::TwoLineElement;
 
     use super::*;
-    use stkcraft_access::GroundSite;
+    use stkcraft_astro_access::GroundSite;
 
     /// A geostationary element set: one revolution per sidereal day, essentially equatorial.
     const GEO_L1: &str = "1 13552U 82069A   04166.50000000  .00000000  00000-0  00000+0 0  9992";

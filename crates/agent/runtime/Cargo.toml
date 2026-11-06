@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-agent"
+name = "stkcraft-agent-runtime"
 description = "The DeepSeek agent: a model driving STKCraft's own tools and skills"
 version.workspace = true
 edition.workspace = true
@@ -8,9 +8,9 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-engine.workspace = true
+stkcraft-astro-engine.workspace = true
 stkcraft-i18n.workspace = true
-stkcraft-mcp.workspace = true
+stkcraft-agent-mcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

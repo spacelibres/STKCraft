@@ -10,27 +10,27 @@ authors.workspace = true
 [dependencies]
 stkcraft-core.workspace = true
 stkcraft-time.workspace = true
-stkcraft-frames.workspace = true
-stkcraft-sgp4.workspace = true
-stkcraft-access.workspace = true
-stkcraft-engine.workspace = true
+stkcraft-astro-frames.workspace = true
+stkcraft-astro-sgp4.workspace = true
+stkcraft-astro-access.workspace = true
+stkcraft-astro-engine.workspace = true
 stkcraft-extensions.workspace = true
-stkcraft-viewport.workspace = true
+stkcraft-ui-viewport.workspace = true
 # The agent interface: `stkcraft mcp` serves the command registry over stdio.
-stkcraft-mcp.workspace = true
+stkcraft-agent-mcp.workspace = true
 # The control channel a launcher or a sibling app drives this session through.
-stkcraft-control.workspace = true
+stkcraft-agent-control.workspace = true
 # The interface strings and their catalogs. The catalogs are an optional build input: without any,
 # every lookup shows English.
 stkcraft-i18n.workspace = true
-stkcraft-knowledge.workspace = true
+stkcraft-agent-knowledge.workspace = true
 # One crate owns persistence: the record, the cache and the vector store.
 stkcraft-storage.workspace = true
 # The family's shared UI library: the interface font stack (installed system fonts included, which
 # is what makes a CJK interface render), theme tokens and the widgets the Craft apps share.
 craft-ui.workspace = true
 # `stkcraft ask` puts a model in front of the same tools an MCP client sees.
-stkcraft-agent.workspace = true
+stkcraft-agent-runtime.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -48,7 +48,7 @@ bytemuck = { workspace = true }
 # The build script extracts the interface strings with the same scanner `cargo xtask i18n` uses, so
 # a window that translates itself and a translator's catalog describe the same interface.
 stkcraft-i18n.workspace = true
-stkcraft-knowledge.workspace = true
+stkcraft-agent-knowledge.workspace = true
 # One crate owns persistence: the record, the cache and the vector store.
 stkcraft-storage.workspace = true
 # The family's shared UI library: the interface font stack (installed system fonts included, which

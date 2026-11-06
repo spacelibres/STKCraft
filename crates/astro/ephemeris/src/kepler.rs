@@ -35,7 +35,7 @@
 //! this table, and the difference (up to about 4 700 km) is larger than the model's own error for
 //! some planets, so it is named rather than hidden.
 
-use stkcraft_body::Body;
+use stkcraft_astro_body::Body;
 use stkcraft_core::{Error, Result};
 use stkcraft_time::{Epoch, JD_J2000, TimeScale};
 

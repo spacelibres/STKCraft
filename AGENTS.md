@@ -97,9 +97,9 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   work the tool was supposed to have done.
 - **Programmatic calls never open dialogs.** A command run through the control channel or
   MCP uses defaults; only a menu click starts an interactive sequence.
-- **The model stays outside the kernel.** `stkcraft-engine` makes no network call and links no
+- **The model stays outside the kernel.** `stkcraft-astro-engine` makes no network call and links no
   HTTP client; it exposes commands as MCP tools, its state as resources, and procedures as
-  skills. `stkcraft-mcp` (a transport, L5) and `stkcraft-agent` (a client of that protocol, L6)
+  skills. `stkcraft-agent-mcp` (a transport, L5) and `stkcraft-agent-runtime` (a client of that protocol, L6)
   sit above it. The agent reaches nothing the protocol does not expose, so a capability a user
   has is a capability an agent has, and adding one means adding a command — never teaching the
   model a number. Do not put a prompt, a model name or a network call below the app layer.

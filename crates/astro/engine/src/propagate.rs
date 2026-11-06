@@ -1,7 +1,7 @@
 //! From a two-line element set to an Earth-fixed position.
 //!
-//! This is the join that had no home until this crate existed: `stkcraft-sgp4` produces a TEME
-//! state, `stkcraft-frames` converts it, and `stkcraft-access` needs an Earth-fixed position.
+//! This is the join that had no home until this crate existed: `stkcraft-astro-sgp4` produces a TEME
+//! state, `stkcraft-astro-frames` converts it, and `stkcraft-astro-access` needs an Earth-fixed position.
 //! Neither of the two numerical crates can depend on the other (they are both L2), so the
 //! composition belongs here.
 //!
@@ -15,14 +15,16 @@
 //! - Asking for times out of order is **allowed and correct** — the integrator restarts, as the
 //!   reference says it should — but costs an integration from the epoch.
 //!
-//! The window finder in `stkcraft-access` back-tracks while bisecting, so it pays that cost.
+//! The window finder in `stkcraft-astro-access` back-tracks while bisecting, so it pays that cost.
 //! It is correct, and for a near-Earth orbit the restart is cheap because there is no
 //! resonance to integrate.
 
-use stkcraft_access::Ellipsoid;
+use stkcraft_astro_access::Ellipsoid;
+use stkcraft_astro_frames::{
+    CartesianState, EarthOrientation, EquinoxTerms, teme_to_gcrf, teme_to_itrf,
+};
+use stkcraft_astro_sgp4::{Elements, Satellite, StateVector, TwoLineElement};
 use stkcraft_core::{Error, Result};
-use stkcraft_frames::{CartesianState, EarthOrientation, EquinoxTerms, teme_to_gcrf, teme_to_itrf};
-use stkcraft_sgp4::{Elements, Satellite, StateVector, TwoLineElement};
 use stkcraft_time::Epoch;
 
 /// A satellite prepared to propagate, with its frame context.
@@ -163,7 +165,7 @@ impl Propagator {
 
 /// Convert a TEME state into the frame crate's state type.
 ///
-/// The two types exist separately because `stkcraft-sgp4` and `stkcraft-frames` are on the same
+/// The two types exist separately because `stkcraft-astro-sgp4` and `stkcraft-astro-frames` are on the same
 /// layer and cannot depend on each other. The conversion is total: both are three-component
 /// kilometre-and-kilometre-per-second states.
 fn cartesian(state: &StateVector) -> CartesianState {
@@ -182,8 +184,8 @@ pub const EARTH: Ellipsoid = Ellipsoid::WGS84;
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 mod tests {
+    use stkcraft_astro_sgp4::TwoLineElement;
     use stkcraft_core::{Angle, Distance};
-    use stkcraft_sgp4::TwoLineElement;
 
     use super::*;
 
@@ -322,7 +324,7 @@ mod tests {
     fn the_site_and_satellite_are_measurable_against_each_other() {
         // A smoke test that the pieces compose: place a station and a low satellite and confirm
         // the elevation is a real number in range. The full access path has its own tests.
-        use stkcraft_access::{GroundSite, Sensor, look_angle};
+        use stkcraft_astro_access::{GroundSite, Sensor, look_angle};
 
         let mut p = propagator();
         let at = p.epoch();

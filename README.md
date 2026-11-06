@@ -109,7 +109,7 @@ STKCraft is an early skeleton. What exists today:
   than NaN when a direction is undefined.
 - `stkcraft-time`: the IAU time scales, the published leap-second table with a confidence
   report, and two-part Julian dates precise to well under a microsecond.
-- `stkcraft-frames`: rotations that refuse to exist unless they are proper rotations.
+- `stkcraft-astro-frames`: rotations that refuse to exist unless they are proper rotations.
 
 What comes next, in order: SGP4 and its verification vectors; the scenario document; the 3D
 viewport; then access and coverage, which is the reason the product exists.

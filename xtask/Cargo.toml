@@ -10,8 +10,8 @@ publish = false
 
 [dependencies]
 serde_json.workspace = true
-stkcraft-agent.workspace = true
-stkcraft-engine.workspace = true
+stkcraft-agent-runtime.workspace = true
+stkcraft-astro-engine.workspace = true
 stkcraft-i18n.workspace = true
 toml = "0.8"
 

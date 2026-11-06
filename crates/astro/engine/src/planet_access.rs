@@ -10,7 +10,7 @@
 //! sampler with bisection has one honest disadvantage — the step must be small enough not to step
 //! over a short pass — which the caller controls and the documentation states.
 
-use stkcraft_access::PlanetAccess;
+use stkcraft_astro_access::PlanetAccess;
 use stkcraft_core::{Error, Result};
 use stkcraft_time::Epoch;
 
@@ -160,8 +160,8 @@ fn bisect(at: &impl Fn(f64) -> Result<bool>, mut before: f64, mut after: f64) ->
 #[expect(clippy::expect_used)]
 mod tests {
     use super::*;
-    use stkcraft_access::{GroundSite, Sensor};
-    use stkcraft_body::Body;
+    use stkcraft_astro_access::{GroundSite, Sensor};
+    use stkcraft_astro_body::Body;
     use stkcraft_core::Angle;
     use stkcraft_time::{JD_J2000, TimeScale};
 

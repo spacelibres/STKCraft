@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-control"
+name = "stkcraft-agent-control"
 description = "The control channel: a local socket another program drives the engine through"
 version.workspace = true
 edition.workspace = true
@@ -8,8 +8,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-stkcraft-engine.workspace = true
-stkcraft-mcp.workspace = true
+stkcraft-astro-engine.workspace = true
+stkcraft-agent-mcp.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 

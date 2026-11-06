@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-viewport"
+name = "stkcraft-ui-viewport"
 description = "The 3D viewport for STKCraft"
 version.workspace = true
 edition.workspace = true

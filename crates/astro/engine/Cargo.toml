@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-engine"
+name = "stkcraft-astro-engine"
 description = "Scenario, commands and analysis for STKCraft"
 version.workspace = true
 edition.workspace = true
@@ -10,11 +10,11 @@ authors.workspace = true
 [dependencies]
 stkcraft-core.workspace = true
 stkcraft-time.workspace = true
-stkcraft-frames.workspace = true
-stkcraft-sgp4.workspace = true
-stkcraft-access.workspace = true
+stkcraft-astro-frames.workspace = true
+stkcraft-astro-sgp4.workspace = true
+stkcraft-astro-access.workspace = true
 # A scenario names its central body, and a planet-centred orbit needs that body's GM and size.
-stkcraft-body.workspace = true
+stkcraft-astro-body.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

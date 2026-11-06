@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-ephemeris"
+name = "stkcraft-astro-ephemeris"
 description = "Planetary ephemerides for STKCraft: a NAIF SPK reader and the trait it fills"
 version.workspace = true
 edition.workspace = true
@@ -10,7 +10,7 @@ authors.workspace = true
 [dependencies]
 stkcraft-core.workspace = true
 stkcraft-time.workspace = true
-stkcraft-body.workspace = true
+stkcraft-astro-body.workspace = true
 
 [lints]
 workspace = true

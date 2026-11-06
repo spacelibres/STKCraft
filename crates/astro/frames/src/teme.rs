@@ -23,8 +23,8 @@
 //!
 //! # Why the state type is defined here
 //!
-//! [`CartesianState`] is declared in this crate rather than reusing `stkcraft_sgp4::StateVector`
-//! because `stkcraft-frames` and `stkcraft-sgp4` are on the same layer and `cargo xtask layers`
+//! [`CartesianState`] is declared in this crate rather than reusing `stkcraft_astro_sgp4::StateVector`
+//! because `stkcraft-astro-frames` and `stkcraft-astro-sgp4` are on the same layer and `cargo xtask layers`
 //! forbids a same-layer dependency. That is the right call on its own terms as well: a frame
 //! conversion has no business knowing how a state vector was produced. Callers convert
 //! explicitly, which keeps the boundary visible.

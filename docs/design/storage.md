@@ -80,7 +80,7 @@ make when the corpus outgrows that, not before.
 
 **Embeddings are not built yet**, and this is a stated limit rather than a hidden one: the model that
 would produce them is a dependency on a provider, and until it is chosen the lexical index in
-`stkcraft-knowledge` is the retrieval, with page-level citations. The vector table above is the shape the
+`stkcraft-agent-knowledge` is the retrieval, with page-level citations. The vector table above is the shape the
 data will take, so the day an embedding exists it fills a store rather than forcing a redesign.
 
 ## 4. Where each store lives
@@ -131,7 +131,7 @@ run that produced it and to what that run read.
 
 - **No PostgreSQL path.** The schema is portable and the driver swap is deferred.
 - **No embeddings and no vector index in use**: the store exists and is tested, and it holds nothing
-  until an embedding model is chosen. The lexical index in `stkcraft-knowledge` is the retrieval.
+  until an embedding model is chosen. The lexical index in `stkcraft-agent-knowledge` is the retrieval.
 - **The knowledge index is cached in the KV store**: the whole assembled library — documents and index —
   under a key derived from every file's path, size and modification time, so a re-open is one read and
   an edited corpus replaces its entry rather than accumulating one per save. That is measured in

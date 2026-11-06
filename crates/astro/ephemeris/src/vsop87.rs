@@ -26,7 +26,7 @@
 //! The Moon. VSOP87 is a planetary theory; the lunar motion needs ELP2000, and a Keplerian or
 //! VSOP-style guess for it would be wrong by degrees. The Moon is refused by name.
 
-use stkcraft_body::Body;
+use stkcraft_astro_body::Body;
 use stkcraft_core::{Error, Result};
 use stkcraft_time::{Epoch, JD_J2000, TimeScale};
 

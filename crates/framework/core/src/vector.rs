@@ -6,7 +6,7 @@
 //! large dependency for a handful of dot and cross products, so the vector lives here.
 //!
 //! The type is deliberately minimal: no generic scalar parameter, no SIMD. Rotation
-//! lives in `stkcraft-frames`, which owns the matrices.
+//! lives in `stkcraft-astro-frames`, which owns the matrices.
 
 use core::fmt;
 use core::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};

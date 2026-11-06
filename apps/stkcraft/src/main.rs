@@ -1,6 +1,6 @@
 //! `STKCraft`: space mission analysis and visualisation.
 //!
-//! The binary is a thin transport over `stkcraft-engine`. Every subcommand maps to a command
+//! The binary is a thin transport over `stkcraft-astro-engine`. Every subcommand maps to a command
 //! id in the engine's registry, so what the CLI can do, a menu and an agent can do too — the
 //! CLI is not a separate implementation.
 //!

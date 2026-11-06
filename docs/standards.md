@@ -55,9 +55,9 @@ here.
 
 **The model is outside the kernel, and the kernel is completely reachable from outside it.**
 
-- `stkcraft-engine` and everything below it makes no network call, links no HTTP client and does not
-  know a language model exists. `stkcraft-mcp` (L5) is a transport onto the command registry;
-  `stkcraft-agent` (L6) is a client of that transport. The agent therefore cannot reach a capability
+- `stkcraft-astro-engine` and everything below it makes no network call, links no HTTP client and does not
+  know a language model exists. `stkcraft-agent-mcp` (L5) is a transport onto the command registry;
+  `stkcraft-agent-runtime` (L6) is a client of that transport. The agent therefore cannot reach a capability
   the protocol does not expose, which keeps "an agent can do anything a user can" a property of the
   design rather than a promise.
 - **Every command is a tool**, generated from the registry: one descriptor with a label, a menu path,
@@ -215,15 +215,32 @@ grouped by subject and every group has a rule about what may live in it.
 |---|---|---|
 | `crates/framework/` | the platform: units, time, translations, persistence, the extension contract | nothing here may know what an orbit is. A name like `body` or `access` appearing here is a bug |
 | `crates/astro/` | the orbital-analysis domain: bodies, frames, ephemerides, propagation, access geometry, the engine | the astronomy lives here and nowhere else. Every constant and formula carries its source |
-| `crates/agent/` | the *driving* surfaces: the knowledge base, the MCP server, the agent runtime and the control channel | a crate here drives the engine through the command registry and may not reach past it. Two of them (the shell of the group's name — a model — and the launcher socket) are the same thing from the engine's side |
+| `crates/agent/` | the *driving* surfaces: the knowledge base, the MCP server, the agent runtime and the control channel | a crate here drives the engine through the command registry and may not reach past it. The runtime and the launcher socket are the same thing from the engine's side: a client of the protocol |
 | `crates/ui/` | presentation | may use GPU and windowing crates; may not compute physics |
 | `apps/` | the deliverable: window, CLI, MCP server and assistant wiring | thin: every behaviour it offers is a command or a transport |
 | `xtask/` | the build tool | sits outside the layer graph |
 
 - **A new crate goes into the directory that matches its subject**, and `cargo xtask layers` fails for a
   workspace member that is not in the table, so the taxonomy cannot quietly grow a fourth category.
-- **Names keep the `stkcraft-` prefix** rather than a domain prefix: `stkcraft-body` is unambiguous
-  inside `crates/astro/`, and the family's convention is one prefix for the app's crates.
+- **The package name repeats the directory, in the order the path has it**: `crates/astro/body` is
+  `stkcraft-astro-body`, `crates/agent/mcp` is `stkcraft-agent-mcp`, `crates/ui/viewport` is
+  `stkcraft-ui-viewport`. The group is spelled out because the leaves are generic: `engine`, `mcp` and
+  `viewport` say nothing on their own in a `use` list, and a reader of `stkcraft-engine::analysis` has to
+  go and find out whether that is the platform or the domain.
+- **`crates/framework/` is the exception and stays bare**: `stkcraft-core`, `stkcraft-time`,
+  `stkcraft-i18n`, `stkcraft-extensions`, `stkcraft-storage`. That is the part a sibling app shares — the
+  platform, not the astronomy — so it is named for its subject rather than its group, and a
+  `stkcraft-framework-` prefix would be noise on the five crates everything depends on.
+- **A package name never disagrees with its directory.** `crates/agent/runtime` was once named
+  `stkcraft-agent`, so a reader looking for the runtime found nothing and a reader looking for "the
+  agent" found the runtime. 0.1.37 fixed it; the table in `xtask/src/layers.rs` pairs every name with its
+  path, so a new disagreement is a gate failure rather than a habit.
+- **A hyphen delimits, a group is never a leaf, and hyphens are legal.** `stkcraft-astro-frames` is a
+  valid package and not a valid crate identifier, which is what Cargo's hyphen/underscore rule is for:
+  the manifest reads as a path and the code says `stkcraft_astro_frames`. No group directory is itself a
+  package, so a later `stkcraft-astro-…` can never collide with a bare `stkcraft-astro`.
+- **The family's convention is one prefix for the app's own crates**, and a crate shared with the
+  siblings keeps the family's name (`craft-ui`, `craft-i18n`) instead of getting one of ours.
 - **The layer number and the directory agree**: framework ≤ 4, astro 2–4, agent 3–6, ui 5, apps 6. A
   crate that needs a higher layer than its directory implies is in the wrong directory.
 

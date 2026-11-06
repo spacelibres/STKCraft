@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-body"
+name = "stkcraft-astro-body"
 description = "Solar-system bodies: constants, IAU rotation models and ellipsoids for STKCraft"
 version.workspace = true
 edition.workspace = true

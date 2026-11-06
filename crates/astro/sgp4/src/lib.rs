@@ -41,7 +41,7 @@
 //!   nothing is guessed and nothing is silently defaulted.
 //! - **Alpha-5** object identifiers are carried through as text, not decoded to a number.
 //! - **No frame conversion.** Output is TEME, the frame SGP4 is defined in. Converting to
-//!   ICRF or Earth-fixed belongs to `stkcraft-frames`.
+//!   ICRF or Earth-fixed belongs to `stkcraft-astro-frames`.
 
 #![deny(
     clippy::unwrap_used,

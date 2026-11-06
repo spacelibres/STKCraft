@@ -4,10 +4,10 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the TEME state vectors `stkcraft-sgp4` produces into ICRF and Earth-fixed
+**Goal:** Turn the TEME state vectors `stkcraft-astro-sgp4` produces into ICRF and Earth-fixed
 states, so a propagated satellite has a position something else can use.
 
-**Architecture:** `stkcraft-frames` gains four layers of increasing scope, each independently
+**Architecture:** `stkcraft-astro-frames` gains four layers of increasing scope, each independently
 testable against a published reference: fundamental arguments and the IAU-80 nutation series
 (no frame objects yet, just numbers); precession and nutation *matrices*; sidereal time and the
 composite TEME→GCRF and TEME→ITRF rotations; and finally a `TerrestrialFrame` type that owns the
@@ -16,7 +16,7 @@ Nothing here invents a convention: every matrix is checked against two independe
 implementations, and every acceptance test names the reference value it reproduces.
 
 **Tech Stack:** Rust 2024, `stkcraft-core` (`Vector3`, `Result`), `stkcraft-time` (`Epoch`,
-`JulianDate`, `TimeScale`), `stkcraft-sgp4` (`StateVector`). No new dependencies.
+`JulianDate`, `TimeScale`), `stkcraft-astro-sgp4` (`StateVector`). No new dependencies.
 
 ## Global Constraints
 
@@ -221,7 +221,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --offline -p stkcraft-frames --lib arguments`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib arguments`
 Expected: FAIL with `cannot find function 'iau_1980' in this scope`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -319,7 +319,7 @@ pub fn iau_1980(ttt: f64) -> Result<FundamentalArguments> {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test --offline -p stkcraft-frames --lib arguments`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib arguments`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 5: Register the module**
@@ -429,7 +429,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --offline -p stkcraft-frames --lib nutation`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib nutation`
 Expected: FAIL, no `iau_1980` in `frames::nutation`.
 
 - [ ] **Step 3: Generate the 106-term table**
@@ -555,7 +555,7 @@ pub fn iau_1980(ttt: f64) -> Result<Nutation> {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cargo test --offline -p stkcraft-frames --lib nutation`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib nutation`
 Expected: PASS, 5 tests.
 
 - [ ] **Step 6: Register the module, gate and commit**
@@ -674,7 +674,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --offline -p stkcraft-frames --lib precession`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib precession`
 Expected: FAIL, no `iau_1977_angles`.
 
 - [ ] **Step 3: Write the implementation**
@@ -762,7 +762,7 @@ Add `use stkcraft_core::Vector3;` inside the test module for the arcseconds test
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --offline -p stkcraft-frames --lib precession`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib precession`
 Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Register the module, gate and commit**
@@ -843,7 +843,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --offline -p stkcraft-frames --lib sidereal`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib sidereal`
 Expected: FAIL.
 
 - [ ] **Step 3: Write the implementation**
@@ -912,7 +912,7 @@ pub fn greenwich_mean(jdut1: f64) -> Result<f64> {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --offline -p stkcraft-frames --lib sidereal`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib sidereal`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Register the module, gate and commit**
@@ -932,11 +932,11 @@ git commit -m "M4.4: Greenwich mean sidereal time"
 **Files:**
 - Create: `crates/frames/src/teme.rs`
 - Modify: `crates/frames/src/lib.rs`
-- Modify: `crates/frames/Cargo.toml` (add the `stkcraft-sgp4` dependency)
+- Modify: `crates/frames/Cargo.toml` (add the `stkcraft-astro-sgp4` dependency)
 
 **Interfaces:**
 - Consumes: `arguments`, `nutation`, `precession`, `sidereal`, `rotation::Rotation3`,
-  `stkcraft_sgp4::StateVector`.
+  `stkcraft_astro_sgp4::StateVector`.
 - Produces:
 
 ```rust
@@ -962,13 +962,13 @@ pub fn teme_to_itrf(
 Add to `crates/frames/Cargo.toml`:
 
 ```toml
-stkcraft-sgp4.workspace = true
+stkcraft-astro-sgp4.workspace = true
 ```
 
-**Layer check:** `stkcraft-sgp4` is L2 and `stkcraft-frames` is L2. A same-layer dependency is
+**Layer check:** `stkcraft-astro-sgp4` is L2 and `stkcraft-astro-frames` is L2. A same-layer dependency is
 forbidden by `cargo xtask layers`. **Before writing any code**, decide the direction:
 either (a) move the state type down, or (b) define the conversion over `stkcraft_core` types
-(`[Distance; 3]` position and `[Velocity; 3]` velocity) so `stkcraft-frames` needs no SGP4
+(`[Distance; 3]` position and `[Velocity; 3]` velocity) so `stkcraft-astro-frames` needs no SGP4
 dependency at all. **Take (b)** — a frame conversion has no business knowing how the state was
 produced, and it keeps the layering table untouched. Replace `StateVector` in the signatures
 above with:
@@ -980,8 +980,8 @@ pub struct CartesianState {
 }
 ```
 
-defined in `teme.rs`, with a documented `From<stkcraft_sgp4::StateVector>` implemented in
-`stkcraft-sgp4` — no, in **`stkcraft-frames` under a feature-free `From` impl is impossible
+defined in `teme.rs`, with a documented `From<stkcraft_astro_sgp4::StateVector>` implemented in
+`stkcraft-astro-sgp4` — no, in **`stkcraft-astro-frames` under a feature-free `From` impl is impossible
 without the dependency**; instead give `CartesianState` a constructor and have callers convert
 explicitly. Document this in `lib.rs`. The tests below use `CartesianState`.
 
@@ -1092,7 +1092,7 @@ mod tests {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --offline -p stkcraft-frames --lib teme`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib teme`
 Expected: FAIL, no `teme_to_gcrf`.
 
 - [ ] **Step 3: Implement `teme_to_gcrf`**
@@ -1155,7 +1155,7 @@ Rotation3::from_rows([
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test --offline -p stkcraft-frames --lib teme::tests::teme_to_gcrf`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib teme::tests::teme_to_gcrf`
 Expected: PASS.
 
 - [ ] **Step 5: Implement `teme_to_itrf`**
@@ -1185,7 +1185,7 @@ so anything above `1e-4` rad is a caller bug, and silently applying it would til
 
 - [ ] **Step 6: Run all tests**
 
-Run: `cargo test --offline -p stkcraft-frames --lib teme`
+Run: `cargo test --offline -p stkcraft-astro-frames --lib teme`
 Expected: PASS, 5 tests.
 
 - [ ] **Step 7: Gate and commit**
@@ -1245,7 +1245,7 @@ leaving the gap implicit.
 generated-data step with a stated verification, not a "fill this in later".
 
 **Type consistency.** `CartesianState` is introduced in Task 5 rather than reusing
-`stkcraft_sgp4::StateVector`, because both crates are L2 and `cargo xtask layers` forbids a
+`stkcraft_astro_sgp4::StateVector`, because both crates are L2 and `cargo xtask layers` forbids a
 same-layer dependency. The plan states this explicitly where it matters. `Rotation3` comes
 from Task 0 (already present in `rotation.rs`), and `from_rows` returns `Result`, so every
 matrix construction can use `?`.

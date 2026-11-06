@@ -19,9 +19,9 @@
 //! `STKCRAFT_SCREENSHOT_EGUI`) and are otherwise never reachable: a normal run opens a window.
 
 use egui::Sense;
-use stkcraft_viewport::renderer::{DEPTH_FORMAT, Globals, SceneRenderer};
-use stkcraft_viewport::scene::SceneData;
-use stkcraft_viewport::{Camera, SceneCallback};
+use stkcraft_ui_viewport::renderer::{DEPTH_FORMAT, Globals, SceneRenderer};
+use stkcraft_ui_viewport::scene::SceneData;
+use stkcraft_ui_viewport::{Camera, SceneCallback};
 
 use crate::app::App;
 
@@ -582,7 +582,7 @@ struct Occlusion {
 fn occlusion(scene: &SceneData, camera: &Camera, rgb: &[u8]) -> Occlusion {
     let radius = globe_radius_km(scene);
     let eye = f64_3(camera.eye());
-    let clip = stkcraft_viewport::camera::multiply(
+    let clip = stkcraft_ui_viewport::camera::multiply(
         camera.projection(WIDTH as f32 / HEIGHT as f32),
         camera.view(),
     );
@@ -596,7 +596,7 @@ fn occlusion(scene: &SceneData, camera: &Camera, rgb: &[u8]) -> Occlusion {
             // Grazing the limb: which side it is on is not a question with a stable answer.
             continue;
         };
-        let Some(ndc) = stkcraft_viewport::camera::transform_point(clip, vertex.position) else {
+        let Some(ndc) = stkcraft_ui_viewport::camera::transform_point(clip, vertex.position) else {
             continue;
         };
         if !(ndc[0].is_finite() && ndc[1].is_finite() && ndc[2].is_finite()) {
@@ -725,7 +725,7 @@ fn globe_radius_km(scene: &SceneData) -> f64 {
     if radius > 0.0 {
         radius
     } else {
-        f64::from(stkcraft_viewport::EARTH_EQUATORIAL_RADIUS_KM)
+        f64::from(stkcraft_ui_viewport::EARTH_EQUATORIAL_RADIUS_KM)
     }
 }
 
@@ -1021,7 +1021,7 @@ mod tests {
         // nothing to check, which is the shape of a verification path that silently stops
         // verifying anything.
         let camera = Camera::default_view();
-        let scene = stkcraft_viewport::scene::SceneData::default();
+        let scene = stkcraft_ui_viewport::scene::SceneData::default();
         let rgb = vec![0_u8; (WIDTH * HEIGHT * 3) as usize];
         let report = occlusion(&scene, &camera, &rgb);
         assert_eq!(report.far_samples, 0);

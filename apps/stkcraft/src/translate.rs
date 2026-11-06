@@ -7,7 +7,7 @@
 //!
 //! # The rules it inherits
 //!
-//! The batch, the prompt and the acceptance rules are the shared ones in `stkcraft_agent::translate`,
+//! The batch, the prompt and the acceptance rules are the shared ones in `stkcraft_agent_runtime::translate`,
 //! so a catalog made here and one made by the developer task cannot disagree about what a valid row
 //! is. What is new is only where the result goes and who waits for it:
 //!
@@ -111,7 +111,7 @@ fn existing_rows(directory: &std::path::Path, locale: &str) -> Vec<Row> {
 /// A message when there is nothing to do or no model to do it with — reported before a thread
 /// starts, because a person who picked a language needs the reason now rather than a spinner.
 pub fn start(locale: &str) -> Result<Run, String> {
-    let model = stkcraft_agent::DeepSeek::from_environment()?;
+    let model = stkcraft_agent_runtime::DeepSeek::from_environment()?;
     let locale = locale.to_owned();
     let directory = crate::prefs::Prefs::locales_dir().ok_or_else(|| {
         "this platform has no configuration directory to write a catalog to".to_owned()
@@ -133,7 +133,7 @@ pub fn start(locale: &str) -> Result<Run, String> {
 }
 
 /// The worker: translate, validate, write.
-fn translate<M: stkcraft_agent::ChatModel>(
+fn translate<M: stkcraft_agent_runtime::ChatModel>(
     model: &M,
     locale: &str,
     directory: &std::path::Path,
@@ -146,7 +146,7 @@ fn translate<M: stkcraft_agent::ChatModel>(
         count: wanted.len(),
     });
     let language_name = crate::prefs::language_name_for(locale);
-    let catalogue = stkcraft_agent::translate::translate_catalogue(
+    let catalogue = stkcraft_agent_runtime::translate::translate_catalogue(
         model,
         locale,
         &language_name,
@@ -227,13 +227,13 @@ mod tests {
         answer: String,
     }
 
-    impl stkcraft_agent::ChatModel for Scripted {
+    impl stkcraft_agent_runtime::ChatModel for Scripted {
         fn complete(
             &self,
-            _messages: &[stkcraft_agent::Message],
+            _messages: &[stkcraft_agent_runtime::Message],
             _tools: &[serde_json::Value],
-        ) -> Result<stkcraft_agent::Turn, String> {
-            Ok(stkcraft_agent::Turn {
+        ) -> Result<stkcraft_agent_runtime::Turn, String> {
+            Ok(stkcraft_agent_runtime::Turn {
                 text: self.answer.clone(),
                 calls: Vec::new(),
             })

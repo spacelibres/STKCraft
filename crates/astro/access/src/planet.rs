@@ -17,7 +17,7 @@
 //! the light time between the two (a millisecond is 25 km at Mars, but the orientation changes by
 //! 0.0013° in that time, which is less than the model's own error). Nothing else is approximated.
 
-use stkcraft_body::Body;
+use stkcraft_astro_body::Body;
 use stkcraft_core::{Error, Result};
 use stkcraft_time::Epoch;
 

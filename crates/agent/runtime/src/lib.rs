@@ -1,9 +1,9 @@
 //! The `DeepSeek` agent: a model driving the engine through its own tools.
 //!
-//! This crate is the other half of the MCP server. `stkcraft-mcp` lets a client *outside* the
+//! This crate is the other half of the MCP server. `stkcraft-agent-mcp` lets a client *outside* the
 //! process — Claude Desktop, a local harness — drive the engine; this one lets the engine drive
 //! itself from a prompt, with `DeepSeek` as the model, and it is the same surface either way: the
-//! tools are the command registry's, executed through [`stkcraft_mcp::Server`], and the skills are
+//! tools are the command registry's, executed through [`stkcraft_agent_mcp::Server`], and the skills are
 //! the same markdown documents.
 //!
 //! # The loop
@@ -42,7 +42,7 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 
 use serde_json::{Value, json};
-use stkcraft_mcp::Server;
+use stkcraft_agent_mcp::Server;
 
 pub mod session;
 pub mod translate;
@@ -790,7 +790,7 @@ impl<M: ChatModel> Agent<M> {
 mod tests {
     use super::*;
     use std::cell::RefCell;
-    use stkcraft_engine::Scenario;
+    use stkcraft_astro_engine::Scenario;
 
     /// A model that answers from a script, so the loop is exercised without a network.
     struct Script {
@@ -1030,7 +1030,7 @@ mod tests {
                 })
         };
         let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        for command in stkcraft_engine::Registry::builtin().iter() {
+        for command in stkcraft_astro_engine::Registry::builtin().iter() {
             let mapped = function_name(command.descriptor.id);
             assert!(
                 separator_free(&mapped),
@@ -1248,7 +1248,7 @@ mod tests {
 
     #[test]
     fn the_system_prompt_names_the_rules_and_the_skills() {
-        let skills = vec![stkcraft_mcp::Skill::parse(
+        let skills = vec![stkcraft_agent_mcp::Skill::parse(
             "compute-passes",
             "# Compute passes\n\nHow to do it.\n",
         )];

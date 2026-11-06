@@ -6,10 +6,10 @@
 //! produces different numbers — and that is the correct outcome.
 
 use serde::{Deserialize, Serialize};
-use stkcraft_access::{GroundSite, Sensor};
-use stkcraft_body::Body;
+use stkcraft_astro_access::{GroundSite, Sensor};
+use stkcraft_astro_body::Body;
+use stkcraft_astro_sgp4::TwoLineElement;
 use stkcraft_core::{Error, Result};
-use stkcraft_sgp4::TwoLineElement;
 use stkcraft_time::Epoch;
 
 /// The central body a scenario without one is about.
@@ -267,7 +267,7 @@ impl Scenario {
 #[cfg(test)]
 #[expect(clippy::expect_used)]
 mod tests {
-    use stkcraft_access::Ellipsoid;
+    use stkcraft_astro_access::Ellipsoid;
     use stkcraft_core::{Angle, Distance};
 
     use super::*;

@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-sgp4"
+name = "stkcraft-astro-sgp4"
 description = "SGP4/SDP4 near-Earth and deep-space propagation for STKCraft"
 version.workspace = true
 edition.workspace = true

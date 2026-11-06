@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-access"
+name = "stkcraft-astro-access"
 description = "Access and coverage geometry for STKCraft"
 version.workspace = true
 edition.workspace = true
@@ -10,7 +10,7 @@ authors.workspace = true
 [dependencies]
 stkcraft-core.workspace = true
 # A station on another planet needs that body's ellipsoid and its IAU rotation model.
-stkcraft-body.workspace = true
+stkcraft-astro-body.workspace = true
 stkcraft-time.workspace = true
 serde.workspace = true
 

@@ -8,9 +8,9 @@
 //! The layers below supply the physics:
 //!
 //! - `stkcraft-time` — epochs, scales and leap seconds.
-//! - `stkcraft-sgp4` — a two-line element set to a TEME state.
-//! - `stkcraft-frames` — TEME to GCRF and to Earth-fixed.
-//! - `stkcraft-access` — a station, a sensor and a position to access windows.
+//! - `stkcraft-astro-sgp4` — a two-line element set to a TEME state.
+//! - `stkcraft-astro-frames` — TEME to GCRF and to Earth-fixed.
+//! - `stkcraft-astro-access` — a station, a sensor and a position to access windows.
 //!
 //! This crate holds them together: it owns the scenario document, moves each satellite from
 //! its element set through the frame chain to an Earth-fixed position, and hands that to the

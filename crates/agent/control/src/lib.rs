@@ -47,7 +47,7 @@ use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
-use stkcraft_mcp::Server;
+use stkcraft_agent_mcp::Server;
 
 /// The methods this channel answers, for the error that names them.
 pub const METHODS: [&str; 7] = [
@@ -346,7 +346,7 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 #[allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use super::*;
-    use stkcraft_engine::Scenario;
+    use stkcraft_astro_engine::Scenario;
 
     fn control() -> Control {
         Control::new(

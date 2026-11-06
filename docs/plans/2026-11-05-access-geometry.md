@@ -6,7 +6,7 @@
 **Goal:** Answer "when can this satellite see that ground station, and for how long" — the
 first analysis the product exists to do, and the layer everything above it consumes.
 
-**Architecture:** A new crate `stkcraft-access` at L3, above `stkcraft-frames`. It is built as
+**Architecture:** A new crate `stkcraft-astro-access` at L3, above `stkcraft-astro-frames`. It is built as
 four independently testable pieces: geometry (the Earth model and the line-of-sight
 elevation/azimuth/range from a satellite to a site), the sensor (a cone of half-angle and
 range limits), the window finder (root isolation plus bracketing, not naive sampling), and
@@ -14,7 +14,7 @@ finally the access result type. Every piece is held to a hand-computable case, a
 requires, and the window finder is held to a case whose answer is known analytically.
 
 **Tech Stack:** Rust 2024, `stkcraft-core` (`Angle`, `Distance`, `Duration`, `Vector3`,
-`Result`), `stkcraft-time` (`Epoch`, `TimeScale`), `stkcraft-frames` (`CartesianState`,
+`Result`), `stkcraft-time` (`Epoch`, `TimeScale`), `stkcraft-astro-frames` (`CartesianState`,
 `teme_to_itrf`). No new dependencies.
 
 ## Global Constraints
@@ -106,7 +106,7 @@ Register in `xtask/src/layers.rs`:
 
 ```rust
 CrateSpec {
-    name: "stkcraft-access",
+    name: "stkcraft-astro-access",
     path: "crates/access",
     layer: 3,
 },
@@ -114,7 +114,7 @@ CrateSpec {
 
 and raise `LAYER_COUNT` from 3 to 4. Add the crate to `PORTABLE_CRATES` in
 `xtask/src/main.rs` so the wasm gate covers it. Add the workspace member and
-`stkcraft-access.workspace = true` plus `stkcraft-frames.workspace = true` to the dep table.
+`stkcraft-astro-access.workspace = true` plus `stkcraft-astro-frames.workspace = true` to the dep table.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -153,7 +153,7 @@ The derivations are one line each; the comments carry the source.
 - [ ] **Step 4: Run, gate, commit**
 
 ```bash
-cargo test --offline -p stkcraft-access
+cargo test --offline -p stkcraft-astro-access
 cargo xtask ci --offline
 git add -A && git commit -m "M5.1: WGS-84 ellipsoid"
 ```

@@ -41,7 +41,7 @@
 
 use std::path::Path;
 
-use stkcraft_body::Body;
+use stkcraft_astro_body::Body;
 use stkcraft_core::{Error, Result};
 use stkcraft_time::{Epoch, JD_J2000, TimeScale};
 

@@ -114,7 +114,7 @@ STKCraft is meant to be driven by a model, and the difference from a product tha
 *offers* an assistant is structural: the model is not inside the kernel, and the kernel is
 completely reachable from outside it.
 
-The kernel — everything through `stkcraft-engine` — makes no network call, links no HTTP
+The kernel — everything through `stkcraft-astro-engine` — makes no network call, links no HTTP
 client, and does not know a language model exists. What it does instead is expose itself
 completely:
 
@@ -134,14 +134,14 @@ completely:
   That is deliberate progressive disclosure: a procedure is loaded when a job needs it, so a
   large library costs nothing until it is used.
 
-The payoff is testability. `stkcraft_mcp::Server::handle` is a pure function of a request and
+The payoff is testability. `stkcraft_agent_mcp::Server::handle` is a pure function of a request and
 the session, so the whole protocol is covered without a pipe, and an agent's tool call is the
 same call a test makes. A model that cannot reach a network can still be tested end to end: the
 `ChatModel` trait means a scripted turn exercises the entire loop — the request body, the tool
 dispatch, the result fed back, the final answer — with no credential and no socket.
 
-Two layers hold this up, and the split is the point. `stkcraft-mcp` (L5) is a *transport*: it
-turns the registry into a protocol and knows nothing about models. `stkcraft-agent` (L6) is a
+Two layers hold this up, and the split is the point. `stkcraft-agent-mcp` (L5) is a *transport*: it
+turns the registry into a protocol and knows nothing about models. `stkcraft-agent-runtime` (L6) is a
 *client* of that protocol — from the server's point of view it is indistinguishable from Claude
 Desktop connected to the same stdin. The agent therefore cannot reach a capability the protocol
 does not expose, which keeps "the model can do anything the user can" a property of the design
@@ -192,7 +192,7 @@ vectors live next to the code that uses them, and the constant or formula they v
 cited in a comment beside it. See `AGENTS.md` for the standard a layer must meet before it
 is called done.
 
-`stkcraft-sgp4` is the first layer to meet that standard, and it is worth looking at as the
+`stkcraft-astro-sgp4` is the first layer to meet that standard, and it is worth looking at as the
 pattern:
 
 - The verification data is a transcription of the AIAA 2006-6753 archive — the 33 element

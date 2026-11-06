@@ -1,5 +1,5 @@
 [package]
-name = "stkcraft-mcp"
+name = "stkcraft-agent-mcp"
 description = "The MCP server that turns STKCraft's commands into an agent's tools"
 version.workspace = true
 edition.workspace = true
@@ -9,8 +9,8 @@ authors.workspace = true
 
 [dependencies]
 stkcraft-core.workspace = true
-stkcraft-engine.workspace = true
-stkcraft-knowledge.workspace = true
+stkcraft-astro-engine.workspace = true
+stkcraft-agent-knowledge.workspace = true
 stkcraft-time.workspace = true
 serde_json.workspace = true
 
