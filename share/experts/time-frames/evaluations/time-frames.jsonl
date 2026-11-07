@@ -8,3 +8,4 @@
 {"id":"tf-008","question":"Convert UTC to UT1 without DUT1.","expect":{"refusal":"DUT1 is required; it cannot be derived. No EOP loader exists yet.","citation":"IERS Conventions (2010) chapter 8"}}
 {"id":"tf-009","question":"What leap second applies on 2035-01-01?","expect":{"refusal":"The date is after the published leap-second table; no offset is guessed.","citation":"IERS Bulletin C"}}
 {"id":"tf-010","question":"Is this IAU 2006/2000A precession-nutation?","expect":{"refusal":"No. The kernel implements IAU-77/80, the series SGP4/TEME is defined against.","citation":"Vallado (2013); ERFA eraPrec76/eraNut80"}}
+{"id":"tf-011","question":"What does converting UTC to UT1 require?","expect":{"formula":"time.ut1-from-utc","value":"DUT1; without it the conversion is refused","citation":"IERS Conventions (2010) chapter 8"}}

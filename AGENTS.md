@@ -203,7 +203,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   degrees/radians mix-up is a compile error. Do not add `From<f64>` conversions.
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
 - **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`, tests, assets,
-  experts, i18n, api-docs, layers, wasm, version, and the lockfile check the workflow ends with). It is the
+  experts, experts-eval, i18n, api-docs, layers, wasm, version, and the lockfile check the workflow ends with). It is the
   same gate `.github/workflows/ci.yml` runs through the shared `gate.yml` on Ubuntu and Windows, so a
   commit that passes it locally is a commit whose CI gate passes on both legs. Two things it cannot
   check locally and CI can: the Windows leg's own environment and the packaging lint. macOS is not

@@ -72,7 +72,7 @@ cargo xtask ci                                                   # the full gate
 
 | Task | What it does |
 |---|---|
-| `ci` | The full gate: `fmt --check`, clippy with `-D warnings`, tests, assets, expert/formula packages, i18n, the API reference, layers, wasm, version, and the lockfile check |
+| `ci` | The full gate: `fmt --check`, clippy with `-D warnings`, tests, assets, expert/formula packages and evaluations, i18n, the API reference, layers, wasm, version, and the lockfile check |
 | `fmt` | `cargo fmt --check` over the workspace |
 | `layers` | Enforces that a crate depends only on lower layers, and that analysis crates stay free of every GUI crate |
 | `assets` | Every asset has a row in `ATTRIBUTION.md`, and every row names a file that exists |
