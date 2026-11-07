@@ -29,7 +29,16 @@ pub struct Prefs {
     pub model_endpoint: Option<String>,
     /// The model name, when the person chose one.
     pub model: Option<String>,
+    /// Explicit wire protocol: `deepseek` or `compatible`.
+    pub model_protocol: Option<String>,
+    /// Explicit `DeepSeek` thinking selection: `enabled` or `disabled`.
+    pub model_thinking: Option<String>,
+    /// Total generated-token cap, validated before a model operation (including thinking tokens).
+    pub model_max_output_tokens: Option<String>,
 }
+
+// Preferences contain a handful of short settings, not documents. Bound reads even if a file grows.
+const MAX_PREFERENCES_BYTES: u64 = 64 * 1024;
 
 /// The file the model's credential lives in, beside the preferences.
 ///
@@ -81,6 +90,8 @@ pub fn store_credential_at(path: &std::path::Path, key: &str) -> Result<(), Stri
 }
 
 /// Make a file readable only by its owner, on the platforms that have modes.
+// Keep the fallible Unix signature on other platforms too.
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 fn restrict(path: &std::path::Path) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -106,11 +117,14 @@ fn restrict(path: &std::path::Path) -> Result<(), String> {
 /// A message saying what is missing and where to put it, because "no model" is a state the interface
 /// has to be able to explain.
 pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
-    let prefs = Prefs::load();
+    let prefs = Prefs::try_load()?;
     let stored = stored_credential();
     let environment = std::env::var("DEEPSEEK_API_KEY").ok();
     let base_url = std::env::var("DEEPSEEK_BASE_URL").ok();
     let model = std::env::var("DEEPSEEK_MODEL").ok();
+    let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
+    let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+    let max_output_tokens = std::env::var("DEEPSEEK_MAX_OUTPUT_TOKENS").ok();
     model_provider_from(
         &prefs,
         stored.as_deref(),
@@ -118,6 +132,9 @@ pub fn model_provider() -> Result<stkcraft_agent_runtime::Provider, String> {
             key: environment.as_deref(),
             base_url: base_url.as_deref(),
             model: model.as_deref(),
+            protocol: protocol.as_deref(),
+            thinking: thinking.as_deref(),
+            max_output_tokens: max_output_tokens.as_deref(),
         },
     )
 }
@@ -135,6 +152,53 @@ pub struct ModelEnvironment<'a> {
     pub base_url: Option<&'a str>,
     /// `DEEPSEEK_MODEL`.
     pub model: Option<&'a str>,
+    /// `DEEPSEEK_PROTOCOL`.
+    pub protocol: Option<&'a str>,
+    /// `DEEPSEEK_THINKING`.
+    pub thinking: Option<&'a str>,
+    /// `DEEPSEEK_MAX_OUTPUT_TOKENS`.
+    pub max_output_tokens: Option<&'a str>,
+}
+
+/// Resolve credential-free protocol settings with the same precedence as the model connection.
+pub fn model_options_from(
+    prefs: &Prefs,
+    environment: &ModelEnvironment<'_>,
+) -> Result<stkcraft_agent_runtime::ProviderOptions, String> {
+    stkcraft_agent_runtime::ProviderOptions::resolve(
+        prefs
+            .model_endpoint
+            .as_deref()
+            .or(environment.base_url)
+            .unwrap_or(stkcraft_agent_runtime::DEEPSEEK_BASE_URL),
+        prefs.model_protocol.as_deref().or(environment.protocol),
+        prefs.model_thinking.as_deref().or(environment.thinking),
+    )?
+    .with_max_output_tokens(
+        prefs
+            .model_max_output_tokens
+            .as_deref()
+            .or(environment.max_output_tokens),
+    )
+}
+
+/// Validate a proposed settings change without requiring or reading a credential.
+pub fn validate_model_options(prefs: &Prefs) -> Result<(), String> {
+    let base_url = std::env::var("DEEPSEEK_BASE_URL").ok();
+    let protocol = std::env::var("DEEPSEEK_PROTOCOL").ok();
+    let thinking = std::env::var("DEEPSEEK_THINKING").ok();
+    let max_output_tokens = std::env::var("DEEPSEEK_MAX_OUTPUT_TOKENS").ok();
+    model_options_from(
+        prefs,
+        &ModelEnvironment {
+            base_url: base_url.as_deref(),
+            protocol: protocol.as_deref(),
+            thinking: thinking.as_deref(),
+            max_output_tokens: max_output_tokens.as_deref(),
+            ..ModelEnvironment::default()
+        },
+    )
+    .map(|_| ())
 }
 
 /// Resolve the provider from the person's settings and the environment, in that order.
@@ -172,9 +236,8 @@ pub fn model_provider_from(
         .clone()
         .or_else(|| environment.model.map(str::to_owned))
         .unwrap_or_else(|| stkcraft_agent_runtime::DEEPSEEK_MODEL.to_owned());
-    Ok(stkcraft_agent_runtime::Provider::new(
-        endpoint, model, api_key,
-    ))
+    let options = model_options_from(prefs, environment)?;
+    Ok(stkcraft_agent_runtime::Provider::new(endpoint, model, api_key).with_options(options))
 }
 
 impl Prefs {
@@ -215,13 +278,66 @@ impl Prefs {
     /// Read the preferences, or the defaults when there are none to read.
     #[must_use]
     pub fn load() -> Self {
-        let Some(path) = Self::path() else {
-            return Self::default();
+        Self::try_load().unwrap_or_default()
+    }
+
+    /// Read model settings without silently replacing malformed saved connection options.
+    ///
+    /// # Errors
+    /// Unreadable, non-regular, oversized or malformed existing preference files.
+    pub fn try_load() -> Result<Self, String> {
+        Self::path().map_or_else(|| Ok(Self::default()), |path| Self::read_at(&path))
+    }
+
+    fn read_at(path: &std::path::Path) -> Result<Self, String> {
+        use std::io::Read as _;
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => {
+                return Err(format!(
+                    "could not inspect preferences {}: {error}",
+                    path.display()
+                ));
+            }
         };
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return Self::default();
-        };
-        serde_json::from_str(&text).unwrap_or_default()
+        if !metadata.is_file() {
+            return Err(format!(
+                "preferences {} are not a regular file",
+                path.display()
+            ));
+        }
+        if metadata.len() > MAX_PREFERENCES_BYTES {
+            return Err(format!(
+                "preferences {} exceed {MAX_PREFERENCES_BYTES} bytes",
+                path.display()
+            ));
+        }
+        let file = std::fs::File::open(path)
+            .map_err(|error| format!("could not open preferences {}: {error}", path.display()))?;
+        if !file
+            .metadata()
+            .map_err(|error| format!("could not inspect preferences {}: {error}", path.display()))?
+            .is_file()
+        {
+            return Err(format!(
+                "preferences {} are not a regular file",
+                path.display()
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_PREFERENCES_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("could not read preferences {}: {error}", path.display()))?;
+        if bytes.len() as u64 > MAX_PREFERENCES_BYTES {
+            return Err(format!(
+                "preferences {} exceed {MAX_PREFERENCES_BYTES} bytes",
+                path.display()
+            ));
+        }
+        serde_json::from_slice(&bytes).map_err(|_| format!("invalid preferences JSON in {}; repair the saved settings before configuring or using the model", path.display()))
     }
 
     /// Write the preferences, creating the directory if it is missing.
@@ -234,13 +350,25 @@ impl Prefs {
         let Some(path) = Self::path() else {
             return Err("this platform has no configuration directory".to_owned());
         };
+        self.write_at(&path)
+    }
+
+    fn write_at(&self, path: &std::path::Path) -> Result<(), String> {
+        // A lenient UI read may have used defaults. Never overwrite a malformed saved connection.
+        Self::read_at(path)?;
         if let Some(directory) = path.parent() {
             std::fs::create_dir_all(directory)
                 .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
         }
         let text = serde_json::to_string_pretty(self)
             .map_err(|error| format!("could not write the preferences: {error}"))?;
-        std::fs::write(&path, text)
+        if text.len() as u64 > MAX_PREFERENCES_BYTES {
+            return Err(format!(
+                "preferences {} exceed {MAX_PREFERENCES_BYTES} bytes",
+                path.display()
+            ));
+        }
+        std::fs::write(path, text)
             .map_err(|error| format!("could not write {}: {error}", path.display()))
     }
 }
@@ -357,11 +485,198 @@ mod tests {
     use super::*;
 
     #[test]
+    fn preference_reads_are_bounded_and_default_ui_writes_preserve_invalid_connections() {
+        let base = std::env::temp_dir()
+            .canonicalize()
+            .expect("temporary directory");
+        let root = base.join(format!("stkcraft-preference-bounds-{}", std::process::id()));
+        assert!(root.starts_with(&base));
+        std::fs::create_dir(&root).expect("unique preference fixture");
+        let path = root.join("ui.json");
+        assert_eq!(
+            Prefs::read_at(&path).expect("missing file"),
+            Prefs::default()
+        );
+        assert!(
+            Prefs::read_at(&root).is_err(),
+            "directories are not preference files"
+        );
+        for bytes in [b"{broken-json".to_vec(), vec![b' '; 65_537]] {
+            std::fs::write(&path, &bytes).expect("invalid fixture");
+            assert!(Prefs::read_at(&path).is_err());
+            assert!(
+                Prefs::default().write_at(&path).is_err(),
+                "UI defaults must not overwrite saved invalid settings"
+            );
+            assert_eq!(std::fs::read(&path).expect("preserved file"), bytes);
+        }
+        std::fs::write(&path, r#"{"language":"zh","model_endpoint":"https://private.invalid/chat/completions","future":true}"#).expect("valid old preferences");
+        let prefs = Prefs::read_at(&path).expect("unknown fields remain compatible");
+        assert_eq!(prefs.language.as_deref(), Some("zh"));
+        assert_eq!(
+            prefs.model_endpoint.as_deref(),
+            Some("https://private.invalid/chat/completions")
+        );
+        let before = std::fs::read(&path).expect("valid fixture");
+        let oversized = Prefs {
+            model: Some("x".repeat(65_537)),
+            ..Prefs::default()
+        };
+        assert!(oversized.write_at(&path).is_err());
+        assert_eq!(
+            std::fs::read(&path).expect("oversized writes preserve file"),
+            before
+        );
+        let resolved = root.canonicalize().expect("fixture root");
+        assert!(resolved.starts_with(&base));
+        std::fs::remove_dir_all(resolved).expect("remove isolated fixtures");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preference_reads_refuse_device_files() {
+        assert!(Prefs::read_at(std::path::Path::new("/dev/zero")).is_err());
+    }
+
+    #[test]
+    fn model_protocol_invalid_explicit_settings_are_errors() {
+        for raw in [
+            r#"{"model_protocol":"unknown"}"#,
+            r#"{"model_thinking":"turbo"}"#,
+            r#"{"model_max_output_tokens":"0"}"#,
+            r#"{"model_max_output_tokens":"-1"}"#,
+            r#"{"model_max_output_tokens":"4294967296"}"#,
+        ] {
+            let prefs: Prefs = serde_json::from_str(raw).expect("settings object");
+            let result =
+                model_provider_from(&prefs, Some("test-only-key"), &ModelEnvironment::default());
+            assert!(
+                result.is_err(),
+                "invalid explicit settings were accepted: {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_protocol_settings_win_and_proxy_opt_in_is_explicit() {
+        use stkcraft_agent_runtime::{ProviderProtocol, ThinkingMode};
+        let environment = ModelEnvironment {
+            key: Some("test-only-key"),
+            protocol: Some("compatible"),
+            thinking: Some("enabled"),
+            ..ModelEnvironment::default()
+        };
+        let prefs = Prefs {
+            model: Some("deepseek-chat".to_owned()),
+            model_protocol: Some("deepseek".to_owned()),
+            model_thinking: Some("disabled".to_owned()),
+            ..Prefs::default()
+        };
+        let provider = model_provider_from(&prefs, None, &environment).expect("saved settings win");
+        assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
+        assert_eq!(provider.options.thinking, ThinkingMode::Disabled);
+        assert_eq!(provider.options.max_output_tokens, Some(8192));
+        assert_eq!(
+            provider.model, "deepseek-chat",
+            "explicit model selections survive"
+        );
+
+        let proxy = ModelEnvironment {
+            key: Some("test-only-key"),
+            base_url: Some("https://proxy.invalid/chat/completions"),
+            ..ModelEnvironment::default()
+        };
+        let provider = model_provider_from(&Prefs::default(), None, &proxy).expect("generic proxy");
+        assert_eq!(
+            provider.options.protocol,
+            ProviderProtocol::OpenAiCompatible
+        );
+        assert_eq!(provider.options.max_output_tokens, None);
+        let capped = ModelEnvironment {
+            max_output_tokens: Some("123"),
+            ..proxy
+        };
+        assert_eq!(
+            model_options_from(&Prefs::default(), &capped)
+                .expect("env output cap")
+                .max_output_tokens,
+            Some(123)
+        );
+        let chosen = Prefs {
+            model_max_output_tokens: Some("456".to_owned()),
+            ..Prefs::default()
+        };
+        assert_eq!(
+            model_options_from(&chosen, &capped)
+                .expect("saved cap wins")
+                .max_output_tokens,
+            Some(456)
+        );
+        let enabled_proxy = ModelEnvironment {
+            protocol: Some("deepseek"),
+            thinking: Some("enabled"),
+            ..proxy
+        };
+        let provider = model_provider_from(&Prefs::default(), None, &enabled_proxy)
+            .expect("explicit proxy opt-in");
+        assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
+        assert_eq!(provider.options.thinking, ThinkingMode::Enabled);
+    }
+
+    #[test]
+    fn model_protocol_shipped_defaults_and_legacy_preferences_are_compatible() {
+        use stkcraft_agent_runtime::{ProviderProtocol, ThinkingMode};
+        let prefs: Prefs = serde_json::from_str(r#"{"language":"zh"}"#).expect("old preferences");
+        assert!(prefs.model_protocol.is_none());
+        assert!(prefs.model_thinking.is_none());
+        let provider =
+            model_provider_from(&prefs, Some("test-only-key"), &ModelEnvironment::default())
+                .expect("shipped defaults");
+        assert_eq!(provider.options.protocol, ProviderProtocol::DeepSeek);
+        assert_eq!(provider.options.thinking, ThinkingMode::Disabled);
+        assert_eq!(provider.model, "deepseek-flash");
+        assert!(
+            model_options_from(
+                &Prefs::default(),
+                &ModelEnvironment {
+                    protocol: Some("typo"),
+                    ..ModelEnvironment::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            model_options_from(
+                &Prefs::default(),
+                &ModelEnvironment {
+                    thinking: Some("turbo"),
+                    ..ModelEnvironment::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            model_options_from(
+                &Prefs::default(),
+                &ModelEnvironment {
+                    protocol: Some("compatible"),
+                    thinking: Some("enabled"),
+                    ..ModelEnvironment::default()
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn preferences_round_trip_through_json() {
         let prefs = Prefs {
             language: Some("de".to_owned()),
             model_endpoint: Some("https://mine.example/v1/chat/completions".to_owned()),
             model: Some("mine".to_owned()),
+            model_protocol: Some("compatible".to_owned()),
+            model_thinking: Some("disabled".to_owned()),
+            model_max_output_tokens: Some("8192".to_owned()),
         };
         let text = serde_json::to_string(&prefs).expect("serialised");
         let read: Prefs = serde_json::from_str(&text).expect("deserialised");
@@ -400,6 +715,7 @@ mod tests {
             key: Some("from-environment"),
             base_url: Some("https://env.example/v1/chat/completions"),
             model: Some("env-model"),
+            ..ModelEnvironment::default()
         };
         let provider =
             model_provider_from(&prefs, Some("from-settings"), &environment).expect("a provider");
@@ -433,6 +749,7 @@ mod tests {
             language: None,
             model_endpoint: Some("https://mine.example/v1/chat/completions".to_owned()),
             model: Some("mine".to_owned()),
+            ..Prefs::default()
         };
         let provider = model_provider_from(
             &chosen,

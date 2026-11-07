@@ -47,6 +47,7 @@ pub mod cache;
 pub mod formula;
 pub mod record;
 pub mod schema;
+pub mod transcripts;
 pub mod vector;
 
 pub use cache::Cache;

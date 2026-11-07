@@ -55,9 +55,10 @@ earlier ones could not settle.
    linked HTTP client: a configured command
    (`STKCRAFT_FORMULA_RECOGNIZER="<command>"`) that takes a PNG on stdin and writes LaTeX on stdout,
    with the engine and version recorded. Nothing is linked in; a build with no recogniser stores
-   `unrecognised` boxes rather than failing.
+   `unrecognised` boxes rather than failing. *Status: no code reads `STKCRAFT_FORMULA_RECOGNIZER` or writes
+   `unrecognised` yet; layer 3 is not built.*
 4. **OCR, for pages with no text layer.** A scanned page is recognised to prose by the same external
-   pattern (`STKCRAFT_OCR="<command>"`, PNG in, text out), and its formulas then go through layer 3.
+   pattern (`STKCRAFT_OCR="<command>"`, PNG in, text out), and its formulas then go through layer 3. *The OCR hook exists (`crates/agent/knowledge/src/ocr.rs`).*
    The two are separate knobs because they fail separately: a page can have a good text layer and no
    formula model, or an OCR pass that gives prose and nothing else.
 
@@ -84,8 +85,8 @@ use (Apache-2.0), and its *taxonomy is the useful part*: `Mathlib/Analysis/Speci
 says what a square root is, `Mathlib/Analysis/Calculus/FDeriv/Basic.lean` says what a derivative is, and
 the docstring of each declaration says what it is for.
 
-So the integration is an **index, not a dependency**: `cargo xtask mathlib` fetches a pinned Mathlib
-checkout, parses it for declarations (`def`, `theorem`, `lemma`, `structure`, `class`) with their module
+So the integration is an **index, not a dependency**: `MATHLIB_DIR=<checkout> cargo xtask mathlib` reads a
+Mathlib checkout that the user supplies (the task does not download it), parses it for declarations (`def`, `theorem`, `lemma`, `structure`, `class`) with their module
 path, statement and docstring, and writes one table:
 
 ```sql
@@ -142,7 +143,7 @@ a file that a person can open. So every formula carries a **chain**, and every l
 | the wording | the introducing sentence (`problem`) and its line range in the text layer | the paper's own words, cited as written |
 | the classification | Mathlib revision, declaration name, **SHA-256 of the declaration's statement and docstring** | the concept is pinned to a commit, so "what Mathlib said in 2026" is checkable in 2030 |
 
-That chain is stored with the formula and printed with it:
+That chain is stored with the formula and printed with it. The digests below are abbreviated and illustrative, not a recorded run:
 
 ```text
 paper.pdf:page 12, formula at (120,340)-(300,388) — Real.sqrt (Analysis, 0.83)
@@ -173,31 +174,39 @@ The relational store (SQLite, `docs/design/storage.md`) gains one table, because
 with provenance:
 
 ```sql
-CREATE TABLE formulas (
-    id            INTEGER PRIMARY KEY,
-    document      TEXT NOT NULL,          -- path relative to the library root
-    page          INTEGER NOT NULL,
-    x0, y0, x1, y1 REAL NOT NULL,         -- the box, in PDF points
-    latex         TEXT,                   -- when the recogniser produced it
-    unicode       TEXT,                   -- always: what the text layer says, if anything
-    surroundings  TEXT,                   -- the sentence that introduces it, for retrieval
-    problem       TEXT,                   -- the sentence or caption that introduces it: what it solves
-    source        TEXT NOT NULL,          -- deterministic/text-layer | model/<engine>/<version> | unrecognised
-    confidence    REAL,                   -- when the source reports one
-    mathlib_name  TEXT,                   -- the declaration it matched, when it matched one
-    mathlib_score REAL,                   -- and how strongly
-    mathlib_domain TEXT,                  -- the taxonomy the match implies
-    classifier    TEXT,                   -- the scoring engine and version, like `source`
-    -- provenance: every link that makes the row checkable
-    paper_digest  TEXT NOT NULL,          -- SHA-256 of the PDF the box was read from
-    region_digest TEXT NOT NULL,          -- SHA-256 of the region image
-    mathlib_rev   TEXT,                   -- the Mathlib revision the index was built from
-    problem_lines TEXT                    -- the line range of `problem` in the text layer
-
-    digest        TEXT NOT NULL,          -- SHA-256 of the region image
-    FOREIGN KEY (document) REFERENCES documents(path)
+-- migration V2 of crates/framework/storage/src/schema.rs
+CREATE TABLE formula (
+    id             INTEGER PRIMARY KEY,
+    document       TEXT NOT NULL,
+    page           INTEGER NOT NULL,
+    x0             REAL NOT NULL,
+    y0             REAL NOT NULL,
+    x1             REAL NOT NULL,
+    y1             REAL NOT NULL,
+    unicode        TEXT NOT NULL,
+    latex          TEXT,
+    problem        TEXT,
+    problem_lines  TEXT,
+    source         TEXT NOT NULL,
+    confidence     REAL,
+    mathlib_name   TEXT,
+    mathlib_score  REAL,
+    mathlib_domain TEXT,
+    mathlib_rev    TEXT,
+    classifier     TEXT,
+    paper_digest   TEXT NOT NULL,
+    region_digest  TEXT NOT NULL,
+    recorded_at    TEXT NOT NULL,
+    UNIQUE (document, page, x0, y0, x1, y1) ON CONFLICT REPLACE
 ) STRICT;
 ```
+
+The table above is the one the code creates. It differs from the first design in three ways: it has no
+`surroundings` column (`problem` carries the introducing sentence), it has one digest pair rather than two
+digests for the region, and it has no foreign key, because `knowledge_document` is keyed by path and the
+formula row stores the path directly. The deterministic recogniser and the Mathlib classifier are built
+and used by `cargo xtask verify-formulas`; what is missing is the production path from a recognised
+formula to `record_formula`, and a formula model that fills `latex` and `source` beyond the text layer.
 
 The knowledge index (`crates/agent/knowledge/src/index.rs`) indexes four things from each row: the LaTeX
 tokens, the Unicode fallback, the sentence that introduces it, and the Mathlib name it was classified
@@ -206,23 +215,28 @@ finds it too, and a search for `sqrt` finds the formula classified as `Real.sqrt
 is `paper.pdf:page 12, formula at (120, 340)-(300, 388)`, not a line range: a box is what a reader can
 find on a page that has no lines.
 
-## What "recognised well" will be measured against
+## What "recognised well" is measured against
 
 Not "it looks right". The corpus already contains the standards
 (`docs/guides/ccsds-standards.md`, 495 documents) and papers whose formulas are published elsewhere in
 typeset form. The acceptance test is a **transcription table**: a set of (document, page, box, expected
-LaTeX) rows, chosen from the corpus, where a mismatch is a failing test. It starts small — a dozen
-formulas across CCSDS and the SGP4 papers — and grows. A recogniser that cannot pass it is not shipped
-as the default.
+LaTeX) rows, chosen from the corpus, where a mismatch is a failing test. `share/math/transcriptions.tsv`
+holds the rows and `cargo xtask verify-formulas` re-extracts and re-classifies them, failing on drift. It
+starts small — nine rows today — and grows. A recogniser that cannot pass it is not shipped as the
+default.
 
 ## Order of work
 
 1. **Detection and storage** (ours, deterministic): segment math regions from the text layer, store them
-   with their boxes and Unicode, index them, and cite them by box. A test proves a display equation in a
-   CCSDS PDF is found on the page it is on and stored with its glyphs.
+   with their boxes and Unicode, index them, and cite them by box. Shipped in 0.1.51–0.1.65; a test
+   proves a display equation in a CCSDS PDF is found on the page it is on and stored with its glyphs.
 2. **The transcriptions and the problem sentences**: each row of the table records the expected LaTeX
    *and* the sentence that introduces the formula, so "what does it solve" is measured with the formula.
+   Shipped, with nine rows.
 3. **OCR and the formula model** behind the two environment commands, with `source` and `confidence`
    recorded, and the `unrecognised` path tested — including that it never produces text it did not read.
-5. **Agent and panel**: `knowledge.search` returns formulas as their own hits with the box citation, and
-   a formula is quoted with its page so a person can check the pixels.
+   OCR shipped behind the configured engine; the formula model (`STKCRAFT_FORMULA_RECOGNIZER`) is not
+   built.
+4. **Agent and panel** — the search side shipped: `knowledge.search` returns formulas as their own hits
+   with the box citation (`FormulaHit`), and MCP serves them. What remains is the panel showing a
+   formula as a place a person can open.

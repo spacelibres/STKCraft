@@ -27,22 +27,23 @@
 
 use std::path::{Path, PathBuf};
 
+use stkcraft_framework_storage::transcripts;
+
 use serde::{Deserialize, Serialize};
 
-use crate::{Message, ToolCall};
+use crate::{Message, ToolCall, Usage};
 
 /// How many characters of conversation to keep before dropping the oldest turns.
 ///
-/// A token is around four characters of English and less of Chinese; 120 000 characters is roughly
-/// 30 000 tokens, which leaves room in a 64 k-token window for the system prompt, the skills a model
-/// may read, and a long tool result.
+/// This is a Unicode character heuristic, including opaque reasoning and tool payloads. It is not
+/// a token count or a claim about the selected model's context limit.
 pub const CONTEXT_BUDGET_CHARS: usize = 120_000;
 
 /// How many turns survive a compaction, at least.
 pub const KEEP_TURNS: usize = 6;
 
 /// One message as it is stored: a tagged JSON object, so the file reads as a transcript.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Stored {
     /// The instruction the model starts from.
@@ -55,6 +56,13 @@ enum Stored {
         text: String,
         /// The calls it asked for.
         calls: Vec<StoredCall>,
+        /// Opaque provider replay state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_content: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<Usage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        finish_reason: Option<String>,
     },
     /// A tool's answer.
     Tool {
@@ -110,7 +118,16 @@ impl From<&Message> for Stored {
             Message::System(text) => Self::System(text.clone()),
             Message::Summary(text) => Self::Summary(text.clone()),
             Message::User(text) => Self::User(text.clone()),
-            Message::Assistant { text, calls } => Self::Assistant {
+            Message::Assistant {
+                text,
+                calls,
+                reasoning_content,
+                usage,
+                finish_reason,
+            } => Self::Assistant {
+                reasoning_content: reasoning_content.clone(),
+                usage: usage.clone(),
+                finish_reason: finish_reason.clone(),
                 text: text.clone(),
                 calls: calls
                     .iter()
@@ -136,7 +153,16 @@ impl Stored {
             Self::System(text) => Some(Message::System(text)),
             Self::Summary(text) => Some(Message::Summary(text)),
             Self::User(text) => Some(Message::User(text)),
-            Self::Assistant { text, calls } => Some(Message::Assistant {
+            Self::Assistant {
+                text,
+                calls,
+                reasoning_content,
+                usage,
+                finish_reason,
+            } => Some(Message::Assistant {
+                usage,
+                finish_reason,
+                reasoning_content,
                 text,
                 calls: calls
                     .into_iter()
@@ -178,9 +204,10 @@ impl Session {
     /// A message when the directory cannot be created.
     pub fn create(directory: &Path) -> Result<Self, String> {
         let id = session_id();
-        let path = directory.join(format!("{id}.jsonl"));
-        std::fs::create_dir_all(directory)
-            .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+        let path = stkcraft_framework_storage::transcripts::path(directory, &id)
+            .map_err(|error| format!("{error}"))?;
+        stkcraft_framework_storage::transcripts::ensure_directory(directory)
+            .map_err(|error| format!("{error}"))?;
         let now = session_id();
         Ok(Self {
             id,
@@ -205,9 +232,10 @@ impl Session {
     ///
     /// A message when the directory or the file cannot be read.
     pub fn open(directory: &Path, id: &str) -> Result<Self, String> {
-        let path = directory.join(format!("{id}.jsonl"));
-        let text = std::fs::read_to_string(&path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        let path = stkcraft_framework_storage::transcripts::path(directory, id)
+            .map_err(|error| format!("{error}"))?;
+        let text = stkcraft_framework_storage::transcripts::read(&path)
+            .map_err(|error| format!("{error}"))?;
         let mut messages = Vec::new();
         let mut meta = Meta::default();
         for line in text.lines() {
@@ -215,6 +243,32 @@ impl Session {
                 continue;
             }
             let Ok(stored) = serde_json::from_str::<Stored>(line) else {
+                // Preserve the truncated-line recovery policy, but never silently discard a
+                // complete assistant record whose opaque protocol state is the wrong type.
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+                    && let Some(reasoning) = value
+                        .get("assistant")
+                        .and_then(|assistant| assistant.get("reasoning_content"))
+                    && !reasoning.is_null()
+                    && !reasoning.is_string()
+                {
+                    return Err("stored assistant reasoning_content must be a string or null; use an intact session".to_owned());
+                }
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+                    && let Some(assistant) = value.get("assistant")
+                {
+                    if assistant.get("usage").is_some_and(|usage| {
+                        !usage.is_null() && serde_json::from_value::<Usage>(usage.clone()).is_err()
+                    }) {
+                        return Err("stored assistant usage must contain unsigned integer counters; use an intact session".to_owned());
+                    }
+                    if assistant
+                        .get("finish_reason")
+                        .is_some_and(|reason| !reason.is_null() && !reason.is_string())
+                    {
+                        return Err("stored assistant finish_reason must be a string or null; use an intact session".to_owned());
+                    }
+                }
                 continue;
             };
             // The last `Meta` line wins: the file is a log, and the newest statement about the
@@ -249,20 +303,8 @@ impl Session {
     /// The ids of the sessions in a directory, newest first.
     #[must_use]
     pub fn list(directory: &Path) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(directory) else {
-            return Vec::new();
-        };
-        let mut ids: Vec<String> = entries
-            .flatten()
-            .filter_map(|entry| {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                name.strip_suffix(".jsonl").map(str::to_owned)
-            })
-            .collect();
-        // The id is a timestamp, so the reverse order is newest first.
-        ids.sort();
-        ids.reverse();
-        ids
+        // The id is a timestamp, so the storage crate's reverse order is newest first.
+        stkcraft_framework_storage::transcripts::list(directory)
     }
 
     /// Append a message: to the conversation and to the file.
@@ -272,7 +314,6 @@ impl Session {
     /// A message when the transcript cannot be written. The conversation keeps the message either
     /// way — a failed write costs the resume, not the answer.
     pub fn record(&mut self, message: Message) -> Result<(), String> {
-        use std::io::Write as _;
         // The title is the first thing the person asked: a session list of timestamps tells nobody
         // which conversation is which.
         if self.meta.title.is_none()
@@ -284,20 +325,14 @@ impl Session {
         self.meta.updated = session_id();
         let line = serde_json::to_string(&Stored::from(&message))
             .map_err(|error| format!("could not serialise a message: {error}"))?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|error| format!("could not open {}: {error}", self.path.display()))?;
-        writeln!(file, "{line}")
-            .map_err(|error| format!("could not write {}: {error}", self.path.display()))?;
+        transcripts::append_line(&self.path, &line).map_err(|error| format!("{error}"))?;
         if let Ok(meta) = serde_json::to_string(&Stored::Meta {
             created: self.meta.created.clone(),
             updated: self.meta.updated.clone(),
             title: self.meta.title.clone(),
             scenario: self.meta.scenario.clone(),
         }) {
-            let _ = writeln!(file, "{meta}");
+            let _ = transcripts::append_line(&self.path, &meta);
         }
         self.messages.push(message);
         Ok(())
@@ -314,17 +349,9 @@ impl Session {
 
     /// Append one stored line to the transcript.
     fn write_stored(&mut self, stored: &Stored) -> Result<(), String> {
-        use std::io::Write as _;
         let line = serde_json::to_string(stored)
             .map_err(|error| format!("could not serialise a transcript line: {error}"))?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|error| format!("could not open {}: {error}", self.path.display()))?;
-        writeln!(file, "{line}")
-            .map_err(|error| format!("could not write {}: {error}", self.path.display()))?;
-        Ok(())
+        transcripts::append_line(&self.path, &line).map_err(|error| format!("{error}"))
     }
 
     /// How many characters of conversation the messages hold, which is the budget's unit.
@@ -332,20 +359,8 @@ impl Session {
     pub fn characters(&self) -> usize {
         self.messages
             .iter()
-            .map(|message| match message {
-                Message::System(text) | Message::Summary(text) | Message::User(text) => {
-                    text.chars().count()
-                }
-                Message::Assistant { text, calls } => {
-                    text.chars().count()
-                        + calls
-                            .iter()
-                            .map(|call| call.name.len() + call.arguments.to_string().len())
-                            .sum::<usize>()
-                }
-                Message::Tool { content, .. } => content.chars().count(),
-            })
-            .sum()
+            .map(crate::message_characters)
+            .fold(0usize, usize::saturating_add)
     }
 
     /// Drop the oldest turns until the conversation fits the budget.
@@ -442,40 +457,20 @@ impl Session {
 }
 
 /// A session id from the clock: sortable, readable, and unique enough for one person's history.
+///
+/// The conversion goes through `chrono`; the suite rule is that no crate hand-rolls the calendar,
+/// and the storage crate formats the same clock for its rows. A clock outside chrono's range keeps
+/// the epoch sentinel rather than a wrapped date.
 #[must_use]
 pub fn session_id() -> String {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
-    let days = seconds / 86_400;
-    let of_day = seconds % 86_400;
-    let (year, month, day) = crate::session::civil_from_days(i64::try_from(days).unwrap_or(0));
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}-{:02}-{:02}",
-        of_day / 3_600,
-        (of_day % 3_600) / 60,
-        of_day % 60
+    let seconds = i64::try_from(seconds).unwrap_or(i64::MAX);
+    chrono::DateTime::from_timestamp(seconds, 0).map_or_else(
+        || "1970-01-01T00-00-00".to_owned(),
+        |instant| instant.format("%Y-%m-%dT%H-%M-%S").to_string(),
     )
-}
-
-/// Days since 1970-01-01 to a Gregorian date, after Hinnant's `civil_from_days`.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_piece = (5 * day_of_year + 2) / 153;
-    let day = u32::try_from(day_of_year - (153 * month_piece + 2) / 5 + 1).unwrap_or(1);
-    let month = u32::try_from(if month_piece < 10 {
-        month_piece + 3
-    } else {
-        month_piece - 9
-    })
-    .unwrap_or(1);
-    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 #[cfg(test)]
@@ -497,6 +492,9 @@ mod tests {
             .expect("recorded");
         session
             .record(Message::Assistant {
+                usage: None,
+                finish_reason: None,
+                reasoning_content: None,
                 text: String::new(),
                 calls: vec![ToolCall {
                     id: "call-1".to_owned(),
@@ -513,10 +511,128 @@ mod tests {
             .expect("recorded");
         session
             .record(Message::Assistant {
+                usage: None,
+                finish_reason: None,
+                reasoning_content: None,
                 text: "45 degrees".to_owned(),
                 calls: Vec::new(),
             })
             .expect("recorded");
+    }
+
+    #[test]
+    fn malformed_stored_usage_is_rejected_instead_of_dropping_history() {
+        let directory = scratch("stkcraft-invalid-usage");
+        std::fs::create_dir_all(&directory).expect("directory");
+        std::fs::write(directory.join("invalid.jsonl"), r#"{"assistant":{"text":"answer","calls":[],"usage":{"prompt_tokens":-1,"completion_tokens":0,"total_tokens":0}}}"#).expect("write");
+        let error = Session::open(&directory, "invalid").expect_err("metadata error");
+        assert!(error.contains("usage"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn malformed_stored_reasoning_does_not_silently_drop_an_assistant() {
+        let directory = scratch("stkcraft-session-invalid-reasoning");
+        std::fs::write(directory.join("invalid.jsonl"),r#"{"assistant":{"text":"public","calls":[],"reasoning_content":{"secret":"private"}}}"#).expect("write");
+        let error = Session::open(&directory, "invalid").expect_err("invalid protocol state");
+        assert!(error.contains("reasoning_content"));
+        assert!(!error.contains("private"));
+    }
+
+    #[test]
+    fn old_and_new_assistant_records_round_trip_without_changing_tags() {
+        let old: Stored =
+            serde_json::from_str(r#"{"assistant":{"text":"old","calls":[]}}"#).expect("old");
+        let message = old.into_message().expect("message");
+        assert!(matches!(
+            message,
+            Message::Assistant {
+                usage: None,
+                finish_reason: None,
+                reasoning_content: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            serde_json::to_value(Stored::from(&message)).expect("json"),
+            serde_json::json!({"assistant":{"text":"old","calls":[]}})
+        );
+        for reasoning in [None, Some(String::new()), Some(" private 雪\n".to_owned())] {
+            let message = Message::Assistant {
+                text: "answer".into(),
+                calls: vec![],
+                usage: None,
+                finish_reason: None,
+                reasoning_content: reasoning,
+            };
+            let encoded = serde_json::to_string(&Stored::from(&message)).expect("encode");
+            let read: Stored = serde_json::from_str(&encoded).expect("decode");
+            assert_eq!(read.into_message(), Some(message));
+        }
+    }
+
+    #[test]
+    fn reasoning_and_unicode_identifiers_count_toward_compaction_and_retained_fields_survive() {
+        let directory = scratch("stkcraft-session-reasoning-budget");
+        let mut session = Session::create(&directory).expect("session");
+        let payload = Message::Assistant {
+            text: "字".into(),
+            usage: None,
+            finish_reason: None,
+            reasoning_content: Some("秘".repeat(CONTEXT_BUDGET_CHARS)),
+            calls: vec![ToolCall {
+                id: "号".into(),
+                name: "名".into(),
+                arguments: json!({}),
+            }],
+        };
+        assert_eq!(
+            crate::message_characters(&payload),
+            CONTEXT_BUDGET_CHARS + 5
+        );
+        session.record(Message::System("s".into())).expect("record");
+        session.record(Message::User("old".into())).expect("record");
+        session.record(payload).expect("record");
+        for index in 0..KEEP_TURNS {
+            session
+                .record(Message::User(index.to_string()))
+                .expect("record");
+            session
+                .record(Message::Assistant {
+                    text: "a".into(),
+                    calls: vec![],
+                    usage: None,
+                    finish_reason: None,
+                    reasoning_content: Some(format!("retained {index}")),
+                })
+                .expect("record");
+        }
+        assert!(session.characters() > CONTEXT_BUDGET_CHARS);
+        assert!(session.compact() > 0);
+        assert_eq!(
+            session
+                .messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    Message::Assistant {
+                        usage: None,
+                        finish_reason: None,
+                        reasoning_content: Some(_),
+                        ..
+                    }
+                ))
+                .count(),
+            KEEP_TURNS
+        );
+        assert!(matches!(session.messages.get(2), Some(Message::User(_))));
+        assert_eq!(
+            crate::message_characters(&Message::Tool {
+                call_id: "号".into(),
+                content: "字".into()
+            }),
+            2
+        );
     }
 
     #[test]
@@ -585,6 +701,9 @@ mod tests {
                 .expect("recorded");
             session
                 .record(Message::Assistant {
+                    usage: None,
+                    finish_reason: None,
+                    reasoning_content: None,
                     text: format!("answer {index}"),
                     calls: Vec::new(),
                 })
@@ -654,6 +773,9 @@ mod tests {
                 .expect("recorded");
             session
                 .record(Message::Assistant {
+                    usage: None,
+                    finish_reason: None,
+                    reasoning_content: None,
                     text: format!("answer {index}"),
                     calls: Vec::new(),
                 })

@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 mod api_docs;
+mod downloads;
 mod i18n;
 mod layers;
 mod translate;
@@ -137,12 +138,7 @@ Tasks:
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
   verify-formulas  re-extract every recorded formula, re-classify, fail on drift
-  standards download every CCSDS publication, verified (the set we align to)
-  naif      download NAIF's required reading, verified (the algorithms behind the standards)
-  math-regions  print the formula regions of a PDF as TSV, for the transcription table
-  formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
-  mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
-  verify-formulas  re-extract every recorded formula, re-classify, fail on drift
+  release   tag the version and print the command that publishes it (`release` checks the changelog)
   fetch-data  download the ephemeris kernels and tables, verified
   lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
@@ -396,47 +392,29 @@ fn task_assets() -> Result<(), String> {
         .map_err(|e| format!("could not read ATTRIBUTION.md: {e}"))?;
 
     let skip_directories = ignored_directories(&root);
+    // Match the whole repository-relative path, not the file name: a row for `icon.png` must not
+    // attribute an unrelated `app-icon.png`, and a row that names the wrong directory is a row that
+    // does not describe the file it claims to.
+    let referenced = attribution_paths(&attribution);
     let mut missing = Vec::new();
     let mut counted = 0_usize;
     collect_assets(&root, &skip_directories, &mut |path| {
         counted += 1;
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_owned();
-        if !attribution.contains(&name) {
-            let relative = path
-                .strip_prefix(&root)
-                .unwrap_or(path)
-                .display()
-                .to_string();
+        let relative = path
+            .strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if !referenced.iter().any(|row| row == &relative) {
             missing.push(relative);
         }
     })?;
 
     // An attribution row must name a file that exists, or the table rots.
-    let known: Vec<String> = collect_asset_names(&root)?;
     let mut orphaned = Vec::new();
-    for line in attribution.lines() {
-        let Some(cell) = line.trim().strip_prefix('|') else {
-            continue;
-        };
-        // Asset rows start with a backticked path.
-        let Some(start) = cell.find('`') else {
-            continue;
-        };
-        let rest = cell.get(start + 1..).unwrap_or_default();
-        let Some(end) = rest.find('`') else {
-            continue;
-        };
-        let referenced = &rest[..end];
-        if referenced.is_empty() || referenced.eq_ignore_ascii_case("path") {
-            continue;
-        }
-        let file = referenced.rsplit('/').next().unwrap_or(referenced);
-        if !known.iter().any(|k| k == file) {
-            orphaned.push(referenced.to_owned());
+    for path in &referenced {
+        if !root.join(path).is_file() {
+            orphaned.push(path.clone());
         }
     }
 
@@ -459,31 +437,56 @@ fn task_assets() -> Result<(), String> {
     }
 }
 
-fn collect_asset_names(root: &Path) -> Result<Vec<String>, String> {
-    let skip = ignored_directories(root);
-    let mut names = Vec::new();
-    collect_assets(root, &skip, &mut |path| {
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            names.push(name.to_owned());
+/// The asset paths an attribution table names, normalised to repository-relative form.
+fn attribution_paths(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        let Some(cell) = line.trim().strip_prefix('|') else {
+            continue;
+        };
+        // Asset rows start with a backticked path.
+        let Some(start) = cell.find('`') else {
+            continue;
+        };
+        let rest = cell.get(start + 1..).unwrap_or_default();
+        let Some(end) = rest.find('`') else {
+            continue;
+        };
+        let referenced = rest.get(..end).unwrap_or_default().trim();
+        if referenced.is_empty() || referenced.eq_ignore_ascii_case("path") {
+            continue;
         }
-    })?;
-    Ok(names)
+        paths.push(referenced.replace('\\', "/"));
+    }
+    paths
 }
 
 /// The directory names a `.gitignore` at the workspace root tells git to ignore.
 ///
-/// Only plain entries are read — a line with no wildcard and a trailing slash, e.g. `plan/`. A
-/// pattern with a wildcard could match anything and is left to git; this is not a `.gitignore`
-/// implementation, it is enough to keep local scratch directories out of the asset table.
+/// Only plain entries are read. `git` accepts `/plan`, `plan/` and `/plan/` for the same directory,
+/// and this repository uses all three spellings: `.gitignore` writes `/plan` and `/data/`, while an
+/// author reasonably writes `plan/`. Reading only the trailing-slash form silently kept `plan/`
+/// (the local notebook `AGENTS.md` says is not part of the repository) in the asset table, so a
+/// screenshot parked there failed `cargo xtask assets` — a gate that failed on exactly the files it
+/// says are out of scope. A pattern with a wildcard could match anything, and one with an interior
+/// slash could name a nested path this one-level check would misread; both are left to git. This is
+/// not a `.gitignore` implementation, it is enough to keep local scratch directories out.
 fn ignored_directories(root: &Path) -> Vec<String> {
     let Ok(text) = fs::read_to_string(root.join(".gitignore")) else {
         return Vec::new();
     };
+    ignored_directory_names(&text)
+}
+
+/// The directory entries of a `.gitignore`, normalised to bare names.
+fn ignored_directory_names(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .filter(|line| line.ends_with('/') && !line.contains('*') && !line.contains('!'))
-        .map(|line| line.trim_end_matches('/').to_owned())
+        .filter(|line| !line.contains('*') && !line.contains('!'))
+        .map(|line| line.trim_matches('/'))
+        .filter(|name| !name.is_empty() && !name.contains('/'))
+        .map(str::to_owned)
         .collect()
 }
 
@@ -718,14 +721,14 @@ fn write_version(root: &Path, text: &str, new: &str) -> Result<(), String> {
     run_cargo(&["update", "--workspace", "--offline"])
 }
 
-/// Tag the current version and push the tag, then leave the GitHub release to `gh`.
+/// Tag the current version and push the tag, and tell the maintainer whether a Release is due.
 ///
-/// The tag is the release in the sibling Craft apps: every version carries one, and a version
-/// without one is a version nobody can check out. This command makes that mechanical rather than
-/// remembered: it refuses when `CHANGELOG.md`'s newest section is not the workspace version (so a
-/// tag cannot point at a section that does not exist), creates the annotated tag if it is missing,
-/// and pushes it. `gh release create <tag> --title "STKCraft <tag>" --generate-notes` is the
-/// remaining step and is printed rather than run, so this works on a machine without `gh`.
+/// Every version carries a tag, because a version without one is a version nobody can check out.
+/// Only a **stable** version — 1.0.0 or later with no pre-release suffix — gets a GitHub Release;
+/// the 0.x development records are tags and nothing else. The command refuses when `CHANGELOG.md`'s
+/// newest section is not the workspace version (so a tag cannot point at a section that does not
+/// exist), creates the annotated tag if it is missing, and pushes it. The `gh release create` line
+/// is printed only for a stable version, and printed rather than run so this works without `gh`.
 fn tag_release(root: &Path) -> Result<(), String> {
     let version = workspace_version(root)?;
     task_version_check()?;
@@ -750,8 +753,38 @@ fn tag_release(root: &Path) -> Result<(), String> {
         println!("tagged {tag}");
     }
     run_git(root, &["push", "origin", &tag])?;
-    println!("next: gh release create {tag} --title \"STKCraft {tag}\" --generate-notes");
+    if is_stable_version(&version) {
+        println!(
+            "stable release: next: gh release create {tag} --title \"STKCraft {tag}\" --generate-notes"
+        );
+    } else {
+        println!(
+            "{tag} is a development version: tagged, no GitHub Release. Only a stable version \
+             (1.0.0 or later, no -rc/-alpha suffix) gets a Release."
+        );
+    }
     Ok(())
+}
+
+/// Whether a version is stable enough for a GitHub Release.
+///
+/// The 0.x series is development by `SemVer`'s own definition: every version is tagged so it can be
+/// checked out, but a Release implies "this is the version to use", which 0.x does not promise.
+/// A pre-release suffix (`-rc.1`, `-alpha`) is a tag for the same reason. Build metadata (`+…`)
+/// does not make a version unstable.
+fn is_stable_version(text: &str) -> bool {
+    let without_build = text.split('+').next().unwrap_or_default();
+    let core = without_build.split('-').next().unwrap_or_default();
+    let mut parts = core.split('.');
+    let (Some(major), Some(_minor), Some(_patch), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    let Ok(major) = major.parse::<u32>() else {
+        return false;
+    };
+    major >= 1 && !without_build.contains('-')
 }
 
 /// A `.gitignore`d directory of fetched data, and the files that belong in it with their checksums.
@@ -1301,7 +1334,7 @@ fn task_fetch_standards(args: &[String]) -> Result<(), String> {
         .zip(urls.iter())
         .map(|((name, hash, _), url)| (*name, url.as_str(), *hash))
         .collect();
-    let (fetched, verified, bytes) = fetch_verified(&entries, &directory, jobs, force)?;
+    let (fetched, verified, bytes) = downloads::fetch_verified(&entries, &directory, jobs, force)?;
     println!(
         "standards: {} file(s), {fetched} fetched, {verified} already present, {} on disk",
         STANDARD_FILES.len(),
@@ -4263,20 +4296,48 @@ fn run_curl(
     Ok(())
 }
 
-/// The lower-case hex SHA-256 of a file, computed with `sha256sum`.
+/// The lower-case hex SHA-256 of an ordinary file, streamed with bounded memory.
 fn sha256_of(path: &Path) -> Result<String, String> {
-    let output = std::process::Command::new("sha256sum")
-        .arg(path)
-        .output()
-        .map_err(|error| format!("could not run sha256sum: {error}"))?;
-    if !output.status.success() {
-        return Err(format!("sha256sum failed for {}", path.display()));
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    use std::io::Read;
+
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("could not inspect {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("not a regular file: {}", path.display()));
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.split_whitespace()
-        .next()
-        .map(str::to_owned)
-        .ok_or_else(|| "sha256sum printed nothing".to_owned())
+    let mut file = fs::File::open(path)
+        .map_err(|error| format!("could not open {}: {error}", path.display()))?;
+    if !file
+        .metadata()
+        .map_err(|error| format!("could not inspect {}: {error}", path.display()))?
+        .is_file()
+    {
+        return Err(format!("not a regular file: {}", path.display()));
+    }
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = match file.read(&mut buffer) {
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(format!("could not read {}: {error}", path.display())),
+        };
+        if count == 0 {
+            break;
+        }
+        let bytes = buffer
+            .get(..count)
+            .ok_or_else(|| format!("invalid read length for {}", path.display()))?;
+        hasher.update(bytes);
+    }
+    let mut hex = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        write!(&mut hex, "{byte:02x}")
+            .map_err(|error| format!("could not format SHA-256: {error}"))?;
+    }
+    Ok(hex)
 }
 
 /// Run `git` in the workspace root and fail with its output if it does.
@@ -4310,6 +4371,101 @@ fn validate_version(text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_stable_version_gets_a_github_release() {
+        // The 0.x series is a development record: tag it, do not publish a Release.
+        assert!(!is_stable_version("0.1.88"));
+        assert!(!is_stable_version("1.0.0-rc.1"));
+        assert!(!is_stable_version("1.0.0-alpha"));
+        // A stable version may carry build metadata; that does not make it a pre-release.
+        assert!(is_stable_version("1.0.0"));
+        assert!(is_stable_version("1.2.3+build.7"));
+    }
+
+    #[test]
+    fn attribution_rows_are_read_as_paths_not_names() {
+        let table = "| Path | Title |\n|---|---|\n\
+                     | `assets/app-icon/albatross.png` | mark |\n\
+                     | `docs/images/viewport.png` | shot |\n";
+        assert_eq!(
+            attribution_paths(table),
+            ["assets/app-icon/albatross.png", "docs/images/viewport.png"]
+        );
+    }
+
+    #[test]
+    fn gitignore_directory_entries_are_read_in_every_spelling() {
+        // Git treats `/plan`, `plan/` and `/plan/` alike; the asset gate must too, or the local
+        // notebook `AGENTS.md` describes fails the release check.
+        let names = ignored_directory_names(
+            "# a comment\n/target\nplan/\n/data/\n/craft-fonts\n*.bsp\n/dist\n/sub/dir\n",
+        );
+        assert_eq!(names, ["target", "plan", "data", "craft-fonts", "dist"]);
+    }
+
+    #[test]
+    fn sha256_handles_spaces_and_unicode_paths() -> Result<(), String> {
+        let directory =
+            std::env::temp_dir().join(format!("stkcraft sha256 星 {}", std::process::id()));
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let path = directory.join("known bytes 星.txt");
+        fs::write(&path, b"abc").map_err(|error| error.to_string())?;
+        let actual = sha256_of(&path);
+        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        // NIST FIPS 180-4 SHA-256 example message "abc".
+        assert_eq!(
+            actual.as_deref(),
+            Ok("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_matches_empty_and_multi_buffer_vectors() -> Result<(), String> {
+        let directory =
+            std::env::temp_dir().join(format!("stkcraft-hash-vectors-{}", std::process::id()));
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let empty = directory.join("empty");
+        let million_a = directory.join("million-a");
+        fs::write(&empty, b"").map_err(|error| error.to_string())?;
+        fs::write(&million_a, vec![b'a'; 1_000_000]).map_err(|error| error.to_string())?;
+        let empty_hash = sha256_of(&empty);
+        let million_a_hash = sha256_of(&million_a);
+        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        // SHA-256 standard vectors: empty message and NIST's one million ASCII 'a' bytes.
+        assert_eq!(
+            empty_hash.as_deref(),
+            Ok("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+        assert_eq!(
+            million_a_hash.as_deref(),
+            Ok("cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_rejects_missing_files_and_directories() -> Result<(), String> {
+        let directory =
+            std::env::temp_dir().join(format!("stkcraft-hash-invalid-{}", std::process::id()));
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let missing = sha256_of(&directory.join("missing"));
+        let not_file = sha256_of(&directory);
+        fs::remove_dir_all(&directory).map_err(|error| error.to_string())?;
+        assert!(matches!(missing, Err(error) if error.contains("could not inspect")));
+        assert!(matches!(not_file, Err(error) if error.contains("not a regular file")));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sha256_rejects_devices_before_reading() {
+        assert!(matches!(
+            sha256_of(Path::new("/dev/zero")),
+            Err(error) if error.contains("not a regular file")
+        ));
+    }
 
     #[test]
     fn the_smallest_component_is_the_one_that_moves() {

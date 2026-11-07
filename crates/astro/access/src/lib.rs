@@ -1,8 +1,12 @@
-//! Access and coverage geometry for `STKCraft`.
+//! Access geometry for `STKCraft`: line of sight, sensors and visibility windows.
 //!
 //! This is the layer that answers the question the product exists to answer: **when can this
 //! satellite see that ground station, and for how long.** Everything here is a pure function
 //! of positions and a time interval; nothing knows about orbits, files or windows.
+//!
+//! Coverage analysis — a grid or a region evaluated over time — is a separate layer that is not
+//! built yet. This crate computes the visibility predicate and the windows, which is what a
+//! coverage grid will call; it does not compute percentages.
 //!
 //! The pieces, in dependency order:
 //!

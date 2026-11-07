@@ -322,6 +322,16 @@ fn parse_vertices(points: &str) -> Result<Vec<GroundSite>> {
         let longitude: f64 = longitude
             .parse()
             .map_err(|_| Error::invalid("points", format!("`{longitude}` is not a number")))?;
+        if vertices.len() >= crate::scenario::MAX_TARGET_VERTICES {
+            return Err(Error::invalid(
+                "points",
+                format!(
+                    "corner {} is past the maximum of {}",
+                    index + 1,
+                    crate::scenario::MAX_TARGET_VERTICES
+                ),
+            ));
+        }
         vertices.push(GroundSite::new(
             Angle::from_deg(latitude),
             Angle::from_deg(longitude),

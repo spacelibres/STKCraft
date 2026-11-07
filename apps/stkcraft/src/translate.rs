@@ -236,6 +236,7 @@ mod tests {
             Ok(stkcraft_agent_runtime::Turn {
                 text: self.answer.clone(),
                 calls: Vec::new(),
+                ..stkcraft_agent_runtime::Turn::default()
             })
         }
     }

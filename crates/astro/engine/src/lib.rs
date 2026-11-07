@@ -18,9 +18,9 @@
 //!
 //! # Not yet built
 //!
-//! There is no persistence beyond serde, no undo, no control channel and no UI. The command
-//! table exists and is exercised by tests through the same dispatch path a menu will use; the
-//! transports that will consume it do not exist.
+//! There is no undo. The command table is exercised through the same dispatch path the window,
+//! CLI, control channel and MCP server use; those transports live in their own crates and reach
+//! the engine only through the registry.
 
 #![deny(
     clippy::unwrap_used,

@@ -74,8 +74,24 @@ pub fn macro_calls(text: &str) -> Vec<(Option<String>, Vec<String>)> {
             continue;
         }
         match character {
-            '"' | '\'' => {
-                in_literal = Some(character);
+            '"' => {
+                in_literal = Some('"');
+                continue;
+            }
+            '\'' => {
+                // A lifetime is not a character literal. `&'static str` used to put the scanner
+                // into a "character literal" that never closed on that line, so every `tr!` after
+                // it was invisible to the extractor — the string was in the source and not in any
+                // catalog. A character literal closes one character later; a lifetime continues
+                // with an identifier.
+                let mut look = characters.clone();
+                let next = look.next().map(|(_, next)| next);
+                let after = look.next().map(|(_, next)| next);
+                let lifetime = next.is_some_and(|next| next.is_alphanumeric() || next == '_')
+                    && after != Some('\'');
+                if !lifetime {
+                    in_literal = Some('\'');
+                }
                 continue;
             }
             '/' if characters.peek().is_some_and(|(_, next)| *next == '/') => {
@@ -301,6 +317,21 @@ fn string_literals(text: &str) -> Vec<String> {
 #[allow(clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lifetime_does_not_hide_the_calls_after_it() {
+        let text = r#"
+            fn label(value: &'static str) -> &'static str {
+                let _ = tr!(translations, locale, "Clock");
+                value
+            }
+        "#;
+        let sources = sources(text);
+        assert_eq!(
+            sources.first().map(|source| source.text.as_str()),
+            Some("Clock")
+        );
+    }
 
     #[test]
     fn the_three_macros_are_extracted_with_their_context() {

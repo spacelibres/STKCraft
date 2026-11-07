@@ -353,7 +353,7 @@ pub fn screenshot_through_egui(app: &App, path: &str) -> Result<(), String> {
 fn render_output(
     gpu: &Gpu,
     context: &egui::Context,
-    output: egui::FullOutput,
+    mut output: egui::FullOutput,
 ) -> Result<Vec<u8>, String> {
     let pixels_per_point = output.pixels_per_point;
     let primitives = context.tessellate(output.shapes, pixels_per_point);
@@ -379,6 +379,9 @@ fn render_output(
             renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
         }
     }
+    // This one-frame renderer owns the uploaded textures and drops them after readback.
+    // The pinned egui fork requires explicit consumption even when the renderer is disposable.
+    output.textures_delta.clear();
 
     let (color_texture, depth_texture) = gpu.targets();
     let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -478,6 +481,18 @@ pub fn screenshot_panels(app: &mut App, path: &str) -> Result<(), String> {
     let verdict = assert_panels_rendered(&rgb);
     write_rgb(&rgb, path)?;
     verdict
+}
+
+/// Paint an actual scripted UI frame for opt-in inspection without a model or credential.
+#[cfg(test)]
+pub(crate) fn scripted_ui(
+    context: &egui::Context,
+    output: egui::FullOutput,
+    path: &str,
+) -> Result<(), String> {
+    let gpu = Gpu::open()?;
+    let rgb = render_output(&gpu, context, output)?;
+    write_rgb(&rgb, path)
 }
 
 /// Space, as a byte per channel, for the checks that need to build a blank image.

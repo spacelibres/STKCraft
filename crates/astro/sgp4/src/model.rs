@@ -663,7 +663,12 @@ impl Satellite {
         mm += self.no_unkozai * templ;
         let xlm = mm + argpm + nodem;
         let emsq = em * em;
-        debug_assert!(emsq.is_finite());
+        // A `debug_assert!` here would be a panic in every debug build, which the never-crash rule
+        // forbids in production code. The range check above makes this unreachable today; if a
+        // future change weakens it, this returns the same error as its neighbours instead.
+        if !emsq.is_finite() {
+            return Err(PropagationError::MeanElementsOutOfFamily.into());
+        }
         // The C++ implementation keeps `temp = 1.0 - emsq` here for later use; this crate
         // computes the short-period terms directly, so the value is not needed.
         nodem %= TWO_PI;

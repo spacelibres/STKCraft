@@ -9,6 +9,258 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.88] — The albatross mark, a reachable command surface, and a gate that reads the notebook
+
+### Added
+
+- The project's albatross mark, in the family's `assets/app-icon/` layout: the SVG master, the 512 px
+  PNG the window embeds, the Windows ICO, and their README/LICENSE. The window icon and the panel
+  heading now carry it, and `README.md` opens with it. The mark is the project's own artwork, not
+  covered by the code licence.
+- `stkcraft commands` lists every command id, its parameters and its menu; `stkcraft run <id>` runs any
+  of them against an empty or loaded scenario, with `--scenario`, `--write`, `--json` and
+  `--<parameter>`. A scenario document is validated, bounded to 16 MiB, and written back on request.
+- A window menu generated from the registry's own `menu_path`, with a small parameter form for
+  commands that need one, and `Ctrl+Shift+A` for `access.compute`. A menu click is the only path that
+  starts an interactive sequence.
+- `stkcraft-framework-storage::transcripts`: session files are opened, read, appended and listed by
+  the storage crate, which validates a session id as a file name and bounds a transcript to 64 MiB
+  before reading it.
+- `Scenario::empty_at` and `Scenario::for_now`: a production path that cannot read the system clock
+  reports it instead of dating the mission to J2000.
+- `house-rules.yml` checks the AGENTS.md core and Rust blocks against craft-contrib; the gate now runs
+  Windows as well as Ubuntu, with the suite's craft-fonts pin.
+- MCP tools carry `x-enabled`, so a command whose precondition the scenario does not meet is
+  advertised as unavailable before a call.
+- `access.targets` returns the merged windows with UTC instants in the text and in
+  `structuredContent`; `Degrees` parameters carry `x-unit: degrees`.
+
+### Changed
+
+- The control channel's `engine.execute` returns the summary and every window the command computed,
+  through the same answer formatter the command line uses. A launcher is no longer told a count.
+- Interface text: the i18n extractor no longer mistakes `&'static str` lifetimes for character
+  literals (which had hidden every `tr!` after one), the command labels and the window's status,
+  result and diagnostic lines go through `tr!`/`trn!`, and 55 strings are extracted again.
+- `cargo xtask release` tags every version but prints a GitHub Release command only for a stable
+  version (1.0.0 or later, no pre-release suffix). The 0.x development record is tags and nothing
+  else; the 86 historical 0.x Releases were removed and all 94 tags kept.
+- The generated API reference keeps documentation lists and tables as Markdown blocks instead of
+  joining them into one line, and resolves no relative link into the source tree.
+- The asset gate matches whole repository-relative paths and reads `.gitignore` directory entries in
+  every spelling git accepts, so `plan/` no longer fails a check about what ships.
+- Calendar conversion in storage and the runtime goes through `chrono`; the two hand-written
+  `civil_from_days` copies are gone.
+
+### Fixed
+
+- A TLE field spelled `NaN`, `inf` or `-inf` is refused, and `Elements::from_tle` checks the mean
+  motion, BStar and the three angles for finiteness; a crafted element set can no longer become a
+  silent non-orbit.
+- A planetary access search is capped at ten million samples, like the Earth sampler; `hours: 1e12`
+  is an error instead of a hang.
+- A target is capped at 1024 vertices before any window search, in `add_target`, `validate` and the
+  `target.add` parser.
+- The control channel bounds one request line to 1 MiB before parsing it, and the DAF reader and
+  `julian_to_utc_naive` use checked arithmetic instead of wrapping.
+- A `debug_assert!` on the propagation path became a returned error; a debug build no longer panics
+  on the propagation path.
+- The API reference was stale (it still named 0.1.86 while the workspace was 0.1.87), so the gate
+  failed at HEAD; it is current again.
+- README, ROADMAP, standards, storage, mathematics, knowledge, CCSDS, sources, architecture and
+  CONTRIBUTING were corrected where they described a capability the code does not have, or a command
+  the CLI cannot run.
+
+### Not built yet
+
+- The release workflow and the platform packaging scripts; there is no installer, and
+  `contributors.json` is generated only by the shared `refresh-contributors` release job.
+- `target.add` still takes its corners as the `lat,lon;…` text form rather than a typed parameter.
+- Assistant failure messages, frame diagnostics and command parameter descriptions are English; the
+  catalogs cover the window chrome and the strings the window itself builds.
+- `ui.json` remains the family's configuration file written by the app, not a record table.
+- Coverage analysis, a browser shell, the extension store and DOCX/XLSX extraction remain unbuilt.
+
+### Verification
+
+- `cargo xtask ci` on Windows: fmt, clippy, tests, assets, i18n, api-docs, layers, wasm, version and
+  lockfile.
+- The command line was exercised end to end: `satellite.add`, `station.add` and `access.compute`
+  against a written scenario, with `--json` returning the windows.
+- The panel screenshot was rendered offscreen and inspected; the menu bar and the albatross are in it.
+- The house-rules checker passes against the craft-contrib main checkout.
+
+## [0.1.87] — Test OCR on Windows without a non-ASCII path; api reference check ignores line endings
+
+### Fixed
+
+- `ocr::tests::a_command_reads_a_page_and_its_output_is_the_text` failed on Windows. Its folder name
+  contained Chinese characters, which `cmd` printed through the console code page as replacement
+  characters, so the assertion failed on the codec rather than on the plumbing it checks. The folder is
+  now ASCII. The test still checks that the variables are passed and that standard output is the text.
+- `cargo xtask api-docs` reported `docs/api/en/index.md` as stale on any checkout that converts line
+  endings to CRLF (Windows with autocrlf), even when the content matched. The check now compares line
+  endings, so one committed page passes on every platform.
+
+### Not built yet
+
+- Nothing in this version adds a capability.
+
+### Verification
+
+Checked on Windows with `cargo xtask ci` run in a clean checkout of the previous commit: fmt, clippy,
+tests, assets, i18n and the api-docs step were the steps reached before this change; the api-docs
+failure is the one this version fixes. The OCR test passed in the knowledge crate after the change
+(84 passed, 0 failed). The complete gate must be run on the commit that contains this version.
+
+## [0.1.86] — Assistant rule numbering and the xtask help text
+
+### Fixed
+
+- The assistant's system prompt numbered two rules `2`, so the order of its rules was ambiguous. It now
+  numbers its rules 1 to 6, once each. The rules themselves are unchanged.
+- `cargo xtask help` listed six commands twice and did not list `release`. Each command now appears once,
+  and `release` is documented.
+
+### Not built yet
+
+- Nothing in this version adds a capability. The larger items that `docs/standards.md` and `ROADMAP.md`
+  mark as not built remain not built.
+
+### Verification
+
+This version was prepared in an environment without a Rust toolchain, so `cargo xtask ci` was not run
+against it. Each code change is a single string literal, checked by reading the diff. The version
+consistency check (newest changelog heading against `Cargo.toml`) was checked by hand.
+
+## [0.1.85] — Bounded model output and honest token accounting
+
+### Added
+
+- Configure total generated tokens with `stkcraft model --max-output-tokens N`, saved preferences
+  or `DEEPSEEK_MAX_OUTPUT_TOKENS`. DeepSeek connections default to 8192; generic connections keep
+  their previous request shape unless a cap is explicitly selected. Invalid caps fail before any
+  settings or credential changes.
+- Assistant session records retain optional provider usage and completion status. Answer telemetry
+  distinguishes known token totals, missing usage, failures and overflow, with summary requests
+  accounted separately. Cache and reasoning breakdowns remain optional; telemetry is not a billing
+  guarantee or an estimate of missing values.
+
+### Fixed
+
+- Responses stopped at the output limit cannot execute tool calls or appear as successful answers.
+  Malformed usage also fails validation before dispatch. Older sessions without metadata remain
+  readable, and local telemetry is never replayed as model message content.
+
+### Not built yet
+
+- Supervised transport cancellation, task scheduling and the two specialist execution domains are
+  the next programme stages. Scripted regressions establish protocol behaviour, not live model
+  quality or account availability.
+
+## [0.1.84] — Invalid saved model settings cannot select a different endpoint
+
+### Fixed
+
+- Model operations report malformed saved preferences instead of discarding the chosen endpoint
+  and model while retaining their credential. Wrong-type protocol/thinking fields now fail before
+  credential lookup, model initialization or configuration changes. Read-only inspection, key-only
+  updates and credential removal preserve the original files on failure.
+- The window can still open with default chrome, but saving those defaults cannot overwrite an
+  invalid saved connection. Configuration reads and writes have a 64 KiB bound; device/directory
+  inputs and growing oversized files are refused. Valid older files and unknown fields remain
+  compatible, and a missing file remains a fresh configuration.
+- The development-data guide uses absolute paths and all seven SPKs for the real-kernel reference
+  test, including a PowerShell example, so it actually exercises the complete 54-state comparison.
+
+## [0.1.83] — Explicit DeepSeek protocol and resumable tool thinking
+
+### Added
+
+- `stkcraft model --protocol deepseek|compatible --thinking enabled|disabled`, with matching
+  environment and saved settings, makes the wire protocol a deliberate choice. Saved settings
+  win over environment values; invalid modes are rejected before saving. Custom gateways keep
+  the original compatible request format unless explicitly opted into DeepSeek extensions.
+- DeepSeek reasoning fields survive tool rounds, final turns and local session resume without
+  becoming the answer, trace, summary or debug/error text. Enabled-mode tool responses missing
+  required protocol state fail before any tool executes; incompatible legacy thinking histories
+  are refused with a recovery choice instead of fabricated reasoning.
+
+### Changed
+
+- A fresh shipped configuration selects `deepseek-flash` with thinking explicitly disabled.
+  Existing saved model names are preserved. Developer translations share the provider adapter
+  and explicitly use ordinary mode; generic provider construction retains its old request shape.
+- Conversation-size accounting includes opaque reasoning and uses one saturating Unicode-aware
+  calculation for live and persisted messages.
+
+### Not built yet
+
+- This is protocol compatibility, verified with scripted models and request/session fixtures;
+  live model quality, usage accounting, output caps and cancellable bounded transport remain
+  separate stages. The runtime is still a single-model tool loop.
+
+## [0.1.82] — Assistant results preserve edits made while they run
+
+### Fixed
+
+- A completed assistant request is adopted only while the window still contains its original
+  scenario. Edits made through the window or control channel while inference runs are preserved;
+  an older result produces a visible conflict instead of silently replacing newer work.
+- A conflicted result is consumed once, and a new question can run against the current scenario.
+
+### Added
+
+- The specialist-agent architecture record defines separate product and development permissions,
+  task outcomes, evidence requirements and staged acceptance. The roadmap links it and uses the
+  generated command catalogue instead of an outdated manual command count. The multi-agent
+  executor remains future work; the shipped model loop is still a single-model loop.
+
+## [0.1.81] — The window's assistant reads the configured library
+
+### Fixed
+
+- The assistant now loads the same configured knowledge directory and cache as CLI and MCP
+  sessions. Documents that could be searched from the terminal are no longer absent solely
+  because a question was asked in the window.
+- An explicitly configured missing knowledge directory is reported during assistant initialization;
+  a fresh installation without a default library remains a valid empty-library session.
+
+## [0.1.80] — Malformed model calls cannot become default actions
+
+### Fixed
+
+- Invalid model tool arguments now fail before any tool is dispatched, including when an earlier
+  call in the same response is valid. Corrupt JSON, missing identifiers and non-object arguments
+  no longer silently become an empty parameter object that could execute a command with defaults.
+- Reporting a malformed response containing Chinese or other multi-byte text no longer risks a
+  string-boundary panic. Valid text answers and valid multiple-tool responses keep their behaviour.
+
+## [0.1.79] — Development data verifies on Windows
+
+### Fixed
+
+- The data and document downloaders compute SHA-256 in Rust instead of invoking `sha256sum`.
+  Windows developers no longer need a separate Unix checksum utility, and paths containing
+  backslashes, spaces or non-ASCII names no longer make correctly downloaded files fail verification.
+  Hashing uses a fixed-size buffer and rejects non-regular files before reading them; published
+  URLs and expected checksums remain unchanged.
+- The Windows quality gate no longer requires the Unix-only `/dev/urandom` regression to run,
+  and accepts the shared fallible permission-setting signature on platforms without Unix modes.
+- Configured OCR commands use the native Windows command shell on Windows, with the PDF path and
+  page passed through environment variables. Unix keeps its existing shell syntax.
+
+### Changed
+
+- The CCSDS corpus downloader uses `--jobs` for bounded concurrent document downloads. Each document
+  still has to match its pinned checksum, and an independent failure no longer prevents the remaining
+  documents from being attempted; failures are collected and reported at the end.
+
+### Not built yet
+
+- This changes local verification, not upstream availability: a changed or unavailable source
+  still fails acquisition rather than bypassing its recorded checksum.
+
 ## [0.1.78] — The arc closes with its evidence in one place
 
 A final verification pass, and the roadmap rewritten to say what is shipped rather than what was planned.

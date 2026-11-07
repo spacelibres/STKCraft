@@ -298,6 +298,16 @@ impl Document {
     }
 }
 
+/// Whether a documentation line starts a Markdown list item.
+fn is_list_item(doc: &str) -> bool {
+    if doc.starts_with("- ") || doc.starts_with("* ") || doc.starts_with("+ ") {
+        return true;
+    }
+    // An ordered item: digits followed by `. ` (`1. `, `12. `).
+    doc.split_once(". ")
+        .is_some_and(|(number, _)| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Escape the characters that would break a Markdown table cell.
 fn escape_cell(text: &str) -> String {
     text.replace('|', "\\|").replace('\n', " ")
@@ -428,6 +438,8 @@ fn module_paragraphs(path: &Path) -> Result<Vec<String>, String> {
     let mut paragraphs = Vec::new();
     let mut current = String::new();
     let mut in_code = false;
+    let mut in_table = false;
+    let mut last_was_item = false;
     for line in text.lines() {
         let Some(doc) = line.strip_prefix("//!") else {
             // The module documentation is a prefix of the file; the first item ends it.
@@ -448,9 +460,57 @@ fn module_paragraphs(path: &Path) -> Result<Vec<String>, String> {
             if !current.is_empty() {
                 paragraphs.push(std::mem::take(&mut current));
             }
+            in_table = false;
+            last_was_item = false;
             continue;
         }
         if doc.starts_with('#') {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+            in_table = false;
+            last_was_item = false;
+            continue;
+        }
+        // A Markdown table is one block whose rows must stay adjacent; a list item is its own
+        // block (a blank line between items renders as a loose list). Joining either with spaces,
+        // which is what this function used to do, produced a run-on paragraph and a one-line
+        // table — valid enough for the bytes check, unreadable to a person.
+        if doc.starts_with('|') {
+            if in_table {
+                current.push('\n');
+            } else {
+                if !current.is_empty() {
+                    paragraphs.push(std::mem::take(&mut current));
+                }
+                in_table = true;
+            }
+            last_was_item = false;
+            current.push_str(doc);
+            continue;
+        }
+        if in_table {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+            in_table = false;
+        }
+        if is_list_item(doc) {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+            paragraphs.push(doc.to_owned());
+            last_was_item = true;
+            continue;
+        }
+        // A source line inside a doc comment wraps at the comment's margin, so a sentence under a
+        // bullet continues on the next line without its own marker. That line belongs to the item
+        // above it; treating it as a new paragraph split the sentence in two.
+        if last_was_item {
+            if let Some(last) = paragraphs.last_mut() {
+                last.push(' ');
+                last.push_str(doc);
+            }
             continue;
         }
         if !current.is_empty() {
@@ -518,7 +578,11 @@ pub fn run(root: &Path, action: &Action) -> Result<(), String> {
     let english = root.join(API_DIR).join("en").join(PAGE);
     let rendered = document.render();
     if *action == Action::Check {
-        let committed = std::fs::read_to_string(&english).unwrap_or_default();
+        // Git on Windows checks text files out with CRLF line endings (autocrlf), while the generator writes
+        // LF. Compare line endings, not bytes, so the same committed page passes on every platform.
+        let committed = std::fs::read_to_string(&english)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         if committed != rendered {
             return Err(format!(
                 "{} is stale: run `cargo xtask api-docs` and commit the result",

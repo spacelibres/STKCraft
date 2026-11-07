@@ -2,7 +2,8 @@
 #
 # Shared values for the packaging scripts.
 #
-# Sourced by packaging/macos/package.sh, packaging/linux/package.sh and the web build. The
+# Sourced by the platform packaging scripts once they land; today this file is the shared value
+# table and no installer exists. The
 # display name is what users see; every file name, binary and identifier stays lowercase.
 #
 # Bash, not POSIX sh, because `stkcraft_version` is exported as a function (`export -f`) for the

@@ -456,9 +456,19 @@ fn parse_decimal_field(line: &str, start: usize, end: usize, what: &'static str)
         f if f.starts_with("+.") => format!("+0{}", &f[1..]),
         f => f.to_owned(),
     };
-    normalised
+    let value = normalised
         .parse::<f64>()
-        .map_err(|e| Error::invalid(what, format!("`{field}`: {e}")))
+        .map_err(|e| Error::invalid(what, format!("`{field}`: {e}")))?;
+    // `f64::from_str` accepts `NaN`, `inf` and `-inf`. None of them is a TLE number, and each
+    // would pass every later comparison (`NaN <= 0.0` is false), so a crafted line with a valid
+    // checksum could put a non-orbit into a scenario. The field is the boundary; reject it here.
+    if !value.is_finite() {
+        return Err(Error::invalid(
+            what,
+            format!("`{field}` is not a finite number"),
+        ));
+    }
+    Ok(value)
 }
 
 /// Parse a signed real that carries its sign in the text (columns 34-43 of line 1).
@@ -566,6 +576,16 @@ mod tests {
     fn the_checksum_matches_the_line() {
         assert_eq!(checksum(L1), Some(3));
         assert_eq!(checksum(L2), Some(7));
+    }
+
+    #[test]
+    fn a_non_finite_number_is_not_a_tle_field() {
+        // `f64::from_str` accepts these spellings, and `mean_motion <= 0.0` is false for NaN, so
+        // the field parser is the only place that can refuse them before a scenario holds them.
+        assert!(parse_decimal_field("        NaN", 0, 11, "mean motion").is_err());
+        assert!(parse_decimal_field("        inf", 0, 11, "mean motion").is_err());
+        assert!(parse_decimal_field("       -inf", 0, 11, "mean motion").is_err());
+        assert!(parse_decimal_field("        1.5", 0, 11, "mean motion").is_ok());
     }
 
     #[test]

@@ -11,6 +11,7 @@ use stkcraft_astro_engine::{Arg, Args, Registry, Scenario};
 use stkcraft_astro_sgp4::TwoLineElement;
 use stkcraft_framework_core::Angle;
 
+use crate::knowledge::{library as knowledge_library, opened as knowledge_opened};
 use crate::render;
 
 /// What the CLI can be asked to do.
@@ -37,6 +38,23 @@ pub enum Invocation {
     Model(ModelRequest),
     /// List or search the person's knowledge base.
     Knowledge(KnowledgeRequest),
+    /// Run one registry command by id, optionally against a scenario document.
+    Run(RunRequest),
+    /// List every command id, its parameters and its menu.
+    Commands,
+}
+
+/// One generic command invocation: the transport that makes every id reachable from a terminal.
+pub struct RunRequest {
+    id: String,
+    /// A scenario document to load before the command runs.
+    scenario: Option<String>,
+    /// Where to write the scenario after the command, when the person asked for it.
+    write: Option<String>,
+    /// Print the structured answer instead of the readable one.
+    json: bool,
+    /// The parameters, as the strings the caller typed; `args_from` converts them by kind.
+    params: serde_json::Value,
 }
 
 /// The parameters of the `passes` subcommand.
@@ -88,6 +106,11 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Control(request) => control(&request),
         Invocation::Model(request) => model(&request),
         Invocation::Knowledge(request) => knowledge(&request),
+        Invocation::Run(request) => run_command(&request),
+        Invocation::Commands => {
+            print!("{}", command_list());
+            Ok(())
+        }
     }
 }
 
@@ -117,8 +140,13 @@ COMMANDS
     control     Serve the control channel on loopback (`control --port 7979`)
     model       Show or change the model this installation uses:
                 `model --key <KEY>`, `--endpoint <URL>`, `--name <MODEL>`, `--clear`
+                `--protocol deepseek|compatible`, `--thinking enabled|disabled`
+                `--max-output-tokens <POSITIVE INTEGER>` (includes thinking tokens)
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
+    run         Run any registry command by id, against a scenario document:
+                `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--<param> VALUE]`
+    commands    List every command id, its parameters and the menu it belongs to
     version     Print the version
     help        Print this text
 
@@ -194,8 +222,180 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
             })?;
             Ok(Invocation::Ask(question))
         }
+        "run" => parse_run(arguments),
+        "commands" => Ok(Invocation::Commands),
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
+}
+
+/// Parse `run <id> [--scenario FILE] [--write FILE] [--json] [--param VALUE]`.
+fn parse_run<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let id = arguments.next().ok_or_else(|| {
+        "`run` needs a command id, e.g. `stkcraft run access.compute`; try `stkcraft commands`"
+            .to_owned()
+    })?;
+    let registry = Registry::builtin();
+    let command = registry
+        .get(&id)
+        .ok_or_else(|| format!("no command `{id}`; try `stkcraft commands`"))?;
+    let mut scenario = None;
+    let mut write = None;
+    let mut json = false;
+    let mut params = serde_json::Map::new();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--json" => json = true,
+            "--scenario" => {
+                scenario = Some(arguments.next().ok_or_else(|| {
+                    "`--scenario` needs a file, e.g. `--scenario mission.json`".to_owned()
+                })?);
+            }
+            "--write" => {
+                write = Some(arguments.next().ok_or_else(|| {
+                    "`--write` needs a file, e.g. `--write mission.json`".to_owned()
+                })?);
+            }
+            other => {
+                let Some(name) = other.strip_prefix("--") else {
+                    return Err(format!(
+                        "unexpected argument `{other}`; parameters are `--<name> <value>`"
+                    ));
+                };
+                let known = command
+                    .descriptor
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.name == name);
+                if !known {
+                    let names = command
+                        .descriptor
+                        .parameters
+                        .iter()
+                        .map(|parameter| format!("--{}", parameter.name))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(format!(
+                        "`{id}` has no parameter `{name}`; it takes {}",
+                        if names.is_empty() {
+                            "no parameters".to_owned()
+                        } else {
+                            names
+                        }
+                    ));
+                }
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| format!("`--{name}` needs a value"))?;
+                params.insert(name.to_owned(), serde_json::Value::String(value));
+            }
+        }
+    }
+    Ok(Invocation::Run(RunRequest {
+        id,
+        scenario,
+        write,
+        json,
+        params: serde_json::Value::Object(params),
+    }))
+}
+
+/// The largest scenario document this command will read, bytes.
+///
+/// A document is input from outside the repository; a path that names a device or a multi-gigabyte
+/// file must fail before the allocation, not after it.
+const MAX_SCENARIO_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Run one command against an empty or loaded scenario, then print and optionally save it.
+fn run_command(request: &RunRequest) -> Result<(), String> {
+    let registry = Registry::builtin();
+    let command = registry
+        .get(&request.id)
+        .ok_or_else(|| format!("no command `{}`; try `stkcraft commands`", request.id))?;
+    let mut scenario = match &request.scenario {
+        Some(path) => load_scenario(path)?,
+        None => Scenario::for_now("command line")
+            .map_err(|error| format!("could not read the system clock: {error}"))?,
+    };
+    scenario
+        .validate()
+        .map_err(|error| format!("scenario: {error}"))?;
+    let args = stkcraft_astro_engine::args_from(&command.descriptor, &request.params);
+    let enabled = registry
+        .enabled(&request.id, &scenario)
+        .map_err(|error| format!("{}: {error}", request.id))?;
+    if !enabled {
+        return Err(format!(
+            "`{}` is not available in this scenario: it needs objects the document does not have \
+             (for example a satellite and a station)",
+            request.id
+        ));
+    }
+    let outcome = registry
+        .run(&request.id, &mut scenario, &args)
+        .map_err(|error| format!("{}: {error}", request.id))?;
+    if request.json {
+        let value = crate::answer::json(&outcome, &scenario);
+        let text = serde_json::to_string_pretty(&value)
+            .map_err(|error| format!("could not print the answer: {error}"))?;
+        println!("{text}");
+    } else {
+        println!("{}", crate::answer::text(&outcome, &scenario));
+    }
+    if let Some(path) = &request.write {
+        save_scenario(path, &scenario)?;
+    }
+    Ok(())
+}
+
+fn load_scenario(path: &str) -> Result<Scenario, String> {
+    let metadata =
+        std::fs::metadata(path).map_err(|error| format!("could not read `{path}`: {error}"))?;
+    if metadata.len() > MAX_SCENARIO_BYTES {
+        return Err(format!(
+            "`{path}` is {} bytes; a scenario document is limited to {MAX_SCENARIO_BYTES}",
+            metadata.len()
+        ));
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("could not read `{path}`: {error}"))?;
+    serde_json::from_str(&text)
+        .map_err(|error| format!("`{path}` is not a scenario document: {error}"))
+}
+
+fn save_scenario(path: &str, scenario: &Scenario) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(scenario)
+        .map_err(|error| format!("could not write the scenario: {error}"))?;
+    std::fs::write(path, text).map_err(|error| format!("could not write `{path}`: {error}"))
+}
+
+/// Every command id, its parameters and its menu, for a caller that has no other catalogue.
+fn command_list() -> String {
+    let mut text = String::from(
+        "COMMAND REGISTRY\nRun one with `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--<param> VALUE]`.\n\n",
+    );
+    for command in Registry::builtin().iter() {
+        let _ = writeln!(
+            text,
+            "{:<22} {:<28} {}",
+            command.descriptor.id, command.descriptor.label, command.descriptor.menu_path
+        );
+        for parameter in command.descriptor.parameters {
+            let kind = match parameter.kind {
+                stkcraft_astro_engine::commands::ParameterKind::Text => "text",
+                stkcraft_astro_engine::commands::ParameterKind::Number => "number",
+                stkcraft_astro_engine::commands::ParameterKind::Degrees => "degrees",
+            };
+            let _ = writeln!(
+                text,
+                "    --{:<20} {:<8} {}{}",
+                parameter.name,
+                kind,
+                if parameter.required { "required; " } else { "" },
+                parameter.description
+            );
+        }
+    }
+    text
 }
 
 fn parse_passes<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
@@ -336,9 +536,9 @@ fn passes(request: &PassRequest) -> Result<(), String> {
     let epoch = element_set.epoch;
     let satellite_name = element_set.catalog_number.clone();
 
-    let mut scenario = Scenario::empty("CLI");
-    // Start at the element set's epoch: the same TLE then always produces the same table.
-    scenario.epoch = epoch;
+    // Start at the element set's epoch: the same TLE then always produces the same table, and the
+    // clock cannot move the analysis.
+    let mut scenario = Scenario::empty_at("CLI", epoch);
     scenario.duration_seconds = request.hours * 3_600.0;
 
     registry
@@ -479,7 +679,8 @@ fn parse_planet<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocati
 /// Run the `planet` subcommand: build the scenario, run the command, print the result.
 fn planet(request: &PlanetRequest) -> Result<(), String> {
     let registry = Registry::builtin();
-    let mut scenario = Scenario::empty("CLI");
+    let mut scenario = Scenario::for_now("CLI")
+        .map_err(|error| format!("could not read the system clock: {error}"))?;
     let outcome = registry
         .run(
             "planet.access",
@@ -719,16 +920,25 @@ pub struct ModelRequest {
     endpoint: Option<String>,
     /// A model name to store.
     name: Option<String>,
+    /// An explicitly selected protocol.
+    protocol: Option<String>,
+    /// An explicitly selected thinking mode.
+    thinking: Option<String>,
+    /// An explicit total output-token cap.
+    max_output_tokens: Option<String>,
     /// Remove the stored credential.
     clear: bool,
 }
 
-/// Parse `model [--key K] [--endpoint URL] [--name M] [--clear]`.
+/// Parse model connection, protocol and thinking settings without making a model request.
 fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
     let mut request = ModelRequest {
         key: None,
         endpoint: None,
         name: None,
+        protocol: None,
+        thinking: None,
+        max_output_tokens: None,
         clear: false,
     };
     while let Some(flag) = arguments.next() {
@@ -741,7 +951,24 @@ fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocatio
             "--key" => request.key = Some(value("--key")?),
             "--endpoint" => request.endpoint = Some(value("--endpoint")?),
             "--name" => request.name = Some(value("--name")?),
+            "--protocol" => {
+                let selected = value("--protocol")?;
+                if !matches!(selected.as_str(), "deepseek" | "compatible") {
+                    return Err("--protocol must be deepseek or compatible".to_owned());
+                }
+                request.protocol = Some(selected);
+            }
+            "--thinking" => {
+                let selected = value("--thinking")?;
+                if !matches!(selected.as_str(), "enabled" | "disabled") {
+                    return Err("--thinking must be enabled or disabled".to_owned());
+                }
+                request.thinking = Some(selected);
+            }
             "--clear" => request.clear = true,
+            "--max-output-tokens" => {
+                request.max_output_tokens = Some(value("--max-output-tokens")?);
+            }
             other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
         }
     }
@@ -754,7 +981,7 @@ fn parse_model<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocatio
 /// stored (never the credential itself), and where it is stored. Changing one writes the settings or
 /// the credential file and says which.
 fn model(request: &ModelRequest) -> Result<(), String> {
-    let mut prefs = crate::prefs::Prefs::load();
+    let mut prefs = crate::prefs::Prefs::try_load()?;
     let mut changed = Vec::new();
     if let Some(endpoint) = &request.endpoint {
         prefs.model_endpoint = Some(endpoint.trim().to_owned());
@@ -764,6 +991,20 @@ fn model(request: &ModelRequest) -> Result<(), String> {
         prefs.model = Some(name.trim().to_owned());
         changed.push(format!("model {name}"));
     }
+    if let Some(protocol) = &request.protocol {
+        prefs.model_protocol = Some(protocol.clone());
+        changed.push(format!("protocol {protocol}"));
+    }
+    if let Some(thinking) = &request.thinking {
+        prefs.model_thinking = Some(thinking.clone());
+        changed.push(format!("thinking {thinking}"));
+    }
+    // Validate before any preference or credential mutation, including key-only/clear-only calls.
+    if let Some(cap) = &request.max_output_tokens {
+        prefs.model_max_output_tokens = Some(cap.clone());
+        changed.push(format!("max output tokens {cap}"));
+    }
+    crate::prefs::validate_model_options(&prefs)?;
     if !changed.is_empty() {
         prefs.save()?;
     }
@@ -787,6 +1028,12 @@ fn model(request: &ModelRequest) -> Result<(), String> {
                 env!("CARGO_PKG_VERSION"),
                 provider.model,
                 provider.base_url
+            );
+            println!(
+                "  protocol: {:?}; thinking: {:?}; max output tokens: {:?}",
+                provider.options.protocol,
+                provider.options.thinking,
+                provider.options.max_output_tokens
             );
             println!(
                 "  credential: {} ({}-byte stored or environment key, timeout {} s)",
@@ -924,16 +1171,6 @@ fn history() -> Result<(), String> {
     Ok(())
 }
 
-/// The user's knowledge base: `--knowledge <dir>`, or `STKCRAFT_KNOWLEDGE`, or the configuration
-/// directory's `knowledge/`.
-///
-/// A `--knowledge` path that does not exist is an error with the path in it: a person who pointed the
-/// platform at their documents deserves to know it read nothing, rather than getting answers that
-/// silently came from memory.
-fn knowledge_library() -> Result<stkcraft_agent_knowledge::Library, String> {
-    Ok(knowledge_opened()?.library)
-}
-
 /// Say which files in the directory are not in the library, and why.
 ///
 /// A person who dropped a paper in the folder and cannot search it is owed the reason rather than a
@@ -946,43 +1183,6 @@ fn knowledge_skipped(opened: &stkcraft_agent_knowledge::Opened) {
     for skipped in &opened.skipped {
         println!("    {skipped}");
     }
-}
-
-/// The library and what opening it cost, so the command can say whether the cache worked.
-fn knowledge_opened() -> Result<stkcraft_agent_knowledge::Opened, String> {
-    let explicit = std::env::var("STKCRAFT_KNOWLEDGE")
-        .ok()
-        .map(std::path::PathBuf::from);
-    let directory = match explicit {
-        Some(directory) => directory,
-        None => crate::prefs::knowledge_dir().ok_or_else(|| {
-            "this platform has no configuration directory for a knowledge base".to_owned()
-        })?,
-    };
-    if !directory.is_dir() {
-        if std::env::var_os("STKCRAFT_KNOWLEDGE").is_some() {
-            return Err(format!(
-                "STKCRAFT_KNOWLEDGE points at {}, which is not a directory",
-                directory.display()
-            ));
-        }
-        // No library yet is the normal state of a fresh install, and it is not an error.
-        return Ok(stkcraft_agent_knowledge::Opened {
-            library: stkcraft_agent_knowledge::Library::default(),
-            reuse: stkcraft_agent_knowledge::Reuse::default(),
-            skipped: Vec::new(),
-        });
-    }
-    // The derived index is cached under the data directory, so a second run over a paper corpus is a
-    // directory walk rather than a re-parse of every document.
-    let cache = stkcraft_framework_storage::Paths::for_user()
-        .ok()
-        .map(|paths| stkcraft_framework_storage::Cache::at(paths.cache().join("knowledge")));
-    stkcraft_agent_knowledge::Library::open_cached(
-        &directory,
-        stkcraft_agent_knowledge::Limits::default(),
-        cache.as_ref(),
-    )
 }
 
 /// Run the `knowledge` subcommand: list the library, or search it.
@@ -1102,6 +1302,27 @@ fn app_demo_scenario() -> Result<stkcraft_astro_engine::Scenario, String> {
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_protocol_flags_are_parsed_without_a_credential() {
+        let result = parse_model(
+            ["--protocol", "deepseek", "--thinking", "enabled"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+        let Ok(Invocation::Model(request)) = result else {
+            panic!("protocol options were not accepted");
+        };
+        assert_eq!(request.protocol.as_deref(), Some("deepseek"));
+        assert_eq!(request.thinking.as_deref(), Some("enabled"));
+        for options in [
+            vec!["--protocol", "typo"],
+            vec!["--thinking", "turbo"],
+            vec!["--thinking"],
+        ] {
+            assert!(parse_model(options.into_iter().map(str::to_owned)).is_err());
+        }
+    }
 
     #[test]
     fn a_run_is_recorded_with_its_provenance_and_its_windows() {

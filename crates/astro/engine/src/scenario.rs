@@ -77,6 +77,13 @@ pub struct Station {
     pub sensor: Sensor,
 }
 
+/// The most corners a target may have.
+///
+/// A target's access is one window search per vertex, so an unbounded text parameter is an
+/// unbounded amount of propagation: a document or an MCP call could otherwise turn one request into
+/// tens of thousands of full searches. A polygon a person drew is far below this.
+pub const MAX_TARGET_VERTICES: usize = 1024;
+
 /// A complete analysis: the objects, and the interval they are analysed over.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scenario {
@@ -120,26 +127,43 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    /// An empty scenario starting now.
+    /// An empty scenario at an explicit epoch.
     ///
-    /// "Now" is the current UTC instant, which is the useful default for a new analysis. A
-    /// programmatic caller that wants a specific epoch sets it explicitly.
+    /// The clock is a parameter here so a caller that has one does not have to fall back.
     #[must_use]
-    pub fn empty(name: impl Into<String>) -> Self {
+    pub fn empty_at(name: impl Into<String>, epoch: Epoch) -> Self {
         Self {
             name: name.into(),
             central_body: Body::Earth,
             satellites: Vec::new(),
             stations: Vec::new(),
             targets: Vec::new(),
-            // `Epoch::now` cannot fail for a well-formed system clock; when it does, the J2000
-            // reference epoch is a valid, honest fallback rather than an uninitialised value.
-            epoch: Epoch::now().unwrap_or(Epoch::j2000()),
+            epoch,
             duration_seconds: 86_400.0,
             next_satellite: 1,
             next_station: 1,
             next_target: 1,
         }
+    }
+
+    /// An empty scenario starting now, falling back to J2000 if the clock is unreadable.
+    ///
+    /// This is the convenience constructor for a test or a fixture. A production path that must not
+    /// silently date a mission to 2000 uses [`Self::for_now`] and reports the clock error instead.
+    #[must_use]
+    pub fn empty(name: impl Into<String>) -> Self {
+        Self::empty_at(name, Epoch::now().unwrap_or_else(|_| Epoch::j2000()))
+    }
+
+    /// An empty scenario starting now, with the clock error propagated.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::OutOfRange`] when the system clock is outside the leap-second table's range; the
+    /// caller decides whether to stop or to ask for a date. A mission that starts in 2000 because
+    /// the clock was broken is worse than a message saying so.
+    pub fn for_now(name: impl Into<String>) -> Result<Self> {
+        Ok(Self::empty_at(name, Epoch::now()?))
     }
 
     /// The body this analysis is measured from.
@@ -173,6 +197,26 @@ impl Scenario {
 
         for station in &self.stations {
             station.sensor.validate()?;
+        }
+
+        for target in &self.targets {
+            if target.vertices.is_empty() {
+                return Err(Error::invalid(
+                    "target vertices",
+                    format!("target `{}` has no vertices", target.name),
+                ));
+            }
+            if target.vertices.len() > MAX_TARGET_VERTICES {
+                return Err(Error::invalid(
+                    "target vertices",
+                    format!(
+                        "target `{}` has {} vertices; the maximum is {MAX_TARGET_VERTICES}",
+                        target.name,
+                        target.vertices.len()
+                    ),
+                ));
+            }
+            target.sensor.validate()?;
         }
 
         let mut satellite_ids: Vec<SatelliteId> = self.satellites.iter().map(|s| s.id).collect();
@@ -261,6 +305,15 @@ impl Scenario {
             return Err(Error::invalid(
                 "vertices",
                 "a target needs at least one vertex",
+            ));
+        }
+        if vertices.len() > MAX_TARGET_VERTICES {
+            return Err(Error::invalid(
+                "target vertices",
+                format!(
+                    "{} vertices; the maximum is {MAX_TARGET_VERTICES}",
+                    vertices.len()
+                ),
             ));
         }
         sensor.validate()?;
@@ -374,6 +427,24 @@ mod tests {
         assert_eq!(scenario.satellites.len(), 0);
         assert_eq!(scenario.stations.len(), 0);
         scenario.validate().expect("an empty scenario is valid");
+    }
+
+    #[test]
+    fn an_explicit_epoch_is_not_replaced_by_the_clock() {
+        let epoch = stkcraft_framework_time::utc_from_ymd_hms(2024, 1, 1, 0, 0, 0)
+            .expect("a valid UTC instant");
+        let scenario = Scenario::empty_at("explicit", epoch);
+        assert_eq!(scenario.epoch, epoch);
+    }
+
+    #[test]
+    fn a_target_with_too_many_vertices_is_refused_before_any_search() {
+        let mut scenario = Scenario::empty("test");
+        let vertices = (0..=MAX_TARGET_VERTICES).map(|_| site()).collect();
+        let error = scenario
+            .add_target("huge", vertices, Sensor::above_horizon(Angle::ZERO))
+            .expect_err("a target over the cap is refused");
+        assert!(error.to_string().contains("target vertices"), "{error}");
     }
 
     #[test]

@@ -12,6 +12,7 @@ crates/framework/        the platform — nothing here knows what an orbit is
   time                   time scales, the IERS leap-second table, Julian dates and epochs
   i18n                   the interface catalogs: format, lookup, plurals
   extensions             the package contract: manifests, ids, trust tiers
+  storage                the record (SQLite), the key-value cache and the vector store
 
 crates/astro/            the orbital-analysis domain — the astronomy lives here
   body                   IAU constants, ellipsoid and rotation models for 18 bodies
@@ -25,6 +26,7 @@ crates/agent/            the model-facing surface
   knowledge              the user's own documents, searched before a model answers
   mcp                    the command registry spoken to an outside client
   runtime                a model driving the engine through those tools
+  control                the launcher's socket, driving the same registry
 
 crates/ui/               presentation
   viewport               the 3D viewport: GPU rendering and generated geometry
@@ -38,12 +40,11 @@ Planned, in the order they will land:
 crates/astro/geom        conic sections, sphere coordinate transforms, intersections
 crates/astro/atmos       neutral atmosphere density
 crates/astro/coverage    grids and grids-of-figures over time
-crates/framework/storage the record, the cache and the vector store (docs/design/storage.md)
-crates/astro/papers      PDF ingestion for the knowledge base (via the family's craft-pdf)
 ```
 
 `cargo xtask layers` enforces that a crate depends only on a strictly lower layer, and that
-nothing at or below `LAST_NON_UI_LAYER` touches egui, eframe, wgpu, winit or rfd. Every new
+nothing at or below `LAST_NON_UI_LAYER` touches any crate in `GUI_CRATES` (`egui`, `eframe`,
+`egui-winit`, `egui-wgpu`, `winit`, `rfd`, `wgpu`). Every new
 crate must be registered in `xtask/src/layers.rs`; the task fails for a workspace member that
 is missing from the table.
 
@@ -162,7 +163,9 @@ it: a follow-up can say "and the day after?" only if the agent still holds the s
 calls and the answers before it. `stkcraft chat` is the same thing on a terminal — one agent, many
 questions — and the history is trimmed at a turn boundary when it outgrows `MAX_HISTORY`, never in
 the middle of a tool exchange, because a tool result whose call has been dropped is a request the
-model API rejects long after the cause. Deleting an answer is not the same as forgetting it: the
+model API rejects long after the cause. A second, size-triggered compaction replaces the dropped span
+with a summary the model wrote; the two paths are described in `docs/design/knowledge.md`. Deleting
+an answer is not the same as forgetting it: the
 scenario lives in the server, so a session can be emptied (`Agent::forget`) without losing what the
 tools already built.
 
@@ -176,7 +179,7 @@ A plugin, at this stage, is a *registration*, not a loaded shared object:
 
 - a **command** is one registry entry (id, label, menu path, parameters, `enabled`, `run`), and
   the menu, shortcut, CLI, control channel, MCP server and agent all dispatch by id;
-- a **skill** is one markdown document picked up from `skills/`, needing no code and no rebuild;
+- a **skill** is one markdown document picked up from `share/skills/`, needing no code and no rebuild;
 - a **bulk file** is one row in `cargo xtask fetch-data`, with a checksum recorded in
   `docs/guides/ephemeris-data.md`.
 

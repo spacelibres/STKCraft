@@ -94,12 +94,30 @@ impl Elements {
                 "0 <= i <= 180 deg",
             ));
         }
+        // A non-finite mean motion or drag term passes every `<=` comparison, so it is refused
+        // before the conversion rather than becoming a NaN state vector downstream. The angles
+        // are checked the same way: `Angle::from_deg(NaN)` is a valid `Angle` value.
+        if !mean_motion_rev_per_day.is_finite() {
+            return Err(Error::invalid("mean motion", "must be a finite number"));
+        }
         if mean_motion_rev_per_day <= 0.0 {
             return Err(Error::out_of_range(
                 "mean motion",
                 mean_motion_rev_per_day,
                 "greater than zero",
             ));
+        }
+        if !bstar.is_finite() {
+            return Err(Error::invalid("bstar", "must be a finite number"));
+        }
+        for (what, angle) in [
+            ("right ascension", right_ascension),
+            ("argument of perigee", argument_of_perigee),
+            ("mean anomaly", mean_anomaly),
+        ] {
+            if !angle.as_deg().is_finite() {
+                return Err(Error::invalid(what, "must be a finite number"));
+            }
         }
         // rev/day -> rad/min. The reference implementation divides by
         // `xpdotp = 1440 / (2 * pi)` rather than multiplying by `2 * pi / 1440`, and the two

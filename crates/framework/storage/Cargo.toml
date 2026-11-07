@@ -9,6 +9,8 @@ authors.workspace = true
 
 [dependencies]
 stkcraft-framework-core.workspace = true
+# Calendar conversion goes through chrono, per the suite rule; this crate only labels rows.
+chrono.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

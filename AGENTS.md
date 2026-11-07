@@ -1,11 +1,64 @@
+<!-- craft-house-rules:start core source=dde09ea31e2e457f5b4653a6e76f7cdf55944bdf sha256=540e6cea75d12d0710c3dca89658328e81e508ecef102446ca5bb95b7c0b92bb -->
+## House rules
+
+These apply in every Craft repository. A later rule may be stricter, not weaker. The source is `standards/house-rules-core.md` in `storytold/craft-contrib`. Propose changes there, not in a copy.
+
+1. **A person is accountable.** Whoever runs an agent answers for what it opens and for its review comments.
+2. **Check, then claim.** Before writing code, read the issue comments, search pull requests for `#N` and the keywords, and check recent commits on `main`. Comment on the issue first. Release a claim you will not finish.
+3. **Verify, don't guess.** Open a definition before using it. Confirm the cause in the code, even when someone names a location.
+4. **Keep fixes narrow and tested.** Fix what the issue describes, where the bug is. Add a test that fails without the fix.
+5. **Review the diff before opening a pull request.** Identifiers exist as used, the test fails without the fix, nothing unrelated changed, and the description is true.
+6. **Look for a better pull request.** If another fixes the same thing, close yours when it is better or equal, and say why.
+7. **Report only what ran.** Say what you tested and what you could not run. Without a local build or test, say so and rely on CI before marking ready.
+8. **`main` changes through a pull request.** Do not push to it. Branch protection enforces this. There is no exception.
+9. **Stop and ask only about** licensing outside the allowlist, publishing, releases, a new remote, secrets, spending money, destructive git, and anything else hard to undo. Otherwise keep working. `plan/` is a gitignored notebook, not rules. Without it, do not ask for it and do not stop.
+10. **Keep secrets and personal details out** of the repository, logs and requests.
+11. **CI stays shared.** Workflows call `storytold/craft-common-actions`. Do not change CI in a feature or fix pull request. If CI cannot cover a change, open an issue there.
+12. **Guards say why.** A check that looks removable says what it prevents. Read that before changing it.
+13. **Instructions must be readable by everyone.** No notes about one machine, and no links to files a reader cannot open. `craftrules` is retired. Do not link to it.
+14. **Keep pull requests moving.** Concurrent pull requests are fine; unanswered actionable feedback is not. Respond in 7 days, a reminder at 14, closure eligible at 30, from when an actionable request waits on the author. Suggestions and unconfirmed bot findings do not start the clock. A fix, explanation or agreed plan resets it; unrelated activity does not. Waiting on a reviewer or maintainer pauses it and does not count against the author. A maintainer decides closure; it is never automatic. Reuse search results, do not poll, and stop at a rate limit.
+15. **No agent attribution.** A pull request does not say an agent wrote it. A repository rule may not require that.
+<!-- craft-house-rules:end -->
+<!-- craft-house-rules:start rust source=dde09ea31e2e457f5b4653a6e76f7cdf55944bdf sha256=387e0ccb4b49e567f60951d7d6fff7305054c89f43ad812b9993dc7c38528013 -->
+## Rust Craft repositories
+
+These apply to native Craft apps and to shared Rust libraries. Select them by repository type. A repository that merely contains some Rust does not take this block. Rules later in a repository's file may be stricter, but not weaker. The source is `standards/house-rules-rust.md` in [storytold/craft-contrib](https://github.com/storytold/craft-contrib).
+
+1. **Never crash.** Non-test code does not panic and has no `unsafe`, except where the repository file names an exception. Return errors, treat input as hostile, and bound recursion and allocations. New production crate roots copy the `deny` attribute from an existing crate: `clippy::unwrap_used`, `clippy::expect_used`, `clippy::panic`, `clippy::unimplemented`, `clippy::todo`, `clippy::unreachable`. Every crash fix comes with a test that panicked before the fix.
+2. **Clean room.** Learn from observed behaviour and public specifications. Do not copy another product's code, assets, strings or artwork. Check a dependency's licence before adding it.
+3. **Assets and fonts.** Every asset is original or suitably licensed, and is recorded in `ATTRIBUTION.md` in the same change. Font files live in [storytold/craft-fonts](https://github.com/storytold/craft-fonts), not in the app repository.
+4. **Rust only for native Craft apps.** No handwritten JavaScript or TypeScript, and no Tauri, Electron or webview shell, in those apps. Shared tooling follows its documented technical scope and maintainer-approved exceptions. Craft PR Review's existing Tauri and TypeScript UI is one such exception. It does not relax this rule for native apps. Preserve any existing web build.
+5. **Time goes through `chrono`.** Do not hand-roll calendar conversion. For dates beyond what `chrono` can represent, follow [standards/time.md](https://github.com/storytold/craft-contrib/blob/main/standards/time.md).
+6. **Contributor credits.** Add or edit only your own person's entry in `contributors/people.toml`, and only after asking them. Never guess a name or hand-edit `contributors.json`.
+
+## Licence allowlist
+
+Dependencies and assets use SPDX identifiers. An expression is allowed when every identifier is in this list. A repository may name a shorter list. It may not add an identifier here by editing its own copy of these rules.
+
+- `ISC`
+- `MIT`
+- `BSD-2-Clause`
+- `BSD-3-Clause`
+- `Apache-2.0`
+- `OFL-1.1`
+- `Ubuntu-font-1.0`
+- `Bitstream-Vera`
+- `CC0-1.0`
+- `CC-BY-4.0`
+- `CC-BY-SA-4.0`
+- `LicenseRef-Public-Domain`
+
+`LicenseRef-Storyteller-Trademark` is not in this list. It covers Storyteller brand marks only, where a repository already says so.
+<!-- craft-house-rules:end -->
+
 # STKCraft — instructions for agents
 
 STKCraft is a clean-room, open-source, Rust-native space mission analysis and visualisation
 application. It targets the workflow of a professional orbital-analysis suite — building a
 scenario out of satellites, ground stations, sensors and targets, propagating them over a
 timeline, and answering "when can this see that, and for how long" — and aims to be faster,
-more open and fully agent-drivable. It runs natively on macOS, Windows, Linux and FreeBSD,
-and in the browser via WebAssembly.
+more open and fully agent-drivable. It runs natively on macOS, Windows, Linux and FreeBSD, and its
+analysis core compiles to WebAssembly; a browser shell is not shipped yet.
 
 It is one of the ArtCraft Craft apps and follows the same conventions as its siblings:
 `../gridcraft` (spreadsheet), `../cadcraft` (CAD), `../texturecraft` (3D texture painting),
@@ -78,7 +131,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   checksum-verified, or bundled as small generated tables with a source comment. Never
   commit a large binary fixture. `cargo xtask fetch-data` downloads the ephemeris data — ephemeris
   kernels, IERS Earth orientation, the leap-second kernel, planetary constants and the star
-  catalogue — into `data/`, which is `.gitignore`d, as parallel ranged downloads (eight at a time,
+  catalogue — into `data/`, which is `.gitignore`d, one file after another, each as parallel ranged downloads (eight at a time,
   `--jobs` to change it), and verifies each against the SHA-256 recorded in
   `docs/guides/ephemeris-data.md`; a deployment fetches the same files from the same URLs.
 - **The documents the knowledge base is measured on are fetched too.** `cargo xtask papers` puts the
@@ -133,7 +186,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   exists to prevent.
 - **Layering** is enforced by `cargo xtask layers`. A crate may depend only on a strictly
   lower layer, and nothing at or below `LAST_NON_UI_LAYER` may depend on egui, eframe,
-  winit or rfd. Register every new crate in `xtask/src/layers.rs`.
+  winit, rfd or anything else listed in `GUI_CRATES` (`xtask/src/layers.rs`). Register every new crate in `xtask/src/layers.rs`.
 - **The UI is thin and swappable.** Panels read engine state and act by running commands.
   The 3D viewport is a separate crate so it can be replaced without touching the engine.
 - **The window uses the family's UI stack, not a local one.** `egui`/`eframe`/`winit` come from the
@@ -150,10 +203,11 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
 - **Quality gates** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`, tests, assets,
   i18n, api-docs, layers, wasm, version, and the lockfile check the workflow ends with). It is the
-  same gate `.github/workflows/ci.yml` runs through the shared `gate.yml`, so a commit that passes it
-  locally is a commit whose CI gate passes on Linux. Two things it cannot check locally and CI can:
-  the other matrix legs (macOS, Windows) and the packaging lint. Commit after every arc that builds
-  and passes.
+  same gate `.github/workflows/ci.yml` runs through the shared `gate.yml` on Ubuntu and Windows, so a
+  commit that passes it locally is a commit whose CI gate passes on both legs. Two things it cannot
+  check locally and CI can: the Windows leg's own environment and the packaging lint. macOS is not
+  in the CI matrix yet, so a macOS-only regression is found by hand or in a release run. Commit after
+  every arc that builds and passes.
 - **A device file is never read to the end.** `std::fs::read` on `/dev/urandom` (or any device)
   allocates until the machine dies — it did exactly that on 2026-11-06, taking a machine's memory to
   130 GB and getting the process OOM-killed along with the desktop. Read a stated number of bytes with
@@ -169,17 +223,32 @@ cargo run --release -p stkcraft                # the desktop app
 cargo run --release -p stkcraft -- --help      # the command line
 cargo run --release -p stkcraft -- mcp         # serve the engine to a model over stdio
 cargo run --release -p stkcraft -- ask "..."   # ask the model, with the engine as its tools
+cargo run --release -p stkcraft -- passes      # satellite passes over a ground station
+cargo run --release -p stkcraft -- planet      # passes over a station on another body
+cargo run --release -p stkcraft -- commands    # every command id, parameter and menu
+cargo run --release -p stkcraft -- run access.compute --scenario mission.json --json
+                                               # any registry command, against a scenario document
+cargo run --release -p stkcraft -- model       # show or change the model in use
+cargo run --release -p stkcraft -- version     # the version of this build
 cargo run --release -p stkcraft -- chat        # ask questions in one conversation
 cargo xtask ci                                 # the full gate
 cargo xtask version                            # print the workspace version
 cargo xtask version bump                       # bump it, smallest component
-cargo xtask release                            # tag the version and push the tag
+cargo xtask release                            # tag and push; a GitHub Release only if stable
 cargo xtask fetch-data                         # download the kernels, verified
 cargo xtask papers                             # download the paper corpus, verified
 cargo xtask i18n                               # check the interface catalogs
 cargo xtask i18n report                        # what each language still lacks
 cargo xtask i18n translate --language de       # fill German from the English source
 cargo xtask api-docs                           # regenerate the API reference
+cargo xtask version set X.Y.Z                  # set the version to a given number
+cargo xtask standards                          # download the CCSDS corpus, verified
+cargo xtask naif                               # download the NAIF corpus, verified
+cargo xtask mathlib                            # index a Mathlib checkout (MATHLIB_DIR=<checkout>)
+cargo xtask verify-formulas                    # re-extract and re-classify formulas; fail on drift
+cargo xtask layers                             # check crate layering
+cargo xtask wasm                               # check the WebAssembly build
+cargo xtask assets                             # check asset attribution
 cargo run --release -p stkcraft -- extensions  # what extension packages are installed
 cargo run --release -p stkcraft -- knowledge   # the documents a model answers from
 cargo run --release -p stkcraft -- knowledge "maximum off-nadir angle"
@@ -206,12 +275,15 @@ Every commit that changes the product is a release-shaped step, and the history 
    only repeats the commit subject has said nothing.
 4. **No `[Unreleased]` section.** An unreleased section is where entries go to be forgotten, and
    the whole point of this rule is that no commit is a draft. Each commit writes its own version.
-5. **Tag the release**, and make it a release rather than only a tag: `cargo xtask release` checks
-   that the changelog names the version, creates the annotated `vX.Y.Z` tag, pushes it, and prints
-   the one `gh release create` command that publishes it with generated notes. Every version in
-   this repository carries a tag — the siblings tag every release, and a version without one is a
-   version nobody can check out. `cargo xtask release` exists so that step cannot be forgotten;
-   for 0.1.2 through 0.1.4 it was, and the tags had to be added afterwards.
+5. **Tag every version; publish a Release only for a stable one.** `cargo xtask release` checks that
+   the changelog names the version, creates the annotated `vX.Y.Z` tag, pushes it, and — only when
+   the version is stable (1.0.0 or later, no `-rc`/`-alpha` suffix) — prints the
+   `gh release create` command. The 0.x development records are **tags and nothing else**: a GitHub
+   Release says "this is the version to use", which a 0.x version does not promise, and a dev
+   version with both a tag and a Release is the duplication this rule removes. Every version in this
+   repository carries a tag — the siblings tag every release, and a version without one is a version
+   nobody can check out. `cargo xtask release` exists so that step cannot be forgotten; for 0.1.2
+   through 0.1.4 it was, and the tags had to be added afterwards.
 
 `cargo xtask ci` enforces the mechanical half: it fails when the newest `## [x.y.z]` heading and
 the workspace version disagree, and when an `[Unreleased]` heading is present. The judgement half
@@ -301,16 +373,18 @@ the licence. See `docs/standards.md` §6.
 test a change, link an existing `craft-common-actions` issue or open one; do not add a
 local job.
 
-**Known upstream failure.** `Packaging lint` fails at its PowerShell step because that step
-runs `Get-ChildItem packaging/windows/*.ps1` without an existence guard and this repository
-has no Windows packaging yet. Tracked as
-[craft-common-actions#145](https://github.com/storytold/craft-common-actions/issues/145);
-the fix belongs there, not here. Until it lands, a red `Packaging lint` on a change that
-touches nothing under `packaging/` is that issue and not a regression.
+**Known upstream failure.** The shared `Packaging lint` runs `Get-ChildItem
+packaging/windows/*.ps1` without an existence guard. On a checkout with no such directory that
+glob is an error under the runner's `$ErrorActionPreference = 'Stop'`, so a pull request that
+touches `assets/app-icon/` fails a lint about a package that does not exist. Tracked as
+[craft-common-actions#145](https://github.com/storytold/craft-common-actions/issues/145). This
+repository keeps `packaging/windows/README.md` so the directory exists and the glob returns
+nothing; the fix still belongs upstream, and the README can stay as the note on what lands there.
 
 ## Contributor credits (About window)
 
-`contributors/contributors.json` is generated and never hand-edited;
-`contributors/people.toml` holds names people chose for themselves. **Never add, edit or
-guess anyone else's entry.** If your human's GitHub username has no `[people.<username>]`
-entry, ask them once whether they want to be credited by more than their username.
+`contributors/contributors.json` is generated at release time by the shared
+`storytold/craft-common-actions` `refresh-contributors` workflow; it is not committed and is never
+hand-edited. `contributors/people.toml` holds names people chose for themselves. **Never add, edit
+or guess anyone else's entry.** If your human's GitHub username has no `[people.<username>]` entry,
+ask them once whether they want to be credited by more than their username.

@@ -530,7 +530,11 @@ pub fn julian_to_utc_naive(jd: JulianDate) -> Option<NaiveDateTime> {
     // Julian Date -> days since the Unix epoch. `day` is the whole day number and `fraction`
     // is the time of day, so the day difference already lands on a whole number of days.
     let unix_days = (jd.day - JD_MJD_ZERO - 40_587.0) as i64;
-    let unix_seconds = unix_days * SECONDS_PER_DAY as i64 + whole_seconds as i64;
+    // A deserialized epoch can carry any finite day; the multiply must refuse to wrap rather than
+    // produce a date from the wrong century.
+    let unix_seconds = unix_days
+        .checked_mul(SECONDS_PER_DAY as i64)?
+        .checked_add(whole_seconds as i64)?;
     let datetime = DateTime::from_timestamp(unix_seconds, nanos as u32)?;
     Some(datetime.naive_utc())
 }

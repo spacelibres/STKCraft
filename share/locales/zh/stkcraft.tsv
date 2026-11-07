@@ -28,7 +28,11 @@
 	Reset camera	重置相机
 	Running the engine's commands…	正在运行引擎命令…
 	Scenario	场景
+	Stop	停止
+	Stopping…	正在停止…
 	The assistant answers by running the engine's commands, so it needs a model to choose them.	助手通过运行引擎命令来回答，因此需要一个模型来选择命令。
+	The assistant could not start its worker. Try again.	助手无法启动后台任务，请重试。
+	The assistant request was cancelled. Its result was not applied.	助手请求已取消，结果未应用。
 	Translating with your key…	正在使用你的密钥翻译…
 	Uses DEEPSEEK_API_KEY to translate the interface into this language and stores it for this computer.	使用 DEEPSEEK_API_KEY 将界面翻译成此语言，并保存在这台电脑上。
 	View	视图

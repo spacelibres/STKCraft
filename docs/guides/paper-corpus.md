@@ -20,7 +20,7 @@ Three questions need real documents rather than fixtures:
 
 ## What is fetched
 
-The CCSDS blue books are the formats this project parses and emits, so a search over them is the
+The CCSDS blue books are the formats the project plans to parse and emit (see `sources.md`), so a search over them is the
 documentation a person would actually consult. The two papers are openly licensed work on the two
 subjects the engine is built around: SGP4 propagation and TLE accuracy.
 

@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
@@ -32,6 +33,8 @@ craft-ui.workspace = true
 # `stkcraft ask` puts a model in front of the same tools an MCP client sees.
 stkcraft-agent-runtime.workspace = true
 log.workspace = true
+# The embedded albatross mark: the window icon and the panel logo.
+png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

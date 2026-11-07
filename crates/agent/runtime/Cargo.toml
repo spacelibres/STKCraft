@@ -1,6 +1,6 @@
 [package]
 name = "stkcraft-agent-runtime"
-description = "The DeepSeek agent: a model driving STKCraft's own tools and skills"
+description = "The model agent: a model driving STKCraft's own tools and skills"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,8 +11,16 @@ authors.workspace = true
 stkcraft-astro-engine.workspace = true
 stkcraft-framework-i18n.workspace = true
 stkcraft-agent-mcp.workspace = true
+# One crate owns persistence: transcripts are opened and written here, never by the agent.
+stkcraft-framework-storage.workspace = true
+# Session ids are calendar labels; the conversion goes through chrono, per the suite rule.
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "transport_process"
+harness = false

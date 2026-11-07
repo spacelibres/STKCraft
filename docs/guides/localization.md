@@ -22,8 +22,9 @@ message. Both are why the macros take literals.
 
 `cargo xtask i18n` reads those literals out of the source. It is the only mechanism: there is no
 extractor file to update, and a string that is not in a macro is invisible to it. `cargo xtask ci`
-runs the check, so an untranslatable string is caught the same day it lands rather than when someone
-translates the app.
+validates the catalogs and catches a malformed row, but it cannot see a literal that never went
+through a macro — that is a review question, and the reason a user-visible string is expected to be
+wrapped at the point it is written.
 
 **What is not translated:** command ids, satellite and station names, the epoch a time is printed in,
 and anything the engine computes. The rule the family uses is "interface chrome, not document text":
@@ -62,7 +63,7 @@ cargo xtask i18n                              # validate every catalog (the gate
 cargo xtask i18n report                       # what each language still lacks
 cargo xtask i18n translate --language de      # fill what German lacks, with DeepSeek
 cargo xtask i18n translate --language zh --dry-run    # show the proposed rows, write nothing
-cargo xtask i18n translate --all              # every locale that has a directory
+cargo xtask i18n translate                    # every locale that has a directory
 ```
 
 `cargo xtask i18n translate` needs `DEEPSEEK_API_KEY`. The key is yours: the project ships one English
@@ -77,7 +78,7 @@ rather than written wrong.
 
 ## What ships
 
-`locales/zh/stkcraft.tsv` is the first catalog. It was produced with
+`share/locales/zh/stkcraft.tsv` is the first catalog. It was produced with
 `cargo xtask i18n translate --language zh` — the pipeline above, run against the maintainer's own
 key — and then read row by row before it was committed, which is the rule: a wrong translation is
 worse than a missing one, because the missing one shows English and the wrong one is believed.
@@ -107,7 +108,7 @@ Windows  %APPDATA%\stkcraft\locales\de.tsv
 ```
 
 A catalog in the repository is embedded at build time by `apps/stkcraft/build.rs`, which means a
-build with no `locales/` directory is a valid English-only build.
+build with no `share/locales/` directory is a valid English-only build.
 
 ## Translating inside the window
 
@@ -140,7 +141,7 @@ purpose.
 
 1. Pick the code: lowercase BCP 47, as the family requires — `de`, `zh`, `pt-br`, `zh-hans`,
    `sr-latn`. A script variant and a region are alternatives, not both (`zh-hans`, not `zh-hans-cn`).
-2. Make `locales/<code>/stkcraft.tsv` with the header and an `@id	language.name	<name>` row.
+2. Make `share/locales/<code>/stkcraft.tsv` with the header and an `@id	language.name	<name>` row.
 3. Run `cargo xtask i18n translate --language <code>` with your key, or fill the rows by hand.
 4. Review every row. A machine translation that is wrong is worse than a missing one, because the
    missing one shows English and the wrong one is believed.

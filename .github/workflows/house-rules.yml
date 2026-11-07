@@ -1,0 +1,29 @@
+name: House rules
+
+# The shared AGENTS.md blocks must match craft-contrib at the commit they name, and that commit
+# must be on main. The app-specific rules below the blocks may be stricter; they may not weaken
+# the shared ones. `cargo xtask ci` checks the code, this checks the contract it is written under.
+on:
+  push:
+    branches: [main]
+    paths:
+      - AGENTS.md
+      - .github/workflows/house-rules.yml
+  pull_request:
+    paths:
+      - AGENTS.md
+      - .github/workflows/house-rules.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: house-rules-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  house-rules:
+    uses: storytold/craft-common-actions/.github/workflows/house-rules.yml@main
+    with:
+      rust: true
