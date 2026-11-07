@@ -25,7 +25,7 @@ pub enum Invocation {
     /// One satellite against a station on another body, printed as a pass table.
     Planet(PlanetRequest),
     /// Serve the command registry to an agent over standard input and output.
-    Mcp,
+    Mcp(Option<String>),
     /// Ask a model a question; it answers by running the engine's commands.
     Ask(String),
     /// Ask questions one after another, in one conversation, on standard input.
@@ -104,7 +104,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         }
         Invocation::Passes(request) => passes(&request),
         Invocation::Planet(request) => planet(&request),
-        Invocation::Mcp => mcp(),
+        Invocation::Mcp(expert) => mcp(expert.as_deref()),
         Invocation::Ask(question) => ask(&question),
         Invocation::Chat(request) => chat(&request),
         Invocation::Extensions => crate::extensions::list(),
@@ -138,6 +138,7 @@ COMMANDS
     passes      Compute satellite passes over a ground station
     planet      Compute passes over a station on another body
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
+                (`mcp --expert time-frames` restricts it to that expert's allowlist)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
     chat        Ask questions in one conversation, reading them from standard input
                 (`chat --session <id>` resumes one; `chat --sessions` lists them)
@@ -214,7 +215,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "version" | "--version" | "-V" => Ok(Invocation::Version),
         "passes" => parse_passes(arguments),
         "planet" => parse_planet(arguments),
-        "mcp" => Ok(Invocation::Mcp),
+        "mcp" => parse_mcp(arguments),
         "chat" => parse_chat(arguments),
         "extensions" => Ok(Invocation::Extensions),
         "history" => Ok(Invocation::History),
@@ -785,7 +786,7 @@ fn instant_at(
 /// The skills directory is looked for beside the executable first and then in the working
 /// directory, because a deployment copies the binary and its documents together while a developer
 /// runs from the repository root. Absent skills are not an error: the tools still work.
-fn mcp() -> Result<(), String> {
+fn mcp(expert: Option<&str>) -> Result<(), String> {
     let skills = skills_directory();
     let loaded = installed_extensions();
     let mut server = stkcraft_agent_mcp::Server::new(
@@ -794,7 +795,45 @@ fn mcp() -> Result<(), String> {
     )
     .with_knowledge(knowledge_library()?)
     .with_extensions(&loaded);
+    if let Some(id) = expert {
+        let role = load_expert_role(id)?;
+        server = server.with_role(role);
+    }
     server.serve()
+}
+
+/// Parse `mcp [--expert ID]`.
+fn parse_mcp<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let mut expert = None;
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--expert" => {
+                expert = Some(
+                    arguments
+                        .next()
+                        .ok_or("`--expert` needs an expert id, e.g. `--expert time-frames`")?,
+                );
+            }
+            other => return Err(format!("unknown option `{other}` for `mcp`")),
+        }
+    }
+    Ok(Invocation::Mcp(expert))
+}
+
+fn load_expert_role(id: &str) -> Result<stkcraft_agent_knowledge::expert::ExpertRole, String> {
+    let beside_executable = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    let root = beside_executable
+        .filter(|root| {
+            root.join("share/experts")
+                .join(id)
+                .join("role.toml")
+                .is_file()
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    stkcraft_agent_knowledge::expert::load_role(&root, id)
+        .map_err(|error| format!("expert `{id}`: {error}"))
 }
 
 /// Ask `DeepSeek` a question, with the engine's commands as its tools and the skills as its library.

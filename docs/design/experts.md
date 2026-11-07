@@ -58,6 +58,20 @@ share/experts/<expert-id>/
 The first three packages are `time-frames` (8 formulas), `sgp4` (5) and `access-geometry` (5).
 `cargo xtask experts check` is the authority on the current counts.
 
+## Runtime role
+
+Each package also carries `role.toml`:
+
+```toml
+id = "time-frames"
+version = "0.1.0"
+tools = ["knowledge.search", "knowledge.documents", "access.compute"]
+```
+
+`stkcraft mcp --expert <id>` loads that role. The MCP server lists only the allowlisted tools and
+rejects a `tools/call` outside the list; the restriction is enforced at dispatch, not only in the
+description a model reads. `cargo xtask experts check` requires every package to have a valid role.
+
 ## Formula record
 
 A source is registered once, in `sources.toml`:

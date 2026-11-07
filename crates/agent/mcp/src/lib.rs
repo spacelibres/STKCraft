@@ -136,6 +136,8 @@ pub struct Server {
     /// through it, which is what keeps "a capability a user has is a capability an agent has" true for
     /// extensions as well.
     aliases: Vec<stkcraft_framework_extensions::Alias>,
+    /// The expert role, when the session was opened for one. Its tool list is an allowlist.
+    role: Option<stkcraft_agent_knowledge::expert::ExpertRole>,
 }
 
 impl Server {
@@ -148,7 +150,25 @@ impl Server {
             scenario,
             skills,
             knowledge: stkcraft_agent_knowledge::Library::default(),
+            role: None,
         }
+    }
+
+    /// Open the session as an expert role: only its allowlisted tools are listed and callable.
+    #[must_use]
+    pub fn with_role(mut self, role: stkcraft_agent_knowledge::expert::ExpertRole) -> Self {
+        self.role = Some(role);
+        self
+    }
+
+    /// The expert role, when there is one.
+    #[must_use]
+    pub fn role(&self) -> Option<&stkcraft_agent_knowledge::expert::ExpertRole> {
+        self.role.as_ref()
+    }
+
+    fn role_allows(&self, tool: &str) -> bool {
+        self.role.as_ref().is_none_or(|role| role.allows(tool))
     }
 
     /// Serve a knowledge base as well: the person's own documents, searched before a model answers.
@@ -246,6 +266,13 @@ impl Server {
             "tools/list" => {
                 let mut tools = self.tools_json();
                 tools.extend(self.knowledge_tools());
+                if self.role.is_some() {
+                    tools.retain(|tool| {
+                        tool.get("name")
+                            .and_then(Value::as_str)
+                            .is_some_and(|name| self.role_allows(name))
+                    });
+                }
                 Ok(json!({"tools": tools}))
             }
             "tools/call" => {
@@ -253,6 +280,16 @@ impl Server {
                     .get("name")
                     .and_then(Value::as_str)
                     .ok_or((-32602, "tools/call needs a name".to_owned()))?;
+                if !self.role_allows(name) {
+                    let role = self
+                        .role
+                        .as_ref()
+                        .map_or("the session", |role| role.id.as_str());
+                    return Err((
+                        -32000,
+                        format!("tool `{name}` is not available to expert `{role}`"),
+                    ));
+                }
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
                 // The knowledge tools are the server's, not the registry's: a search reads the
                 // person's documents and changes nothing.
@@ -1177,6 +1214,33 @@ mod tests {
         assert!(text.contains(first), "{text}");
         let duration = windows[0]["duration_seconds"].as_f64().expect("a duration");
         assert!(duration > 0.0, "{duration}");
+    }
+
+    #[test]
+    fn an_expert_role_lists_and_dispatches_only_its_tools() {
+        let role = stkcraft_agent_knowledge::expert::ExpertRole::new(
+            "time-frames",
+            "0.1.0",
+            vec!["knowledge.search".to_owned(), "access.compute".to_owned()],
+        )
+        .expect("valid role");
+        let mut server = server().with_role(role);
+        let listed = ask(&mut server, "tools/list", &json!({}));
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(names.contains(&"knowledge.search"), "{names:?}");
+        assert!(names.contains(&"access.compute"), "{names:?}");
+        assert!(!names.contains(&"satellite.add"), "{names:?}");
+        let refused = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "satellite.add", "arguments": {}}),
+        );
+        assert!(refused.get("error").is_some(), "{refused}");
     }
 
     #[test]

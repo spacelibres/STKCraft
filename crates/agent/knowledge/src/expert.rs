@@ -25,6 +25,92 @@ pub struct EvaluationReport {
     pub covered: usize,
 }
 
+/// A runtime role: the expert id and the tools it may use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpertRole {
+    /// The expert package id.
+    pub id: String,
+    /// The role version.
+    pub version: String,
+    tools: Vec<String>,
+}
+
+impl ExpertRole {
+    /// Build a role, rejecting an empty id, version or tool list.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the invalid field.
+    pub fn new(
+        id: impl Into<String>,
+        version: impl Into<String>,
+        tools: Vec<String>,
+    ) -> Result<Self, String> {
+        let id = id.into();
+        let version = version.into();
+        if id.trim().is_empty() || version.trim().is_empty() {
+            return Err("a role needs an id and a version".to_owned());
+        }
+        if tools.is_empty() || tools.iter().any(|tool| tool.trim().is_empty()) {
+            return Err(format!("role `{id}` needs at least one non-empty tool"));
+        }
+        let mut tools = tools;
+        tools.sort();
+        tools.dedup();
+        Ok(Self { id, version, tools })
+    }
+
+    /// Whether this role may call `tool`.
+    #[must_use]
+    pub fn allows(&self, tool: &str) -> bool {
+        self.tools.iter().any(|allowed| allowed == tool)
+    }
+
+    /// The allowed tools, sorted.
+    #[must_use]
+    pub fn tools(&self) -> &[String] {
+        &self.tools
+    }
+}
+
+/// Load one expert's `role.toml`.
+///
+/// # Errors
+///
+/// Returns a message naming the file for an unreadable or malformed role, an id that does not match
+/// the directory, or an empty tool list.
+pub fn load_role(root: &Path, id: &str) -> Result<ExpertRole, String> {
+    let path = root.join("share/experts").join(id).join("role.toml");
+    let text = fs::read_to_string(&path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let file: RoleFile =
+        toml::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    if file.id != id {
+        return Err(format!(
+            "{}: role id is `{}`, package is `{id}`",
+            path.display(),
+            file.id
+        ));
+    }
+    if file.version.trim().is_empty() {
+        return Err(format!("{}: role has no version", path.display()));
+    }
+    if file.tools.is_empty() || file.tools.iter().any(|tool| tool.trim().is_empty()) {
+        return Err(format!(
+            "{}: role needs at least one non-empty tool",
+            path.display()
+        ));
+    }
+    ExpertRole::new(file.id, file.version, file.tools)
+}
+
+#[derive(Debug, Deserialize)]
+struct RoleFile {
+    id: String,
+    version: String,
+    tools: Vec<String>,
+}
+
 /// What one validation pass found.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Validation {
@@ -311,6 +397,9 @@ fn validate_expert(
         ));
         return;
     };
+    if let Err(error) = load_role(root, name) {
+        errors.push(error);
+    }
     let sources_path = expert.join("sources.toml");
     let sources = match fs::read_to_string(&sources_path) {
         Ok(text) => match toml::from_str::<SourceFile>(&text) {
@@ -713,6 +802,11 @@ mod tests {
         ));
         fs::create_dir_all(root.join("share/experts/test/formulas")).expect("fixture");
         fs::write(
+            root.join("share/experts/test/role.toml"),
+            "id = \"test\"\nversion = \"0.1.0\"\ntools = [\"knowledge.search\", \"access.compute\"]\n",
+        )
+        .expect("role");
+        fs::write(
             root.join("share/experts/test/sources.toml"),
             r#"
 schema = 1
@@ -786,6 +880,30 @@ test = "{test}"
             ),
         )
         .expect("evaluation");
+    }
+
+    #[test]
+    fn a_role_loads_and_allows_only_its_tools() {
+        let root = fixture("role");
+        let role = load_role(&root, "test").expect("valid role");
+        assert_eq!(role.id, "test");
+        assert!(role.allows("knowledge.search"));
+        assert!(role.allows("access.compute"));
+        assert!(!role.allows("satellite.add"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_role_id_mismatch_is_refused() {
+        let root = fixture("role-id");
+        fs::write(
+            root.join("share/experts/test/role.toml"),
+            "id = \"other\"\nversion = \"0.1.0\"\ntools = [\"knowledge.search\"]\n",
+        )
+        .expect("role");
+        let error = load_role(&root, "test").expect_err("mismatch must fail");
+        assert!(error.contains("role id"), "{error}");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

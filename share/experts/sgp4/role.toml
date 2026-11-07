@@ -1,0 +1,11 @@
+id = "sgp4"
+version = "0.1.0"
+tools = [
+  "knowledge.search",
+  "knowledge.documents",
+  "version",
+  "engine.commands",
+  "satellite.add",
+  "access.compute",
+  "access.targets",
+]
