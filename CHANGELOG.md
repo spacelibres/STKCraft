@@ -9,6 +9,23 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.86] — Offscreen frames consume their texture updates
+
+### Fixed
+
+- The egui scene and panel screenshot paths consume font/image uploads and deferred texture
+  releases. Previously the pinned egui stack could panic when an otherwise rendered frame was
+  dropped with unapplied deltas, preventing verification images from being written.
+- Texture resources remain alive through GPU submission and readback; deferred releases are
+  consumed even when readback reports an error. A native GPU regression exercises text uploads
+  and an image created and released in one frame.
+
+### Not built yet
+
+- The GPU regression requires an explicitly selected rendering host and is ignored by ordinary
+  test runs. Linux/macOS rendering and other physical adapters have not been verified by this
+  change. Session/context and specialist-agent programme work remains separate.
+
 ## [0.1.85] — Bounded model output and honest token accounting
 
 ### Added

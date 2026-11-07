@@ -56,6 +56,13 @@ satellites, stations and planetary access. The registry is the capability list, 
 
 ## Next
 
+### M0. Safety corrections
+
+- **M0.1 — Offscreen texture lifecycle (0.1.86):** consume egui uploads and deferred releases
+  without dropping pending deltas. The native GPU regression first reproduced the panic, then
+  passed; direct and egui images remained byte-identical with the existing depth checks. The
+  explicit GPU test is separate from the ordinary full gate; other platforms remain unverified.
+
 ### Specialist-agent foundation
 
 [`docs/design/agents.md`](docs/design/agents.md) records the product and development execution domains,
