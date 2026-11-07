@@ -27,6 +27,8 @@
 
 use std::path::{Path, PathBuf};
 
+use stkcraft_framework_storage::transcripts;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{Message, ToolCall, Usage};
@@ -202,9 +204,10 @@ impl Session {
     /// A message when the directory cannot be created.
     pub fn create(directory: &Path) -> Result<Self, String> {
         let id = session_id();
-        let path = directory.join(format!("{id}.jsonl"));
-        std::fs::create_dir_all(directory)
-            .map_err(|error| format!("could not create {}: {error}", directory.display()))?;
+        let path = stkcraft_framework_storage::transcripts::path(directory, &id)
+            .map_err(|error| format!("{error}"))?;
+        stkcraft_framework_storage::transcripts::ensure_directory(directory)
+            .map_err(|error| format!("{error}"))?;
         let now = session_id();
         Ok(Self {
             id,
@@ -229,9 +232,10 @@ impl Session {
     ///
     /// A message when the directory or the file cannot be read.
     pub fn open(directory: &Path, id: &str) -> Result<Self, String> {
-        let path = directory.join(format!("{id}.jsonl"));
-        let text = std::fs::read_to_string(&path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        let path = stkcraft_framework_storage::transcripts::path(directory, id)
+            .map_err(|error| format!("{error}"))?;
+        let text = stkcraft_framework_storage::transcripts::read(&path)
+            .map_err(|error| format!("{error}"))?;
         let mut messages = Vec::new();
         let mut meta = Meta::default();
         for line in text.lines() {
@@ -299,20 +303,8 @@ impl Session {
     /// The ids of the sessions in a directory, newest first.
     #[must_use]
     pub fn list(directory: &Path) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(directory) else {
-            return Vec::new();
-        };
-        let mut ids: Vec<String> = entries
-            .flatten()
-            .filter_map(|entry| {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                name.strip_suffix(".jsonl").map(str::to_owned)
-            })
-            .collect();
-        // The id is a timestamp, so the reverse order is newest first.
-        ids.sort();
-        ids.reverse();
-        ids
+        // The id is a timestamp, so the storage crate's reverse order is newest first.
+        stkcraft_framework_storage::transcripts::list(directory)
     }
 
     /// Append a message: to the conversation and to the file.
@@ -322,7 +314,6 @@ impl Session {
     /// A message when the transcript cannot be written. The conversation keeps the message either
     /// way — a failed write costs the resume, not the answer.
     pub fn record(&mut self, message: Message) -> Result<(), String> {
-        use std::io::Write as _;
         // The title is the first thing the person asked: a session list of timestamps tells nobody
         // which conversation is which.
         if self.meta.title.is_none()
@@ -334,20 +325,14 @@ impl Session {
         self.meta.updated = session_id();
         let line = serde_json::to_string(&Stored::from(&message))
             .map_err(|error| format!("could not serialise a message: {error}"))?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|error| format!("could not open {}: {error}", self.path.display()))?;
-        writeln!(file, "{line}")
-            .map_err(|error| format!("could not write {}: {error}", self.path.display()))?;
+        transcripts::append_line(&self.path, &line).map_err(|error| format!("{error}"))?;
         if let Ok(meta) = serde_json::to_string(&Stored::Meta {
             created: self.meta.created.clone(),
             updated: self.meta.updated.clone(),
             title: self.meta.title.clone(),
             scenario: self.meta.scenario.clone(),
         }) {
-            let _ = writeln!(file, "{meta}");
+            let _ = transcripts::append_line(&self.path, &meta);
         }
         self.messages.push(message);
         Ok(())
@@ -364,17 +349,9 @@ impl Session {
 
     /// Append one stored line to the transcript.
     fn write_stored(&mut self, stored: &Stored) -> Result<(), String> {
-        use std::io::Write as _;
         let line = serde_json::to_string(stored)
             .map_err(|error| format!("could not serialise a transcript line: {error}"))?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|error| format!("could not open {}: {error}", self.path.display()))?;
-        writeln!(file, "{line}")
-            .map_err(|error| format!("could not write {}: {error}", self.path.display()))?;
-        Ok(())
+        transcripts::append_line(&self.path, &line).map_err(|error| format!("{error}"))
     }
 
     /// How many characters of conversation the messages hold, which is the budget's unit.
@@ -480,40 +457,20 @@ impl Session {
 }
 
 /// A session id from the clock: sortable, readable, and unique enough for one person's history.
+///
+/// The conversion goes through `chrono`; the suite rule is that no crate hand-rolls the calendar,
+/// and the storage crate formats the same clock for its rows. A clock outside chrono's range keeps
+/// the epoch sentinel rather than a wrapped date.
 #[must_use]
 pub fn session_id() -> String {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
-    let days = seconds / 86_400;
-    let of_day = seconds % 86_400;
-    let (year, month, day) = crate::session::civil_from_days(i64::try_from(days).unwrap_or(0));
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}-{:02}-{:02}",
-        of_day / 3_600,
-        (of_day % 3_600) / 60,
-        of_day % 60
+    let seconds = i64::try_from(seconds).unwrap_or(i64::MAX);
+    chrono::DateTime::from_timestamp(seconds, 0).map_or_else(
+        || "1970-01-01T00-00-00".to_owned(),
+        |instant| instant.format("%Y-%m-%dT%H-%M-%S").to_string(),
     )
-}
-
-/// Days since 1970-01-01 to a Gregorian date, after Hinnant's `civil_from_days`.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_piece = (5 * day_of_year + 2) / 153;
-    let day = u32::try_from(day_of_year - (153 * month_piece + 2) / 5 + 1).unwrap_or(1);
-    let month = u32::try_from(if month_piece < 10 {
-        month_piece + 3
-    } else {
-        month_piece - 9
-    })
-    .unwrap_or(1);
-    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 #[cfg(test)]

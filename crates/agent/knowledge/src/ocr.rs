@@ -106,9 +106,7 @@ mod tests {
         // The folder name is ASCII on purpose. On Windows, `cmd` echoes the variable through the console code
         // page, and a non-ASCII path came back as replacement characters, so the test failed on the codec
         // rather than on the plumbing it is meant to check.
-        let page = std::env::temp_dir()
-            .join("OCR papers")
-            .join("a paper.pdf");
+        let page = std::env::temp_dir().join("OCR papers").join("a paper.pdf");
         #[cfg(windows)]
         let command = "chcp 65001 >nul & echo file=%STKCRAFT_OCR_FILE% page=%STKCRAFT_OCR_PAGE% & echo the recognised line";
         #[cfg(not(windows))]

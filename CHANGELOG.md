@@ -9,6 +9,87 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.88] — The albatross mark, a reachable command surface, and a gate that reads the notebook
+
+### Added
+
+- The project's albatross mark, in the family's `assets/app-icon/` layout: the SVG master, the 512 px
+  PNG the window embeds, the Windows ICO, and their README/LICENSE. The window icon and the panel
+  heading now carry it, and `README.md` opens with it. The mark is the project's own artwork, not
+  covered by the code licence.
+- `stkcraft commands` lists every command id, its parameters and its menu; `stkcraft run <id>` runs any
+  of them against an empty or loaded scenario, with `--scenario`, `--write`, `--json` and
+  `--<parameter>`. A scenario document is validated, bounded to 16 MiB, and written back on request.
+- A window menu generated from the registry's own `menu_path`, with a small parameter form for
+  commands that need one, and `Ctrl+Shift+A` for `access.compute`. A menu click is the only path that
+  starts an interactive sequence.
+- `stkcraft-framework-storage::transcripts`: session files are opened, read, appended and listed by
+  the storage crate, which validates a session id as a file name and bounds a transcript to 64 MiB
+  before reading it.
+- `Scenario::empty_at` and `Scenario::for_now`: a production path that cannot read the system clock
+  reports it instead of dating the mission to J2000.
+- `house-rules.yml` checks the AGENTS.md core and Rust blocks against craft-contrib; the gate now runs
+  Windows as well as Ubuntu, with the suite's craft-fonts pin.
+- MCP tools carry `x-enabled`, so a command whose precondition the scenario does not meet is
+  advertised as unavailable before a call.
+- `access.targets` returns the merged windows with UTC instants in the text and in
+  `structuredContent`; `Degrees` parameters carry `x-unit: degrees`.
+
+### Changed
+
+- The control channel's `engine.execute` returns the summary and every window the command computed,
+  through the same answer formatter the command line uses. A launcher is no longer told a count.
+- Interface text: the i18n extractor no longer mistakes `&'static str` lifetimes for character
+  literals (which had hidden every `tr!` after one), the command labels and the window's status,
+  result and diagnostic lines go through `tr!`/`trn!`, and 55 strings are extracted again.
+- `cargo xtask release` tags every version but prints a GitHub Release command only for a stable
+  version (1.0.0 or later, no pre-release suffix). The 0.x development record is tags and nothing
+  else; the 86 historical 0.x Releases were removed and all 94 tags kept.
+- The generated API reference keeps documentation lists and tables as Markdown blocks instead of
+  joining them into one line, and resolves no relative link into the source tree.
+- The asset gate matches whole repository-relative paths and reads `.gitignore` directory entries in
+  every spelling git accepts, so `plan/` no longer fails a check about what ships.
+- Calendar conversion in storage and the runtime goes through `chrono`; the two hand-written
+  `civil_from_days` copies are gone.
+
+### Fixed
+
+- A TLE field spelled `NaN`, `inf` or `-inf` is refused, and `Elements::from_tle` checks the mean
+  motion, BStar and the three angles for finiteness; a crafted element set can no longer become a
+  silent non-orbit.
+- A planetary access search is capped at ten million samples, like the Earth sampler; `hours: 1e12`
+  is an error instead of a hang.
+- A target is capped at 1024 vertices before any window search, in `add_target`, `validate` and the
+  `target.add` parser.
+- The control channel bounds one request line to 1 MiB before parsing it, and the DAF reader and
+  `julian_to_utc_naive` use checked arithmetic instead of wrapping.
+- A `debug_assert!` on the propagation path became a returned error; a debug build no longer panics
+  on the propagation path.
+- The API reference was stale (it still named 0.1.86 while the workspace was 0.1.87), so the gate
+  failed at HEAD; it is current again.
+- README, ROADMAP, standards, storage, mathematics, knowledge, CCSDS, sources, architecture and
+  CONTRIBUTING were corrected where they described a capability the code does not have, or a command
+  the CLI cannot run.
+
+### Not built yet
+
+- The release workflow and the platform packaging scripts; there is no installer, and
+  `contributors.json` is generated only by the shared `refresh-contributors` release job.
+- `target.add` still takes its corners as the `lat,lon;…` text form rather than a typed parameter.
+- Assistant failure messages, frame diagnostics and command parameter descriptions are English; the
+  catalogs cover the window chrome and the strings the window itself builds.
+- `ui.json` remains the family's configuration file written by the app, not a record table.
+- Coverage analysis, a browser shell, the extension store and DOCX/XLSX extraction remain unbuilt.
+
+### Verification
+
+- `cargo xtask ci` on Windows: fmt, clippy, tests, assets, i18n, api-docs, layers, wasm, version and
+  lockfile.
+- The command line was exercised end to end: `satellite.add`, `station.add` and `access.compute`
+  against a written scenario, with `--json` returning the windows.
+- The panel screenshot was rendered offscreen and inspected; the menu bar and the albatross are in it.
+- The house-rules checker passes against the craft-contrib main checkout.
+
 ## [0.1.87] — Test OCR on Windows without a non-ASCII path; api reference check ignores line endings
 
 ### Fixed

@@ -1,10 +1,11 @@
-//! The `DeepSeek` agent: a model driving the engine through its own tools.
+//! The model agent: a model driving the engine through its own tools.
 //!
 //! This crate is the other half of the MCP server. `stkcraft-agent-mcp` lets a client *outside* the
 //! process — Claude Desktop, a local harness — drive the engine; this one lets the engine drive
-//! itself from a prompt, with `DeepSeek` as the model, and it is the same surface either way: the
-//! tools are the command registry's, executed through [`stkcraft_agent_mcp::Server`], and the skills are
-//! the same markdown documents.
+//! itself from a prompt, with the connection the person configured (`DeepSeek` is the default and
+//! [`ChatModel`] is a trait, so a different endpoint is a different provider rather than a second
+//! loop), and it is the same surface either way: the tools are the command registry's, executed
+//! through [`stkcraft_agent_mcp::Server`], and the skills are the same markdown documents.
 //!
 //! # The loop
 //!
@@ -21,7 +22,7 @@
 //! question. The model is told which skills exist and calls [`SKILL_TOOL`] when it wants one — the
 //! same "progressive disclosure" an MCP client gets from `resources/list` and `prompts/get`.
 //!
-//! # Talking to `DeepSeek` without an HTTP dependency
+//! # Talking to the model without an HTTP dependency
 //!
 //! The transport is `curl` on standard input, which is already how this repository fetches its
 //! bulk data: no TLS stack in the build, no HTTP client to audit, and the request and response are
@@ -39,13 +40,16 @@
 #![forbid(unsafe_code)]
 
 use std::fmt::Write as _;
-use std::io::Write as _;
 
 use serde_json::{Value, json};
 use stkcraft_agent_mcp::Server;
 
+pub mod control;
+pub use control::{CancellationToken, ModelError, RequestControl};
 pub mod session;
 pub mod translate;
+#[cfg(not(target_arch = "wasm32"))]
+mod transport;
 pub mod usage;
 pub use usage::{AnswerUsage, CompletionTokensDetails, Usage, UsageAggregate};
 
@@ -338,6 +342,22 @@ pub trait ChatModel {
     ///
     /// Whatever the transport failed at, as a message for the caller.
     fn complete(&self, messages: &[Message], tools: &[Value]) -> Result<Turn, String>;
+    /// Cooperative adapter; cannot interrupt an in-progress legacy implementation.
+    /// # Errors
+    /// Cancelled, Timeout or sanitized `ModelFailed`.
+    fn complete_controlled(
+        &self,
+        messages: &[Message],
+        tools: &[Value],
+        control: &RequestControl,
+    ) -> Result<Turn, ModelError> {
+        control.check()?;
+        let result = self
+            .complete(messages, tools)
+            .map_err(|_| ModelError::ModelFailed);
+        control.check()?;
+        result
+    }
 }
 
 /// A chat-completions endpoint, spoken over `curl`.
@@ -560,47 +580,50 @@ impl Provider {
 
 impl ChatModel for Provider {
     fn complete(&self, messages: &[Message], tools: &[Value]) -> Result<Turn, String> {
-        self.validate_history(messages)?;
-        let body = self.body(messages, tools).to_string();
-        let mut child = std::process::Command::new("curl")
-            .args([
-                "-sS",
-                // Retain curl's HTTP failure detection. Response bodies stay private because they
-                // may contain provider reasoning or an echoed request.
-                "--fail-with-body",
-                "--max-time",
-                &self.timeout_seconds.to_string(),
-                "-X",
-                "POST",
+        self.complete_controlled(messages, tools, &RequestControl::default())
+            .map_err(|e| e.to_string())
+    }
+    fn complete_controlled(
+        &self,
+        messages: &[Message],
+        tools: &[Value],
+        control: &RequestControl,
+    ) -> Result<Turn, ModelError> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (messages, tools, control);
+            Err(ModelError::Unsupported)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            control.check()?;
+            if self.options.max_output_tokens == Some(0) {
+                return Err(ModelError::InvalidOutputLimit);
+            }
+            if self.options.protocol == ProviderProtocol::OpenAiCompatible
+                && self.options.thinking == ThinkingMode::Enabled
+            {
+                return Err(ModelError::ThinkingProtocol);
+            }
+            self.validate_history(messages)
+                .map_err(|_| ModelError::MissingHistoryReasoning)?;
+            let control = control.bounded(std::time::Duration::from_secs(self.timeout_seconds))?;
+            let body = self.body(messages, tools);
+            control.check()?;
+            let config = transport::encode_config(
                 &self.base_url,
-                "-H",
-                "Content-Type: application/json",
-                "-H",
-            ])
-            .arg(format!("Authorization: Bearer {}", self.api_key))
-            .arg("--data-binary")
-            .arg("@-")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("could not run curl: {error}"))?;
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin
-                .write_all(body.as_bytes())
-                .map_err(|error| format!("could not send the request: {error}"))?;
+                &self.api_key,
+                &body,
+                control.remaining()?,
+            )?;
+            control.check()?;
+            let mut command = std::process::Command::new("curl");
+            command.args(["-q", "--config", "-"]);
+            let text = transport::run(command, config, &control)?;
+            let turn = self.parse_turn(&text).map_err(|_| ModelError::Protocol)?;
+            control.check()?;
+            Ok(turn)
         }
-        let output = child
-            .wait_with_output()
-            .map_err(|error| format!("the model request did not finish: {error}"))?;
-        if !output.status.success() {
-            // A provider error may echo an entire assistant message, including opaque reasoning.
-            // Keep curl's process status useful without publishing its response payload.
-            return Err(format!(
-                "the model endpoint refused the request (curl {})",
-                output.status
-            ));
-        }
-        self.parse_turn(&String::from_utf8_lossy(&output.stdout))
     }
 }
 
@@ -892,6 +915,39 @@ impl<M: ChatModel> Agent<M> {
         question: &str,
         observer: &mut F,
     ) -> Result<Answer, String> {
+        self.ask_observing_controlled(question, observer, &RequestControl::default())
+            .map_err(|error| {
+                if error == ModelError::ModelFailed {
+                    format!(
+                        "the model did not complete within {} turns or failed",
+                        self.max_turns
+                    )
+                } else {
+                    error.to_string()
+                }
+            })
+    }
+    /// Ask with a shared request control. Tools already executing finish synchronously;
+    /// cancelled transcripts may be partial and isolated UI workers must discard them.
+    /// # Errors
+    /// Typed model or control failure.
+    pub fn ask_controlled(
+        &mut self,
+        question: &str,
+        control: &RequestControl,
+    ) -> Result<Answer, ModelError> {
+        self.ask_observing_controlled(question, &mut |_| {}, control)
+    }
+    /// Ask with cooperative control and a tool observer.
+    /// # Errors
+    /// As [`Self::ask_controlled`].
+    pub fn ask_observing_controlled<F: FnMut(&str)>(
+        &mut self,
+        question: &str,
+        observer: &mut F,
+        control: &RequestControl,
+    ) -> Result<Answer, ModelError> {
+        control.check()?;
         self.usage = AnswerUsage::default();
         if self.messages.is_empty() {
             let system = self.system_prompt();
@@ -899,12 +955,17 @@ impl<M: ChatModel> Agent<M> {
         }
         self.push(Message::User(question.to_owned()));
         self.trim_history();
-        self.compact_session();
+        self.compact_session_controlled(control)?;
+        control.check()?;
 
         let mut answer = Answer::default();
         let tools = self.tools_with_skill_reader();
         for _ in 0..self.max_turns {
-            let turn = match self.model.complete(&self.messages, &tools) {
+            control.check()?;
+            let turn = match self
+                .model
+                .complete_controlled(&self.messages, &tools, control)
+            {
                 Ok(turn) => turn,
                 Err(error) => {
                     self.usage.model.record(None, true);
@@ -915,7 +976,8 @@ impl<M: ChatModel> Agent<M> {
             self.usage
                 .model
                 .record(turn.usage.as_ref(), truncated.is_err());
-            truncated?;
+            truncated.map_err(|_| ModelError::TruncatedOutput)?;
+            control.check()?;
             if turn.calls.is_empty() {
                 answer.text.clone_from(&turn.text);
                 self.push(Message::Assistant {
@@ -926,6 +988,7 @@ impl<M: ChatModel> Agent<M> {
                     calls: Vec::new(),
                 });
                 answer.usage = self.usage.clone();
+                control.check()?;
                 return Ok(answer);
             }
             self.push(Message::Assistant {
@@ -936,8 +999,11 @@ impl<M: ChatModel> Agent<M> {
                 calls: turn.calls.clone(),
             });
             for call in turn.calls {
+                control.check()?;
                 let (content, summary) = self.run_tool(&call);
+                control.check()?;
                 observer(&summary);
+                control.check()?;
                 answer.trace.push(summary);
                 self.push(Message::Tool {
                     call_id: call.id,
@@ -945,11 +1011,7 @@ impl<M: ChatModel> Agent<M> {
                 });
             }
         }
-        Err(format!(
-            "the model did not finish within {} turns; the trace is {}",
-            self.max_turns,
-            answer.trace.join("; ")
-        ))
+        Err(ModelError::ModelFailed)
     }
 
     /// Drop the oldest turns when the conversation outgrows [`MAX_HISTORY`].
@@ -985,25 +1047,28 @@ impl<M: ChatModel> Agent<M> {
     /// knows the conversation has a past it cannot see. This mirrors how a harness keeps a long
     /// session inside a context window: the recent turns stay exact, the old ones stop being sent,
     /// and the record says so rather than pretending the conversation began yesterday.
-    fn compact_session(&mut self) {
+    fn compact_session_controlled(&mut self, control: &RequestControl) -> Result<(), ModelError> {
+        control.check()?;
         // The budget is measured on what the model would actually receive: the messages plus the tool
         // schemas, which for the engine's ten tools is a real part of the request.
         if self.context_characters() <= session::CONTEXT_BUDGET_CHARS {
-            return;
+            return Ok(());
         }
         let Some(session) = &self.session else {
-            return;
+            return Ok(());
         };
         let Some(span) = session.plan_compaction() else {
-            return;
+            return Ok(());
         };
         // The summary is written by the model, about the transcript, before the transcript changes:
         // a summary asked for afterwards would describe text nobody kept.
-        let summary = self.summarize(&span);
+        let summary = self.summarize_controlled(&span, control)?;
+        control.check()?;
         if let Some(session) = &mut self.session {
             session.apply_compaction(&span, summary.as_deref());
             session.messages.clone_into(&mut self.messages);
         }
+        Ok(())
     }
 
     /// Ask the model to summarise the span a compaction is about to drop.
@@ -1012,7 +1077,19 @@ impl<M: ChatModel> Agent<M> {
     /// question could depend on — numbers, names, decisions, what was computed — because it is the
     /// only record of them. A model that cannot answer leaves `None`, and the compaction falls back to
     /// a note that says so rather than inventing a summary.
+    #[cfg(test)]
     fn summarize(&mut self, span: &[Message]) -> Option<String> {
+        self.summarize_controlled(span, &RequestControl::default())
+            .ok()
+            .flatten()
+    }
+
+    fn summarize_controlled(
+        &mut self,
+        span: &[Message],
+        control: &RequestControl,
+    ) -> Result<Option<String>, ModelError> {
+        control.check()?;
         let mut transcript = String::new();
         for message in span {
             let line = match message {
@@ -1041,19 +1118,32 @@ impl<M: ChatModel> Agent<M> {
             Message::System(COMPACTION_PROMPT.to_owned()),
             Message::User(transcript),
         ];
-        if let Ok(turn) = self.model.complete(&messages, &[]) {
-            let failed = reject_truncated(turn.finish_reason.as_deref()).is_err()
-                || !turn.calls.is_empty()
-                || turn.text.trim().is_empty();
-            self.usage.compaction.record(turn.usage.as_ref(), failed);
-            if failed {
-                return None;
+        control.check()?;
+        match self.model.complete_controlled(&messages, &[], control) {
+            Ok(turn) => {
+                let failed = reject_truncated(turn.finish_reason.as_deref()).is_err()
+                    || !turn.calls.is_empty()
+                    || turn.text.trim().is_empty();
+                self.usage.compaction.record(turn.usage.as_ref(), failed);
+                if failed {
+                    control.check()?;
+                    return Ok(None);
+                }
+                control.check()?;
+                Ok(Some(turn.text.trim().to_owned()))
             }
-            Some(turn.text.trim().to_owned())
-        } else {
-            // Unknown failed-summary usage is explicitly counted, never priced at zero.
-            self.usage.compaction.record(None, true);
-            None
+            Err(error) => {
+                // Unknown failed-summary usage is explicitly counted, never priced at zero.
+                self.usage.compaction.record(None, true);
+                if matches!(
+                    error,
+                    ModelError::Cancelled | ModelError::Timeout | ModelError::Cleanup
+                ) {
+                    return Err(error);
+                }
+                control.check()?;
+                Ok(None)
+            }
         }
     }
 
@@ -1750,7 +1840,7 @@ mod tests {
         let error = agent
             .ask_observing("rename", &mut |line| trace.push(line.to_owned()))
             .expect_err("invalid reasoning");
-        assert!(error.contains("reasoning_content"));
+        assert!(error.contains("model did not complete"));
         assert_eq!(trace, Vec::<String>::new());
         assert_eq!(
             serde_json::to_value(agent.server().scenario()).expect("scenario"),
@@ -2755,5 +2845,99 @@ mod tests {
         assert!(printed.contains("https://example"), "{printed}");
         assert!(provider.has_credential());
         assert!(!Provider::new("u", "m", "   ").has_credential());
+    }
+    #[test]
+    fn controlled_cancellation_stops_before_mutation_and_between_tools() {
+        let token = CancellationToken::default();
+        token.cancel();
+        let mut a = agent(vec![]);
+        assert_eq!(
+            a.ask_controlled("x", &RequestControl::new(token)),
+            Err(ModelError::Cancelled)
+        );
+        assert_eq!(a.messages, []);
+        assert_eq!(a.usage().model.requests, 0);
+        let token = CancellationToken::default();
+        let control = RequestControl::new(token.clone());
+        let mut a = agent(vec![Turn {
+            calls: vec![
+                ToolCall {
+                    id: "first".into(),
+                    name: "scenario.rename".into(),
+                    arguments: json!({"name":"first"}),
+                },
+                ToolCall {
+                    id: "second".into(),
+                    name: "scenario.rename".into(),
+                    arguments: json!({"name":"second"}),
+                },
+            ],
+            usage: Some(reported_usage(3)),
+            ..Turn::default()
+        }]);
+        let result = a.ask_observing_controlled("rename", &mut |_| token.cancel(), &control);
+        assert_eq!(result, Err(ModelError::Cancelled));
+        assert_eq!(a.server().scenario().name, "first");
+        assert_eq!(a.usage().model.requests, 1);
+        assert_eq!(a.usage().model.known.total_tokens, 3);
+    }
+    #[test]
+    fn cancellation_after_legacy_response_discards_turn_and_accounts_unknown_attempt() {
+        struct Cancels(CancellationToken);
+        impl ChatModel for Cancels {
+            fn complete(&self, _: &[Message], _: &[Value]) -> Result<Turn, String> {
+                self.0.cancel();
+                Ok(Turn {
+                    text: "unaccepted".into(),
+                    ..Turn::default()
+                })
+            }
+        }
+        let token = CancellationToken::default();
+        let mut a = Agent::new(
+            Cancels(token.clone()),
+            Server::new(Scenario::empty("t"), vec![]),
+        );
+        assert_eq!(
+            a.ask_controlled("x", &RequestControl::new(token)),
+            Err(ModelError::Cancelled)
+        );
+        assert_eq!(a.usage().model.requests, 1);
+        assert_eq!(a.usage().model.unknown_usage_requests, 1);
+        assert_eq!(a.usage().model.failed_requests, 1);
+        assert!(
+            !a.messages
+                .iter()
+                .any(|m| matches!(m, Message::Assistant { .. }))
+        );
+    }
+    #[test]
+    fn summary_interruptions_propagate_instead_of_falling_back() {
+        struct Interrupted(ModelError);
+        impl ChatModel for Interrupted {
+            fn complete(&self, _: &[Message], _: &[Value]) -> Result<Turn, String> {
+                Err("unused".into())
+            }
+            fn complete_controlled(
+                &self,
+                _: &[Message],
+                _: &[Value],
+                _: &RequestControl,
+            ) -> Result<Turn, ModelError> {
+                Err(self.0)
+            }
+        }
+        for error in [ModelError::Cancelled, ModelError::Timeout] {
+            let mut a = Agent::new(
+                Interrupted(error),
+                Server::new(Scenario::empty("t"), vec![]),
+            );
+            assert_eq!(
+                a.summarize_controlled(&[Message::User("old".into())], &RequestControl::default()),
+                Err(error)
+            );
+            assert_eq!(a.usage().compaction.failed_requests, 1);
+            assert_eq!(a.usage().compaction.unknown_usage_requests, 1);
+        }
     }
 }

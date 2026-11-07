@@ -42,7 +42,7 @@
 )]
 #![forbid(unsafe_code)]
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::path::PathBuf;
 
@@ -344,16 +344,50 @@ pub fn serve(port: u16, mut control: Control) -> Result<(), String> {
     Ok(())
 }
 
+/// The largest request line this socket accepts, bytes.
+///
+/// A local peer that never sends a newline must not make the process allocate until it dies. The
+/// limit is far above any protocol request (the scenario is read by a separate method), and a line
+/// that hits it is answered with an error and the connection is closed.
+const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
+
+/// Read one bounded line, or `None` at end of stream.
+fn read_request_line(reader: &mut impl BufRead) -> std::io::Result<Option<String>> {
+    let mut line = String::new();
+    let read = reader
+        .by_ref()
+        .take(MAX_REQUEST_BYTES)
+        .read_line(&mut line)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    Ok(Some(line))
+}
+
 /// Read JSON lines from one client and answer them.
 fn handle_connection(stream: TcpStream, control: &mut Control) -> Result<(), String> {
     let mut writer = stream
         .try_clone()
         .map_err(|error| format!("could not clone the socket: {error}"))?;
-    let reader = BufReader::new(stream);
-    for line in reader.lines() {
-        let Ok(line) = line else {
-            break;
+    let mut reader = BufReader::new(stream);
+    loop {
+        let line = match read_request_line(&mut reader) {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(error) => {
+                eprintln!("control: could not read a request: {error}");
+                break;
+            }
         };
+        if !line.ends_with('\n') {
+            let _ = writeln!(
+                writer,
+                "{}",
+                json!({"id": Value::Null, "error": {"message": "request too large"}})
+            );
+            let _ = writer.flush();
+            break;
+        }
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -405,6 +439,28 @@ mod tests {
 
     fn call(control: &mut Control, method: &str, params: &Value) -> Value {
         control.handle(&json!({"id": 1, "method": method, "params": params}))
+    }
+
+    #[test]
+    fn a_request_line_is_bounded_before_it_is_parsed() {
+        let short = b"{\"id\":1}\n";
+        let mut cursor = std::io::Cursor::new(short.to_vec());
+        let line = read_request_line(&mut cursor)
+            .expect("a cursor reads")
+            .expect("a line");
+        assert_eq!(line, "{\"id\":1}\n");
+
+        let limit = usize::try_from(MAX_REQUEST_BYTES).expect("the limit fits in usize");
+        let long = vec![b'a'; limit + 1];
+        let mut cursor = std::io::Cursor::new(long);
+        let line = read_request_line(&mut cursor)
+            .expect("a cursor reads")
+            .expect("a line");
+        assert_eq!(line.len(), limit);
+        assert!(
+            !line.ends_with('\n'),
+            "an unterminated line must be refused"
+        );
     }
 
     fn authenticated() -> Control {

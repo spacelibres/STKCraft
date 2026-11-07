@@ -39,6 +39,13 @@ impl PlanetPass {
 /// about twenty samples per boundary, so this is cheap and precise rather than a trade-off.
 pub const BOUNDARY_TOLERANCE_SECONDS: f64 = 1.0;
 
+/// The most samples one search may ask for.
+///
+/// The same bound the Earth sampler applies (`stkcraft-astro-access::window`): a caller-supplied
+/// window and step can otherwise ask for billions of full propagations, which is a hang rather
+/// than a slow answer in a synchronous transport.
+const MAXIMUM_STEPS: f64 = 10_000_000.0;
+
 /// Every pass of `orbit` over `access` in the window, in time order.
 ///
 /// `from` is the start of the search and must be on the TDB scale, because the body's rotation
@@ -82,6 +89,14 @@ pub fn find_passes(
     access.problem().validate()?;
 
     let total_seconds = hours * 3_600.0;
+    // This path had no bound, so `hours: 1e12` asked for a hundred billion full propagations and
+    // hung the transport that called it instead of returning an error.
+    let required_steps = (total_seconds / step_seconds).ceil();
+    if !required_steps.is_finite() || required_steps > MAXIMUM_STEPS {
+        return Err(Error::Unsupported {
+            what: "a planetary search with more than ten million samples",
+        });
+    }
     // At a step no smaller than the tolerance the sampler would be slower than the bisection it
     // feeds, and it could miss a pass shorter than one step; both are the caller's to choose.
     let at = |offset: f64| -> Result<bool> {
@@ -234,5 +249,9 @@ mod tests {
         assert!(find_passes(&orbit, &other, tdb(0.0), 1.0, 10.0).is_err());
         assert!(find_passes(&orbit, &access, tdb(0.0), 0.0, 10.0).is_err());
         assert!(find_passes(&orbit, &access, tdb(0.0), 1.0, 0.0).is_err());
+        // A caller-supplied window and step must not be able to ask for billions of samples: that
+        // is a hang in a synchronous transport, not a slow analysis.
+        assert!(find_passes(&orbit, &access, tdb(0.0), 1.0e12, 10.0).is_err());
+        assert!(find_passes(&orbit, &access, tdb(0.0), 1.0, 0.000_1).is_err());
     }
 }

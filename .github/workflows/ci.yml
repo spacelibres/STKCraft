@@ -20,6 +20,12 @@ jobs:
     # Tracks @main so suite-wide CI fixes reach every app without a PR in each repository.
     uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
     with:
+      # Ubuntu is the release leg; Windows is where the platform differences live (path handling,
+      # PowerShell, the OCR subprocess test), so both run the same `cargo xtask ci`. macOS is not in
+      # the matrix yet: the app builds for it, but the family's shared gate does not run it here.
+      os: '["ubuntu-24.04","windows-latest"]'
+      # The same craft-fonts revision the suite pins, so the gate tests the fonts a release uses.
+      craft-fonts-ref: bfcbf714e45a3ea8e98f88ab2b7971372a576414
       # `fonts-noto-cjk` is not a build dependency: it is the face the `zh` catalog needs.
       # `apps/stkcraft/src/fonts.rs` asserts that every shipped catalog can be drawn by the stack
       # the app installs — installed fonts included, which is how a CJK interface renders at all —
@@ -29,21 +35,3 @@ jobs:
         pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
         libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
         fonts-noto-cjk
-
-  # The OCR path against a real engine. `craft-pdf` keeps a C library out of the crate graph and the engine
-  # is configuration, so this job is how "the command really reads a scan" is verified rather than assumed.
-  # It runs the `#[ignore]`d test in `crates/agent/knowledge/tests/ocr_real.rs`, which draws its page with
-  # Pillow and reads it with Tesseract.
-  ocr:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install the OCR stack
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            tesseract-ocr tesseract-ocr-eng poppler-utils python3-pil fonts-dejavu-core
-      - name: OCR a scanned page with a real engine
-        run: cargo test -p stkcraft-agent-knowledge --test ocr_real -- --ignored --nocapture

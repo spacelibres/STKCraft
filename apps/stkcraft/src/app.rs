@@ -22,7 +22,7 @@ use std::fmt::Write as _;
 use std::time::Instant;
 
 use eframe::egui;
-use stkcraft_astro_engine::{Registry, Scenario};
+use stkcraft_astro_engine::{Args, Parameter, Registry, Scenario};
 use stkcraft_framework_core::Angle;
 use stkcraft_framework_time::Epoch;
 use stkcraft_ui_viewport::scene::SceneData;
@@ -41,6 +41,19 @@ pub const DEFAULT_RATE: f64 = 60.0;
 /// One day, so a low Earth orbit gets about fifteen passes: enough to be interesting and few
 /// enough to fit in the panel.
 pub const DEFAULT_ANALYSIS_SECONDS: f64 = 86_400.0;
+
+/// A command waiting for its parameters in the window.
+///
+/// The menu is generated from the registry, so a command with required parameters cannot be run
+/// from a single click. This is the small form that asks for them — a menu click is the one place
+/// the rules allow an interactive sequence.
+struct CommandForm {
+    id: String,
+    label: String,
+    parameters: Vec<Parameter>,
+    values: Vec<String>,
+    error: Option<String>,
+}
 
 /// The state the window draws from.
 pub struct App {
@@ -83,6 +96,13 @@ pub struct App {
     control: Option<crate::control::Bridge>,
     /// How many frames this window has drawn, so `ui.state` can say whether it is painting.
     frames: u64,
+    /// The albatross mark beside the panel heading, loaded on the first draw so no texture is
+    /// created before there is a context to own it.
+    logo: Option<egui::TextureHandle>,
+    /// Whether loading the mark was attempted, so a decode that failed is not retried every frame.
+    logo_attempted: bool,
+    /// A command whose required parameters the person is filling in.
+    command_form: Option<CommandForm>,
 }
 
 impl App {
@@ -131,6 +151,9 @@ impl App {
             fonts_for: None,
             control: None,
             frames: 0,
+            logo: None,
+            logo_attempted: false,
+            command_form: None,
         }
     }
 
@@ -230,7 +253,9 @@ impl App {
             self.accesses = outcome.access.clone().unwrap_or_default();
         }
         self.status = Some((true, outcome.summary.clone()));
-        Ok(serde_json::json!({"summary": outcome.summary}))
+        // The same answer the MCP server gives a model: the summary, and every window it computed.
+        // A launcher that asked for an analysis must not be told only how many passes there were.
+        Ok(crate::answer::json(&outcome, &self.scenario))
     }
 
     /// Answer `ui.screenshot` with the frame the window paints next.
@@ -392,11 +417,12 @@ impl App {
         let step = step_duration(self.access_step_seconds);
         // The analysis is anchored at the scenario's own epoch, so the table does not move when
         // the display clock does.
-        let mut analysis = self.scenario.clone();
-        analysis.duration_seconds = DEFAULT_ANALYSIS_SECONDS;
+        // Run on the window's own scenario, not a copy with a default duration: the timeline a
+        // person set with `scenario.set-duration` is the interval the table describes, and a
+        // launcher's `engine.execute` must get the same answer.
         match registry.run(
             "access.compute",
-            &mut analysis,
+            &mut self.scenario,
             &stkcraft_astro_engine::Args::none().with(
                 "step-seconds",
                 stkcraft_astro_engine::Arg::Number(step.as_seconds()),
@@ -405,17 +431,25 @@ impl App {
             Ok(outcome) => {
                 self.accesses = outcome.access.unwrap_or_default();
                 let passes: usize = self.accesses.iter().map(|a| a.windows.len()).sum();
-                self.status = Some((
-                    true,
-                    format!(
-                        "{passes} pass(es) over {} satellite/station pair(s).",
-                        self.accesses.len()
-                    ),
-                ));
+                let status = stkcraft_framework_i18n::trn!(
+                    &self.translations,
+                    &self.language,
+                    "{n} pass over {pairs} pair",
+                    "{n} passes over {pairs} pairs",
+                    u64::try_from(passes).unwrap_or(u64::MAX)
+                )
+                .replace("{pairs}", &self.accesses.len().to_string());
+                self.status = Some((true, status));
             }
             Err(error) => {
                 self.accesses.clear();
-                self.status = Some((false, format!("Access failed: {error}")));
+                let status = stkcraft_framework_i18n::tr!(
+                    &self.translations,
+                    &self.language,
+                    "Access failed: {error}"
+                )
+                .replace("{error}", &error.to_string());
+                self.status = Some((false, status));
             }
         }
     }
@@ -472,10 +506,20 @@ impl App {
     pub fn panels(&mut self, ui: &mut egui::Ui) {
         self.install_fonts(ui.ctx());
         self.poll_translation();
+        if !self.logo_attempted {
+            self.logo_attempted = true;
+            self.logo = crate::branding::texture(ui.ctx());
+            if self.logo.is_none() {
+                log::warn!(
+                    "the albatross mark could not be decoded; the panel shows the name only"
+                );
+            }
+        }
         if self.translation.is_some() {
             // A translation is a network round trip; keep drawing so its result is picked up.
             ui.ctx().request_repaint();
         }
+        self.menu(ui);
         egui::Panel::left("controls")
             .resizable(true)
             .default_size(300.0)
@@ -506,6 +550,226 @@ impl App {
         }
     }
 
+    /// The menu bar, generated from the command registry's own `menu_path`.
+    ///
+    /// A command is reachable from the menu by being in the registry, not by being listed in a
+    /// second table here: the menu, the CLI, MCP and the control channel all read the same ids.
+    fn menu(&mut self, ui: &mut egui::Ui) {
+        let registry = Registry::builtin();
+        let mut chosen: Option<String> = None;
+        egui::Panel::top("menu").show(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                let mut groups: Vec<&str> = Vec::new();
+                for command in registry.iter() {
+                    if !groups.contains(&command.descriptor.menu_path) {
+                        groups.push(command.descriptor.menu_path);
+                    }
+                }
+                for group in groups {
+                    ui.menu_button(group, |ui| {
+                        for command in registry
+                            .iter()
+                            .filter(|command| command.descriptor.menu_path == group)
+                        {
+                            let enabled = registry
+                                .enabled(command.descriptor.id, &self.scenario)
+                                .unwrap_or(false);
+                            if ui
+                                .add_enabled(
+                                    enabled,
+                                    egui::Button::new(self.command_label(
+                                        command.descriptor.id,
+                                        command.descriptor.label,
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                chosen = Some(command.descriptor.id.to_owned());
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+            });
+        });
+        if let Some(id) = chosen {
+            self.open_command_form(&registry, &id);
+        }
+        // The one shortcut the registry declares today. A shortcut that is not in the registry
+        // would be a second place a capability can hide.
+        let shortcut = egui::KeyboardShortcut::new(
+            egui::Modifiers {
+                ctrl: true,
+                shift: true,
+                ..egui::Modifiers::NONE
+            },
+            egui::Key::A,
+        );
+        if ui.input_mut(|input| input.consume_shortcut(&shortcut)) {
+            self.run_with_defaults("access.compute");
+        }
+        self.command_form_window(ui);
+    }
+
+    /// A command's label in the interface language.
+    ///
+    /// The registry's label is the English source and the fallback. The match is what makes the
+    /// labels extractable: the macros take literals, so a translation cannot be looked up from a
+    /// value passed at run time.
+    fn command_label(&self, id: &str, fallback: &'static str) -> String {
+        let label = match id {
+            "scenario.rename" => {
+                stkcraft_framework_i18n::tr!(&self.translations, &self.language, "Rename Scenario")
+            }
+            "scenario.set-duration" => stkcraft_framework_i18n::tr!(
+                &self.translations,
+                &self.language,
+                "Set Timeline Duration"
+            ),
+            "satellite.add" => {
+                stkcraft_framework_i18n::tr!(&self.translations, &self.language, "Add Satellite")
+            }
+            "satellite.remove" => {
+                stkcraft_framework_i18n::tr!(&self.translations, &self.language, "Remove Satellite")
+            }
+            "station.add" => stkcraft_framework_i18n::tr!(
+                &self.translations,
+                &self.language,
+                "Add Ground Station"
+            ),
+            "station.remove" => stkcraft_framework_i18n::tr!(
+                &self.translations,
+                &self.language,
+                "Remove Ground Station"
+            ),
+            "station.sensor" => stkcraft_framework_i18n::tr!(
+                &self.translations,
+                &self.language,
+                "Set Station Sensor"
+            ),
+            "target.add" => {
+                stkcraft_framework_i18n::tr!(&self.translations, &self.language, "Add Target")
+            }
+            "access.targets" => stkcraft_framework_i18n::tr!(
+                &self.translations,
+                &self.language,
+                "Compute Target Access"
+            ),
+            "access.compute" => {
+                stkcraft_framework_i18n::tr!(&self.translations, &self.language, "Compute Access")
+            }
+            "planet.access" => stkcraft_framework_i18n::tr!(
+                &self.translations,
+                &self.language,
+                "Planet-Centred Access"
+            ),
+            _ => fallback,
+        };
+        label.to_owned()
+    }
+
+    fn open_command_form(&mut self, registry: &Registry, id: &str) {
+        let Some(command) = registry.get(id) else {
+            return;
+        };
+        let label = self.command_label(id, command.descriptor.label);
+        self.command_form = Some(CommandForm {
+            id: id.to_owned(),
+            label,
+            parameters: command.descriptor.parameters.to_vec(),
+            values: vec![String::new(); command.descriptor.parameters.len()],
+            error: None,
+        });
+    }
+
+    /// The small form a parameterised menu item opens. Only a menu click creates one.
+    fn command_form_window(&mut self, ui: &mut egui::Ui) {
+        let Some(mut form) = self.command_form.take() else {
+            return;
+        };
+        let mut open = true;
+        let mut run = false;
+        egui::Window::new(&form.label)
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                for (parameter, value) in form.parameters.iter().zip(form.values.iter_mut()) {
+                    ui.horizontal(|ui| {
+                        ui.label(parameter.name);
+                        ui.text_edit_singleline(value);
+                    });
+                    ui.small(parameter.description);
+                }
+                if let Some(error) = &form.error {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+                if ui
+                    .button(stkcraft_framework_i18n::tr!(
+                        &self.translations,
+                        &self.language,
+                        "Run"
+                    ))
+                    .clicked()
+                {
+                    run = true;
+                }
+            });
+        if run {
+            match self.run_form(&form) {
+                Ok(()) => return,
+                Err(error) => form.error = Some(error),
+            }
+        }
+        if open || form.error.is_some() {
+            self.command_form = Some(form);
+        }
+    }
+
+    fn run_form(&mut self, form: &CommandForm) -> Result<(), String> {
+        let registry = Registry::builtin();
+        let command = registry
+            .get(&form.id)
+            .ok_or_else(|| format!("no command `{}`", form.id))?;
+        let mut values = serde_json::Map::new();
+        for (parameter, value) in form.parameters.iter().zip(&form.values) {
+            if value.trim().is_empty() && !parameter.required {
+                continue;
+            }
+            values.insert(
+                parameter.name.to_owned(),
+                serde_json::Value::String(value.clone()),
+            );
+        }
+        let args = stkcraft_astro_engine::args_from(
+            &command.descriptor,
+            &serde_json::Value::Object(values),
+        );
+        let outcome = registry
+            .run(&form.id, &mut self.scenario, &args)
+            .map_err(|error| format!("{}: {error}", form.id))?;
+        if outcome.access.is_some() {
+            self.accesses = outcome.access.clone().unwrap_or_default();
+        }
+        self.status = Some((true, outcome.summary));
+        self.refresh();
+        Ok(())
+    }
+
+    fn run_with_defaults(&mut self, id: &str) {
+        let registry = Registry::builtin();
+        match registry.run(id, &mut self.scenario, &Args::none()) {
+            Ok(outcome) => {
+                if outcome.access.is_some() {
+                    self.accesses = outcome.access.clone().unwrap_or_default();
+                }
+                self.status = Some((true, outcome.summary));
+                self.refresh();
+            }
+            Err(error) => self.status = Some((false, format!("{id}: {error}"))),
+        }
+    }
+
     /// The `egui` side panel: clock, scenario contents, parameters and results.
     fn left_panels(&mut self, ui: &mut egui::Ui) {
         // The language is copied out so a lookups and the widget borrows below cannot fight over
@@ -516,7 +780,18 @@ impl App {
                 stkcraft_framework_i18n::tr!(&self.translations, &language, $source)
             };
         }
-        ui.heading("STKCraft");
+        ui.horizontal(|ui| {
+            if let Some(logo) = &self.logo {
+                ui.add(
+                    egui::Image::from_texture(egui::load::SizedTexture::new(
+                        logo.id(),
+                        egui::vec2(28.0, 28.0),
+                    ))
+                    .corner_radius(6.0),
+                );
+            }
+            ui.heading("STKCraft");
+        });
         ui.label(format!("{} {}", tr!("version"), env!("CARGO_PKG_VERSION")));
         ui.separator();
 
@@ -607,11 +882,16 @@ impl App {
                         .scenario
                         .station(access.station)
                         .map_or("?", |s| s.name.as_str());
-                    ui.label(format!(
-                        "{satellite} over {station}: {} pass(es), {}",
-                        access.windows.len(),
-                        render::format_duration(access.total.as_seconds())
-                    ));
+                    ui.label(
+                        tr!("{satellite} over {station}: {passes}, {total}")
+                            .replace("{satellite}", satellite)
+                            .replace("{station}", station)
+                            .replace("{passes}", &access.windows.len().to_string())
+                            .replace(
+                                "{total}",
+                                &render::format_duration(access.total.as_seconds()),
+                            ),
+                    );
                     for window in access.windows.iter().take(20) {
                         let start = instant_at(self.scenario.epoch, window.start.as_seconds());
                         ui.label(format!(
@@ -715,12 +995,12 @@ impl App {
 
         ui.separator();
         ui.heading(tr!("Diagnostics"));
-        ui.label(format!(
-            "{} satellite marker(s), {} station(s), {} track(s)",
-            self.frame.satellites.len(),
-            self.frame.stations.len(),
-            self.frame.tracks.len()
-        ));
+        ui.label(
+            tr!("{satellites} satellite marker(s), {stations} station(s), {tracks} track(s)")
+                .replace("{satellites}", &self.frame.satellites.len().to_string())
+                .replace("{stations}", &self.frame.stations.len().to_string())
+                .replace("{tracks}", &self.frame.tracks.len().to_string()),
+        );
         for problem in &self.problems {
             ui.colored_label(egui::Color32::from_rgb(230, 120, 120), problem);
         }
@@ -848,10 +1128,9 @@ pub fn demo_scenario() -> Result<Scenario, String> {
     )
     .map_err(|error| format!("the built-in ISS element set is invalid: {error}"))?;
 
-    let mut scenario = Scenario::empty("Demo");
     // Start at the element set's own epoch. A scenario starting "now" would be years from these
-    // elements and every propagation would be nonsense.
-    scenario.epoch = iss.epoch;
+    // elements and every propagation would be nonsense, so the clock is not consulted at all.
+    let mut scenario = Scenario::empty_at("Demo", iss.epoch);
     scenario.duration_seconds = DEFAULT_ANALYSIS_SECONDS;
     scenario
         .add_satellite("ISS", iss, [240, 90, 60])
@@ -875,11 +1154,19 @@ pub fn demo_scenario() -> Result<Scenario, String> {
 /// The `eframe` options the app runs with.
 #[must_use]
 pub fn native_options() -> eframe::NativeOptions {
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1280.0, 800.0])
+        .with_min_inner_size([640.0, 400.0])
+        .with_title("STKCraft");
+    // The task bar and the alt-tab switcher are the first place a person sees the application, so
+    // the window carries the albatross rather than the toolkit's default icon. A mark that cannot
+    // be decoded leaves the toolkit default in place: the window still opens.
+    match crate::branding::window_icon() {
+        Some(icon) => viewport = viewport.with_icon(icon),
+        None => log::warn!("the albatross window icon could not be decoded"),
+    }
     eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([640.0, 400.0])
-            .with_title("STKCraft"),
+        viewport,
         renderer: eframe::Renderer::Wgpu,
         // The viewport draws a depth-tested globe, so the window's pass needs a depth attachment.
         // `eframe` takes bits and `wgpu` takes a format; the constant ties the two together and a
@@ -894,6 +1181,17 @@ pub fn native_options() -> eframe::NativeOptions {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_asks_for_the_albatross_icon() {
+        let options = native_options();
+        let icon = options
+            .viewport
+            .icon
+            .expect("the embedded albatross decodes");
+        assert_eq!((icon.width, icon.height), (512, 512));
+        assert_eq!(icon.rgba.len(), 512 * 512 * 4);
+    }
 
     /// A window with a bridge attached, and the sender that plays the socket thread's part.
     fn window_with_control() -> (

@@ -37,6 +37,7 @@ use std::path::Path;
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
+use stkcraft_astro_engine::analysis::TargetAccess;
 use stkcraft_astro_engine::commands::{Parameter, ParameterKind, Registry};
 use stkcraft_astro_engine::scenario::Scenario;
 use stkcraft_astro_engine::{PlanetPass, SatelliteAccess};
@@ -369,7 +370,7 @@ impl Server {
                 .map(|(key, value)| format!("{key}={value}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let mut tool = Self::tool_for(command);
+            let mut tool = self.tool_for(command);
             if let Some(object) = tool.as_object_mut() {
                 object.insert("name".to_owned(), json!(alias.id));
                 object.insert(
@@ -393,12 +394,15 @@ impl Server {
 
     /// The tools the engine's own registry offers.
     fn registry_tools(&self) -> Vec<Value> {
-        self.registry.iter().map(Self::tool_for).collect()
+        self.registry
+            .iter()
+            .map(|command| self.tool_for(command))
+            .collect()
     }
 
     /// One tool descriptor for one command: the schema a model reads comes from the parameters the
     /// command declares, so the two cannot disagree.
-    fn tool_for(command: &stkcraft_astro_engine::commands::Command) -> Value {
+    fn tool_for(&self, command: &stkcraft_astro_engine::commands::Command) -> Value {
         let parameters = command.descriptor.parameters;
         let mut properties = serde_json::Map::new();
         let mut required = Vec::new();
@@ -418,9 +422,13 @@ impl Server {
                 ParameterKind::Number => {
                     json!({"type": "number", "description": description})
                 }
+                // A degrees parameter is a number to a caller, but the unit is not optional: the
+                // schema says so, because a model that has to infer it from the parameter's name
+                // is the failure the declared-kind rule exists to prevent.
                 ParameterKind::Degrees => json!({
                     "type": "number",
                     "description": description,
+                    "x-unit": "degrees",
                 }),
             };
             properties.insert((*name).to_owned(), schema);
@@ -430,6 +438,13 @@ impl Server {
         }
         json!({
             "name": command.descriptor.id,
+            // A command whose precondition the scenario does not meet is advertised as unavailable,
+            // not silently offered and then refused with a generic "not available". A client can
+            // say what is missing before the call.
+            "x-enabled": self
+                .registry
+                .enabled(command.descriptor.id, &self.scenario)
+                .unwrap_or(false),
             "description": format!(
                 "{}. Parameters: {}",
                 command.descriptor.label,
@@ -632,6 +647,16 @@ impl Server {
                 "passes": listed,
             }));
         }
+        if let Some(targets) = outcome.targets {
+            let epoch = self.scenario.epoch;
+            let _ = writeln!(text);
+            let listed = self.targets_json(&targets, epoch, &mut text);
+            structured = Some(json!({
+                "kind": "target-access",
+                "epoch": self.scenario.epoch,
+                "pairs": listed,
+            }));
+        }
         Ok((text, structured))
     }
 
@@ -692,6 +717,72 @@ impl Server {
                 json!({
                     "satellite": satellite,
                     "station": station,
+                    "total_seconds": entry.total.as_seconds(),
+                    "windows": windows,
+                })
+            })
+            .collect()
+    }
+
+    /// The target windows, as JSON, with a readable line per pair and per window in `text`.
+    ///
+    /// A target's answer is the merged windows of its vertices, and the tool that computes it must
+    /// return them: a caller told only "1 pair, 3 windows" has to recompute the analysis to learn
+    /// when the passes are, which is work the tool was supposed to have done.
+    fn targets_json(
+        &self,
+        targets: &[TargetAccess],
+        epoch: Epoch,
+        text: &mut String,
+    ) -> Vec<Value> {
+        /// How many windows of one pair the text lists before it summarises the rest.
+        const LISTED: usize = 20;
+        targets
+            .iter()
+            .map(|entry| {
+                let satellite = self
+                    .scenario
+                    .satellite(entry.satellite)
+                    .map_or("?", |satellite| satellite.name.as_str());
+                let _ = write!(
+                    text,
+                    "\n{satellite} over target `{}` ({} vertices): {} window(s), {} in view",
+                    entry.target,
+                    entry.vertices,
+                    entry.windows.len(),
+                    seconds_text(entry.total.as_seconds())
+                );
+                let mut windows = Vec::with_capacity(entry.windows.len());
+                for (index, window) in entry.windows.iter().enumerate() {
+                    let start = instant(epoch, window.start.as_seconds());
+                    let end = instant(epoch, window.end.as_seconds());
+                    windows.push(json!({
+                        "start_utc": start,
+                        "end_utc": end,
+                        "start_seconds": window.start.as_seconds(),
+                        "duration_seconds": window.duration().as_seconds(),
+                    }));
+                    if index < LISTED {
+                        let _ = write!(
+                            text,
+                            "\n  {} → {} UTC ({})",
+                            start,
+                            end,
+                            seconds_text(window.duration().as_seconds())
+                        );
+                    }
+                }
+                if entry.windows.len() > LISTED {
+                    let _ = write!(
+                        text,
+                        "\n  … and {} more (all of them are in the structured content)",
+                        entry.windows.len() - LISTED
+                    );
+                }
+                json!({
+                    "satellite": satellite,
+                    "target": entry.target,
+                    "vertices": entry.vertices,
                     "total_seconds": entry.total.as_seconds(),
                     "windows": windows,
                 })
@@ -948,6 +1039,28 @@ mod tests {
             .expect("planet.access is a tool");
         assert_eq!(planet["inputSchema"]["type"], "object");
         assert!(planet["inputSchema"]["properties"]["body"].is_object());
+        // The degrees kind is not erased into a plain number: the schema declares the unit, so a
+        // caller does not have to infer it from the parameter's name.
+        assert_eq!(
+            planet["inputSchema"]["properties"]["latitude-deg"]["x-unit"],
+            "degrees"
+        );
+        assert!(
+            planet["inputSchema"]["properties"]["body"]
+                .get("x-unit")
+                .is_none()
+        );
+        // A command whose precondition the scenario does not meet says so in the listing.
+        let rename = tools
+            .iter()
+            .find(|tool| tool["name"] == "scenario.rename")
+            .expect("scenario.rename is a tool");
+        assert_eq!(rename["x-enabled"], true);
+        let access = tools
+            .iter()
+            .find(|tool| tool["name"] == "access.compute")
+            .expect("access.compute is a tool");
+        assert_eq!(access["x-enabled"], false);
     }
 
     #[test]
@@ -1010,6 +1123,42 @@ mod tests {
         assert!(text.contains(first), "{text}");
         let duration = windows[0]["duration_seconds"].as_f64().expect("a duration");
         assert!(duration > 0.0, "{duration}");
+    }
+
+    #[test]
+    fn target_access_answers_with_its_windows() {
+        // The same rule as the station case: the merged windows of the target's vertices are the
+        // answer, and a summary count is not. Before this test, every transport dropped
+        // `CommandOutcome::targets` and a caller was told only "1 pair, N window(s)".
+        let mut server = server();
+        for call in [
+            json!({"name": "satellite.add", "arguments": {
+                "name": "ISS", "line1": LEO_L1, "line2": LEO_L2}}),
+            json!({"name": "target.add", "arguments": {
+                "name": "London", "points": "51.5,-0.13"}}),
+        ] {
+            let answer = ask(&mut server, "tools/call", &call);
+            assert!(answer.get("error").is_none(), "{answer}");
+        }
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "access.targets", "arguments": {"step-seconds": 30.0}}),
+        );
+        assert!(answer.get("error").is_none(), "{answer}");
+        let structured = &answer["result"]["structuredContent"];
+        assert_eq!(structured["kind"], "target-access");
+        let pairs = structured["pairs"].as_array().expect("pairs");
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0]["target"], "London");
+        assert_eq!(pairs[0]["vertices"], 1);
+        let windows = pairs[0]["windows"].as_array().expect("windows");
+        assert!(!windows.is_empty(), "no target passes in 24 h");
+        let text = answer["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        let first = windows[0]["start_utc"].as_str().expect("a start time");
+        assert!(text.contains(first), "{text}");
     }
 
     #[test]

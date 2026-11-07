@@ -1,6 +1,6 @@
 # The CCSDS standard set
 
-This is every publication in the CCSDS public catalogue, downloaded and hashed: **495 documents, 548 MB**. It is the set the engine and the knowledge base are aligned to — the blue books this project parses and emits (ODM, TDM, ADM, CDM), and the green, orange, yellow and silver books around them.
+This is every publication in the CCSDS public catalogue, downloaded and hashed: **495 documents, 548 MB**. It is the set the engine and the knowledge base are aligned to: the blue books, including the 500-series mission-operations formats (ODM, TDM, ADM, CDM), and the green, orange, yellow and silver books around them. The corpus is collected; no 500-series message format is parsed or emitted yet.
 
 The rule is the same as `docs/guides/paper-corpus.md`: nothing is committed. `cargo xtask standards` downloads each file from `https://public.ccsds.org/Pubs/<name>` into `data/standards/` (`.gitignore`d) and verifies it against the SHA-256 below; a mismatch is an error, not a warning.
 
@@ -533,6 +533,10 @@ Every row is a file that was downloaded, hashed and then verified by `cargo xtas
 
 ## Aligning to the set
 
-Collecting the standards is the first half; the second is using them. The engine already implements the 500-series formats it emits and parses (ODM 502.0-B-3, TDM 503.0-B-2, ADM 504.0-B-2, CDM 508.0-B-1), and the corpus is what makes each of those claims checkable — a citation into `502x0b3e1.pdf:page 157` is a specification clause a person can read.
+Collecting the standards is the first half; the second is using them. No 500-series format is
+parsed or emitted today: the scenario document is serde JSON, and ODM 502.0-B-3, TDM 503.0-B-2,
+ADM 504.0-B-2 and CDM 508.0-B-1 are in the corpus so an implementation can be written against a
+clause a person can open. A citation into `502x0b3e1.pdf:page 157` is that clause; it is not a claim
+that the code already reads it.
 
 For the rest, the honest state is *collected, not yet aligned*: 3xx cross support, 4xx space link and 6xx internetworking are in the library so a person can search them, and nothing in this repository implements them. `ROADMAP.md` tracks what changes.

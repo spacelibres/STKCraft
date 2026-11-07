@@ -120,9 +120,22 @@ impl Daf {
                     "the summary records form a cycle or a very long chain",
                 ));
             }
-            let offset = (usize::try_from(record).unwrap_or(0)).saturating_sub(1) * RECORD_BYTES;
+            // Addresses come from the file. On a 32-bit target the multiply can overflow, and an
+            // overflow must be an error rather than a wrapped offset that reads the wrong record.
+            let record_number = usize::try_from(record).map_err(|_| {
+                Error::invalid("SPK file", "a summary record address is not positive")
+            })?;
+            let offset = record_number
+                .checked_sub(1)
+                .and_then(|index| index.checked_mul(RECORD_BYTES))
+                .ok_or_else(|| {
+                    Error::invalid("SPK file", "a summary record address is too large")
+                })?;
+            let end = offset.checked_add(RECORD_BYTES).ok_or_else(|| {
+                Error::invalid("SPK file", "a summary record address is too large")
+            })?;
             let record_bytes = bytes
-                .get(offset..offset + RECORD_BYTES)
+                .get(offset..end)
                 .ok_or_else(|| Error::invalid("SPK file", "a summary record is truncated"))?;
             let count = count_of_summaries(record_bytes)?;
             for index in 0..count {
@@ -189,12 +202,18 @@ fn word_offset(word: i32) -> Result<usize> {
     if one_based == 0 {
         return Err(Error::invalid("SPK file", "a segment address is zero"));
     }
-    Ok((one_based - 1) * WORD_BYTES)
+    one_based
+        .checked_sub(1)
+        .and_then(|index| index.checked_mul(WORD_BYTES))
+        .ok_or_else(|| Error::invalid("SPK file", "a segment address is too large"))
 }
 
 fn i32_at(bytes: &[u8], offset: usize) -> Result<i32> {
+    let end = offset
+        .checked_add(4)
+        .ok_or_else(|| Error::invalid("SPK file", "a file record offset is too large"))?;
     let slice = bytes
-        .get(offset..offset + 4)
+        .get(offset..end)
         .ok_or_else(|| Error::invalid("SPK file", "the file record is truncated"))?;
     let mut four = [0_u8; 4];
     four.copy_from_slice(slice);

@@ -24,10 +24,11 @@ elevation that overlap a downlink window in Q3").
 |---|---|---|
 | `scenario` | one row per document: id, name, central body, epoch, duration, revision | it is the unit of work, and everything else points at it |
 | `scenario_revision` | an append-only revision per save: scenario id, revision, timestamp, author, the serialised document | "who changed what, when" is a join, and an undo is a pointer |
-| `satellite`, `station`, `sensor` | the scenario's contents, one row each, typed columns | a query like "every station with a 10° mask" is a `WHERE`, not a parse |
+| `satellite`, `station` | the scenario's contents, one row each, typed columns; sensors and targets are not yet their own table | a query like "every station with a 10° mask" is a `WHERE`, not a parse |
 | `access_window` | satellite, station, start, end, minimum elevation, the run that produced it | the analysis result people quote; indexable by time range |
-| `computation` | a run: id, scenario revision, command id, parameters, engine version, ephemeris digest, started/finished | **provenance**: which numbers came from which inputs |
-| `knowledge_document` | one row per ingested document: path, digest, bytes, pages, added time, source URL | "which document says this" is a join to the citation below |
+| `computation` | a run: id, scenario name and revision, command, parameters, engine version, inputs digest, started time, duration, summary | **provenance**: which numbers came from which inputs |
+| `knowledge_document` | one row per ingested document: path, digest, bytes, passages, added time, source URL | "which document says this" is a join to the citation below |
+| `formula` | one row per recognised formula box, with its text, the sentence that introduces it and the digests that make it re-verifiable (migration V2) | written through `record_formula`; the recogniser and `cargo xtask verify-formulas` exist, but no production path persists a formula yet |
 | `citation` | document id, page or line range, the text quoted, the answer that quoted it | an answer's evidence, queryable afterwards |
 | `translation_row` | locale, context, English source, translation, provenance (a person or a model) | the catalogs are queried and reviewed, not just read |
 | `extension_package` | id, version, kind, trust tier, enabled-for-app, installed time | the store `craft-extensions` describes |
@@ -88,22 +89,29 @@ data will take, so the day an embedding exists it fills a store rather than forc
 ```text
 ${XDG_DATA_HOME:-~/.local/share}/stkcraft/
 ├── stkcraft.db          the relational record (SQLite, STRICT, versioned)
-├── cache/
-│   ├── kernels/         derived kernel indexes
-│   ├── knowledge/       derived inverted index and vectors
-│   └── translations/    generated catalogs
-└── log/
+├── sessions/            stored conversations, one JSON Lines file each,
+│                        written through `stkcraft-framework-storage::transcripts`
+└── cache/
+    └── knowledge/       derived knowledge index, keyed by path, size and modification time
 ```
 
-`${XDG_CONFIG_HOME:-~/.config}/stkcraft/` keeps only what a person chose: `ui.json`, the language
+The data root is `STKCRAFT_DATA` when that is set. Otherwise it is `%APPDATA%\stkcraft` on Windows,
+`~/Library/Application Support/stkcraft` on macOS, and `$XDG_DATA_HOME/stkcraft` elsewhere. Kernel
+indexes and generated catalogs are not cached on disk today.
+
+The configuration directory (`${XDG_CONFIG_HOME:-~/.config}/stkcraft/` on Linux, the platform's
+configuration directory elsewhere) keeps only what a person chose: `ui.json`, the language
 catalogs they generated, their knowledge documents, their extension packages. Data is what the program
 produced; config is what the person decided. A copy of the config directory reproduces someone's setup
 without copying a byte of derived data — and deleting `cache/` never loses a decision.
 
 ## 5. Rules
 
-- **One crate owns persistence** (`stkcraft-framework-storage`). No crate opens a database, writes a key-value
-  file or issues SQL anywhere else; a crate that needs to remember something asks the storage crate.
+- **One crate owns persistence** (`stkcraft-framework-storage`). No crate opens a database, writes a
+  key-value file or issues SQL anywhere else; a crate that needs to remember something asks the
+  storage crate. Transcripts are the newest example: `transcripts::path` validates the session id as
+  a file name (no separators, no `..`), and `transcripts::read` bounds the file before reading it, so
+  `chat --session <id>` cannot choose a path or an allocation.
 - **The record is append-only.** Nothing edits a computation row; a re-run is a new row with a new
   digest. Undo is a pointer to an earlier revision, not a mutation.
 - **Every stored value that came from outside carries its digest**: a kernel, a document, a fetched
@@ -121,8 +129,9 @@ without copying a byte of derived data — and deleting `cache/` never loses a d
 `crates/framework/storage` implements this document: `Store` (SQLite, `STRICT`, WAL, foreign keys,
 forward-only migrations from `PRAGMA user_version`), `Cache` (one file per key, the key never used as a
 path, CRC-32 per value, a damaged value is a miss), and `Vectors` (model and dimension checked, cosine
-by brute force, a flat format for the cache). The record carries the schema of §1 except the two tables
-that have no writer yet: `translation_row` and `extension_package` exist and are not filled.
+by brute force, a flat format for the cache). The record carries the schema of §1. `computation` and
+`access_window` are written by the CLI; `translation_row`, `extension_package`, `knowledge_document`,
+`citation` and `formula` exist and are not yet written by a production path.
 
 The first real consumer is provenance: `stkcraft passes` and `stkcraft planet` record a `computation`
 row — command, parameters, engine version, the **digest of their inputs** — and the access windows they
@@ -136,5 +145,5 @@ run that produced it and to what that run read.
   under a key derived from every file's path, size and modification time, so a re-open is one read and
   an edited corpus replaces its entry rather than accumulating one per save. That is measured in
   `CHANGELOG.md` 0.1.35: 1.43 s → 0.55 s and 173 MB → 124 MB on a 2 000-document corpus.
-- **No corpus fetcher**: the papers the knowledge base should hold need a pinned, checksummed download
-  like `cargo xtask fetch-data`.
+- **Corpus fetchers are built**: `cargo xtask papers` and `cargo xtask standards` download the paper and
+  standards corpora, pinned and checksummed the same way as `cargo xtask fetch-data`.

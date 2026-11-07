@@ -552,9 +552,6 @@ impl Store {
 }
 
 /// Now, as ISO-8601 in UTC, to the second.
-///
-/// Written here rather than through `chrono`: a record's timestamp is a label on a row, and this
-/// crate keeps its dependency list to the SQLite driver and the hash.
 #[must_use]
 pub fn now_iso8601() -> String {
     let seconds = SystemTime::now()
@@ -563,41 +560,19 @@ pub fn now_iso8601() -> String {
     iso8601_from_unix(seconds)
 }
 
-/// A Unix timestamp as ISO-8601 UTC, by the civil-from-days algorithm.
+/// A Unix timestamp as ISO-8601 UTC, to the second.
 ///
-/// Howard Hinnant's `civil_from_days` (public domain, `chrono`-compatible results): days from the
-/// epoch, then the Gregorian date, so a stored timestamp sorts as text and reads as a date.
+/// This used to carry a hand-written `civil_from_days`; the suite rule is that calendar conversion
+/// goes through `chrono`, and a second copy of that algorithm is how two timestamps learn to
+/// disagree. A clock outside chrono's range cannot be formatted, so it keeps the epoch sentinel
+/// rather than a wrapped date.
 #[must_use]
 pub fn iso8601_from_unix(seconds: u64) -> String {
-    let days = i64::try_from(seconds / 86_400).unwrap_or(0);
-    let of_day = seconds % 86_400;
-    let (year, month, day) = civil_from_days(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        of_day / 3_600,
-        (of_day % 3_600) / 60,
-        of_day % 60
+    let seconds = i64::try_from(seconds).unwrap_or(i64::MAX);
+    chrono::DateTime::from_timestamp(seconds, 0).map_or_else(
+        || "1970-01-01T00:00:00Z".to_owned(),
+        |instant| instant.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
     )
-}
-
-/// Days since 1970-01-01 to a Gregorian date, after Hinnant's `civil_from_days`.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_piece = (5 * day_of_year + 2) / 153;
-    let day = u32::try_from(day_of_year - (153 * month_piece + 2) / 5 + 1).unwrap_or(1);
-    let month = u32::try_from(if month_piece < 10 {
-        month_piece + 3
-    } else {
-        month_piece - 9
-    })
-    .unwrap_or(1);
-    (if month <= 2 { year + 1 } else { year }, month, day)
 }
 
 #[cfg(test)]

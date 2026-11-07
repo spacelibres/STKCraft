@@ -70,9 +70,15 @@ The implementing model cannot certify its own physical assumptions by agreement 
 model. Published references remain the acceptance criterion. Numerical and interface drawing
 verification retain the standards in AGENTS.md.
 
-Development workers do not inherit mission documents or provider credentials. Their repository
+Development workers do not inherit mission documents or provider credentials. Maintenance commands that a
+maintainer runs, such as `cargo xtask i18n translate`, are not development workers: they run on demand, under
+the maintainer's own key from the environment, and they are not agent runs. Their repository
 root, writable files and command capabilities are explicit. An agent's worktree is an isolation
 boundary for changes; it must not be described as a security sandbox without an actual sandbox.
+
+Model transport is the exception to the retry policy in "Task lifecycle and resource policy" below. A model request is never retried automatically,
+because a retried request can run a tool twice and cost twice; see `docs/guides/model-provider.md`. Retrying
+it is an explicit user action.
 
 ## Shared infrastructure and separate authority
 

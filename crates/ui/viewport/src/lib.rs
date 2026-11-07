@@ -13,12 +13,12 @@
 //!
 //! # Layers
 //!
-//! This crate sits at the UI layer, above [`LAST_NON_UI_LAYER`], which is what allows it to
+//! This crate sits at the UI layer, above `LAST_NON_UI_LAYER` (defined in `xtask/src/layers.rs`),
+//! which is what allows it to
 //! depend on `wgpu` and `egui`. It depends on `stkcraft-framework-core` for units and errors and on
 //! nothing else from the engine, so the app can feed it from a live scenario, a saved file or a
 //! test fixture with no change here.
 //!
-//! [`LAST_NON_UI_LAYER`]: ../../xtask/src/layers.rs
 
 #![deny(
     clippy::unwrap_used,

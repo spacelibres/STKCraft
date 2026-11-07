@@ -38,6 +38,23 @@ pub enum Invocation {
     Model(ModelRequest),
     /// List or search the person's knowledge base.
     Knowledge(KnowledgeRequest),
+    /// Run one registry command by id, optionally against a scenario document.
+    Run(RunRequest),
+    /// List every command id, its parameters and its menu.
+    Commands,
+}
+
+/// One generic command invocation: the transport that makes every id reachable from a terminal.
+pub struct RunRequest {
+    id: String,
+    /// A scenario document to load before the command runs.
+    scenario: Option<String>,
+    /// Where to write the scenario after the command, when the person asked for it.
+    write: Option<String>,
+    /// Print the structured answer instead of the readable one.
+    json: bool,
+    /// The parameters, as the strings the caller typed; `args_from` converts them by kind.
+    params: serde_json::Value,
 }
 
 /// The parameters of the `passes` subcommand.
@@ -89,6 +106,11 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Control(request) => control(&request),
         Invocation::Model(request) => model(&request),
         Invocation::Knowledge(request) => knowledge(&request),
+        Invocation::Run(request) => run_command(&request),
+        Invocation::Commands => {
+            print!("{}", command_list());
+            Ok(())
+        }
     }
 }
 
@@ -122,6 +144,9 @@ COMMANDS
                 `--max-output-tokens <POSITIVE INTEGER>` (includes thinking tokens)
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
+    run         Run any registry command by id, against a scenario document:
+                `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--<param> VALUE]`
+    commands    List every command id, its parameters and the menu it belongs to
     version     Print the version
     help        Print this text
 
@@ -197,8 +222,180 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
             })?;
             Ok(Invocation::Ask(question))
         }
+        "run" => parse_run(arguments),
+        "commands" => Ok(Invocation::Commands),
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
+}
+
+/// Parse `run <id> [--scenario FILE] [--write FILE] [--json] [--param VALUE]`.
+fn parse_run<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let id = arguments.next().ok_or_else(|| {
+        "`run` needs a command id, e.g. `stkcraft run access.compute`; try `stkcraft commands`"
+            .to_owned()
+    })?;
+    let registry = Registry::builtin();
+    let command = registry
+        .get(&id)
+        .ok_or_else(|| format!("no command `{id}`; try `stkcraft commands`"))?;
+    let mut scenario = None;
+    let mut write = None;
+    let mut json = false;
+    let mut params = serde_json::Map::new();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--json" => json = true,
+            "--scenario" => {
+                scenario = Some(arguments.next().ok_or_else(|| {
+                    "`--scenario` needs a file, e.g. `--scenario mission.json`".to_owned()
+                })?);
+            }
+            "--write" => {
+                write = Some(arguments.next().ok_or_else(|| {
+                    "`--write` needs a file, e.g. `--write mission.json`".to_owned()
+                })?);
+            }
+            other => {
+                let Some(name) = other.strip_prefix("--") else {
+                    return Err(format!(
+                        "unexpected argument `{other}`; parameters are `--<name> <value>`"
+                    ));
+                };
+                let known = command
+                    .descriptor
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.name == name);
+                if !known {
+                    let names = command
+                        .descriptor
+                        .parameters
+                        .iter()
+                        .map(|parameter| format!("--{}", parameter.name))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(format!(
+                        "`{id}` has no parameter `{name}`; it takes {}",
+                        if names.is_empty() {
+                            "no parameters".to_owned()
+                        } else {
+                            names
+                        }
+                    ));
+                }
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| format!("`--{name}` needs a value"))?;
+                params.insert(name.to_owned(), serde_json::Value::String(value));
+            }
+        }
+    }
+    Ok(Invocation::Run(RunRequest {
+        id,
+        scenario,
+        write,
+        json,
+        params: serde_json::Value::Object(params),
+    }))
+}
+
+/// The largest scenario document this command will read, bytes.
+///
+/// A document is input from outside the repository; a path that names a device or a multi-gigabyte
+/// file must fail before the allocation, not after it.
+const MAX_SCENARIO_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Run one command against an empty or loaded scenario, then print and optionally save it.
+fn run_command(request: &RunRequest) -> Result<(), String> {
+    let registry = Registry::builtin();
+    let command = registry
+        .get(&request.id)
+        .ok_or_else(|| format!("no command `{}`; try `stkcraft commands`", request.id))?;
+    let mut scenario = match &request.scenario {
+        Some(path) => load_scenario(path)?,
+        None => Scenario::for_now("command line")
+            .map_err(|error| format!("could not read the system clock: {error}"))?,
+    };
+    scenario
+        .validate()
+        .map_err(|error| format!("scenario: {error}"))?;
+    let args = stkcraft_astro_engine::args_from(&command.descriptor, &request.params);
+    let enabled = registry
+        .enabled(&request.id, &scenario)
+        .map_err(|error| format!("{}: {error}", request.id))?;
+    if !enabled {
+        return Err(format!(
+            "`{}` is not available in this scenario: it needs objects the document does not have \
+             (for example a satellite and a station)",
+            request.id
+        ));
+    }
+    let outcome = registry
+        .run(&request.id, &mut scenario, &args)
+        .map_err(|error| format!("{}: {error}", request.id))?;
+    if request.json {
+        let value = crate::answer::json(&outcome, &scenario);
+        let text = serde_json::to_string_pretty(&value)
+            .map_err(|error| format!("could not print the answer: {error}"))?;
+        println!("{text}");
+    } else {
+        println!("{}", crate::answer::text(&outcome, &scenario));
+    }
+    if let Some(path) = &request.write {
+        save_scenario(path, &scenario)?;
+    }
+    Ok(())
+}
+
+fn load_scenario(path: &str) -> Result<Scenario, String> {
+    let metadata =
+        std::fs::metadata(path).map_err(|error| format!("could not read `{path}`: {error}"))?;
+    if metadata.len() > MAX_SCENARIO_BYTES {
+        return Err(format!(
+            "`{path}` is {} bytes; a scenario document is limited to {MAX_SCENARIO_BYTES}",
+            metadata.len()
+        ));
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("could not read `{path}`: {error}"))?;
+    serde_json::from_str(&text)
+        .map_err(|error| format!("`{path}` is not a scenario document: {error}"))
+}
+
+fn save_scenario(path: &str, scenario: &Scenario) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(scenario)
+        .map_err(|error| format!("could not write the scenario: {error}"))?;
+    std::fs::write(path, text).map_err(|error| format!("could not write `{path}`: {error}"))
+}
+
+/// Every command id, its parameters and its menu, for a caller that has no other catalogue.
+fn command_list() -> String {
+    let mut text = String::from(
+        "COMMAND REGISTRY\nRun one with `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--<param> VALUE]`.\n\n",
+    );
+    for command in Registry::builtin().iter() {
+        let _ = writeln!(
+            text,
+            "{:<22} {:<28} {}",
+            command.descriptor.id, command.descriptor.label, command.descriptor.menu_path
+        );
+        for parameter in command.descriptor.parameters {
+            let kind = match parameter.kind {
+                stkcraft_astro_engine::commands::ParameterKind::Text => "text",
+                stkcraft_astro_engine::commands::ParameterKind::Number => "number",
+                stkcraft_astro_engine::commands::ParameterKind::Degrees => "degrees",
+            };
+            let _ = writeln!(
+                text,
+                "    --{:<20} {:<8} {}{}",
+                parameter.name,
+                kind,
+                if parameter.required { "required; " } else { "" },
+                parameter.description
+            );
+        }
+    }
+    text
 }
 
 fn parse_passes<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
@@ -339,9 +536,9 @@ fn passes(request: &PassRequest) -> Result<(), String> {
     let epoch = element_set.epoch;
     let satellite_name = element_set.catalog_number.clone();
 
-    let mut scenario = Scenario::empty("CLI");
-    // Start at the element set's epoch: the same TLE then always produces the same table.
-    scenario.epoch = epoch;
+    // Start at the element set's epoch: the same TLE then always produces the same table, and the
+    // clock cannot move the analysis.
+    let mut scenario = Scenario::empty_at("CLI", epoch);
     scenario.duration_seconds = request.hours * 3_600.0;
 
     registry
@@ -482,7 +679,8 @@ fn parse_planet<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocati
 /// Run the `planet` subcommand: build the scenario, run the command, print the result.
 fn planet(request: &PlanetRequest) -> Result<(), String> {
     let registry = Registry::builtin();
-    let mut scenario = Scenario::empty("CLI");
+    let mut scenario = Scenario::for_now("CLI")
+        .map_err(|error| format!("could not read the system clock: {error}"))?;
     let outcome = registry
         .run(
             "planet.access",

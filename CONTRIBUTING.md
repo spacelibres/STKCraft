@@ -11,21 +11,23 @@ cargo xtask ci
 ```
 
 That runs, in order: `fmt --check`, clippy with `-D warnings`, the workspace tests, the asset
-attribution check, the layering check, and the WebAssembly check. A commit that fails any of
-them does not land.
+attribution check, the i18n catalog check, the API reference freshness check, the layering check,
+the WebAssembly check, the version consistency check, and a check that the run did not change
+`Cargo.lock`. A commit that fails any of them does not land.
 
 If you cannot run a step — no network for the wasm target, for instance — say so in the commit
 message. Do not silently skip it.
 
 ## One change per commit
 
-A commit is one coherent change, named by a task id in the same form the sibling apps use:
+A commit is one coherent change, named by the roadmap task it advances:
 
 ```
-M1.3: leap-second table with confidence reporting
+F2: sessions carry their metadata and the window lists them
 ```
 
-- `M<major>.<n>` is the milestone and task number from the roadmap.
+- `F<number>` is the programme stage in [`ROADMAP.md`](ROADMAP.md) (`F1`, `F2`, `F5a`). A defect that
+  belongs to no stage names the defect instead, e.g. `assets: skip gitignored scratch directories`.
 - The summary is imperative, lowercase after the colon, and describes the behaviour change.
 - Prefer several small commits over one large one. A reviewer should be able to read each in
   isolation.
@@ -78,20 +80,24 @@ defect, not a shortcut.
 ## Versions and the changelog
 
 Versions live in exactly one place: `[workspace.package] version` in the root `Cargo.toml`.
-Change it with:
+Change it with `cargo xtask version bump`, which raises the smallest component by one, as
+`AGENTS.md` describes. For a deliberate jump, `cargo xtask version set X.Y.Z` writes the number.
+The changelog section that names the new version is committed with it.
 
-```sh
-cargo xtask version set 0.0.2
-```
+Every version is tagged. Only a stable version (1.0.0 or later, with no `-rc`/`-alpha` suffix)
+also gets a GitHub Release; the 0.x development record is tags and nothing else. `cargo xtask
+release` prints the `gh release create` command only for a stable version.
 
-The changelog is written *with* the change, not afterwards. Each released version has a
-section that states:
+The changelog is written *with* the change, not afterwards. Each version has a section headed
+`## [x.y.z] — <title>`, with these subsections, as `AGENTS.md` requires:
 
-- **Added** — capabilities that now exist.
-- **Correctness** — properties the numerical layers guarantee, each with its test.
-- **Known limitations** — what the version deliberately cannot do yet.
+- **Added** — capabilities that now exist, each with its test where it is a correctness property.
+- **Changed** — behaviour that differs from the previous version.
+- **Fixed** — defects corrected, each with its regression test.
+- **Not built yet** — what the version deliberately cannot do yet.
 
-The last of those matters most. An early-alpha release that overstates its coverage wastes a
+The last of those matters most. Sections written before this rule keep the headings they were
+written with; the published history is not rewritten. An early-alpha release that overstates its coverage wastes a
 user's afternoon; one that is honest about a gap saves it.
 
 ## Assets

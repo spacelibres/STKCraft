@@ -81,8 +81,30 @@ answer, so a truncated response cannot silently change a scenario.
 `Answer::usage` and `Agent::usage()` expose reported sums, unknown requests, failed attempts and
 overflow. Compaction requests have a separate aggregate, including failed summary attempts; sums
 cover only reported requests and must not be presented as a complete cost when usage is missing.
-Supervised bounded/cancellable transport is the next stage in
-[the agent programme](../design/agents.md).
+
+## Cancellation and transport bounds
+
+The assistant's **Stop** button cancels its current request. A stopped job remains active until its
+worker reply is drained, and even an already queued successful result cannot be adopted afterward.
+Starting a new conversation discards pending results too. Cancellation is checked between tool calls
+and around model requests, including compaction. An engine calculation already running is
+synchronous; cancellation prevents subsequent work and window adoption when it returns.
+
+Native requests supervise one direct `curl` child with concurrent pipe workers. Serialized/escaped
+request configuration and response bodies are each capped at 8 MiB; diagnostic retention is capped
+at 4 KiB and excess diagnostics are drained. Credentials travel in stdin configuration, outside
+child arguments and temporary files. Default request timeout remains 120 seconds (300 seconds for
+developer translation), bounded further by an optional caller deadline. Requests are not retried
+silently. Typed errors distinguish configuration, transport, timeout, cancellation, HTTP status,
+size and protocol failures without exposing response bodies, reasoning or raw stderr.
+
+Normal cancellation kills and reaps the direct child and joins its pipe workers. Cleanup has a
+one-second grace; an unresolved child or inherited pipe handle produces a distinct cleanup failure.
+Portable process APIs cannot guarantee interruption of OS calls or arbitrary descendants retaining
+pipes. This is supervised transport, with that explicit exceptional failure, and does not provide
+an operating-system sandbox. Browser provider calls return unsupported before using native process
+or clock operations. A legacy `ChatModel` controlled adapter checks before and after a call; an
+implementation must override it to support interruption while the call is running.
 
 Provider behaviour was checked against the official [thinking-mode guide](https://api-docs.deepseek.com/guides/thinking_mode/)
 and [chat-completions contract](https://api-docs.deepseek.com/api/create-chat-completion/)

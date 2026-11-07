@@ -20,8 +20,8 @@ STKCRAFT_KNOWLEDGE=/path/to/documents cargo run --release -p stkcraft -- chat
 ```
 
 Every `.txt`, `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, `.log`, `.rst`, `.tex`, `.org`, `.adoc`,
-`.text` and `.pdf` file under that directory is indexed, up to 8 MiB each for text and 64 MiB for a
-PDF, 2 000 files, 8 levels deep. Hidden files are skipped. Nothing is uploaded anywhere: the search is
+`.text`, `.html`, `.htm` and `.pdf` file under that directory is indexed, up to 8 MiB each for text
+and 64 MiB for a PDF, 2 000 files, 8 levels deep. Hidden files are skipped. Nothing is uploaded anywhere: the search is
 local, and only the passages a question retrieves are sent to the model.
 
 ## Commands
@@ -79,9 +79,11 @@ does not do: **placing text**.
 - **A file that cannot be used is reported.** `Opened::skipped` names it and gives the reason — a scan
   with no text layer, a PDF that will not open, a binary dressed as text — and `stkcraft knowledge`
   prints the list. Indexing nothing while claiming the file is in the library is the worse answer.
-- **What the reader cannot do:** OCR. A scanned page has text in its picture and none in its file, and
-  that is reported as a scan rather than guessed at. Running headers and footers remain in the text,
-  because nothing distinguishes them from a first line; the citation is still the right page.
+- **A scan is read only when an OCR engine is configured.** A scanned page has text in its picture and
+  none in its file; with `STKCRAFT_OCR` (the command the page is piped to) the page is recognised and
+  `Document.ocr_pages` records how many pages came from OCR. Without it the page is reported as a scan
+  rather than guessed at. Running headers and footers remain in the text, because nothing distinguishes
+  them from a first line; the citation is still the right page.
 
 ## What it deliberately does not do
 
@@ -96,20 +98,21 @@ does not do: **placing text**.
 ## A conversation outlives the process
 
 The agent's memory is a **session**: a transcript at
-`~/.local/share/stkcraft/sessions/<id>.jsonl`, one JSON object per message, written as the
+`sessions/<id>.jsonl` under the data directory (see `storage.md` §4), one JSON object per message, written as the
 conversation happens. `stkcraft chat --sessions` lists them and `chat --session <id>` resumes one, so
 closing the terminal costs nothing but the typing.
 
-When a session outgrows the context budget (`CONTEXT_BUDGET_CHARS`), the oldest *turns* are dropped —
-never half a turn, because a tool result whose call is gone is a request a model API rejects — and the
-transcript gains a note saying so. The model therefore knows the conversation has a past it cannot
-see, instead of silently believing it began this morning. That is the same shape a harness keeps its
-own sessions in.
+Two limits keep a long session inside the model's context, and they do different things. The
+transcript is first trimmed at a turn boundary when it outgrows `MAX_HISTORY` — never half a turn,
+because a tool result whose call is gone is a request a model API rejects. Then, when what the model
+would receive (messages plus tool schemas) exceeds `CONTEXT_BUDGET_CHARS`, the oldest span is replaced
+by a summary the model itself wrote, with a plain note only when that summary call fails. The model
+therefore knows the conversation has a past it cannot see, instead of silently believing it began this
+morning. That is the same shape a harness keeps its own sessions in.
 
 ## Where this is going
 
-- Page-level citations for PDF, and a `.docx`/`.xlsx` text extraction, so a citation can name a page.
-- An index cache, so a large library does not re-tokenize on every start.
+- `.docx` and `.xlsx` text extraction, so those documents can be searched and cited.
 - A comparison mode: the same question answered from the library and from the engine, with the
   difference shown — the "expert panel" idea taken literally, where the documents and the computation
   check each other.

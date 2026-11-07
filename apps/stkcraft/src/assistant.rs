@@ -26,6 +26,7 @@
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use eframe::egui;
+use stkcraft_agent_runtime::{CancellationToken, RequestControl};
 use stkcraft_astro_engine::Scenario;
 
 /// What the panel is doing.
@@ -36,6 +37,12 @@ enum State {
     Idle,
     /// A question is running on the worker thread.
     Running,
+    /// Cancellation requested; retain the receivers until the worker finishes.
+    Stopping,
+    /// The cancelled result cannot be adopted.
+    Cancelled,
+    /// The platform could not start a background worker.
+    WorkerUnavailable,
     /// The model answered.
     Answered {
         /// The model's final text.
@@ -53,13 +60,32 @@ type Reply = Result<(String, Scenario), String>;
 /// What the worker is asked to do.
 enum Command {
     /// Answer a question.
-    Ask(Job),
+    Ask(Box<Job>),
     /// Forget the conversation, keeping the document the tools built.
     Forget,
 }
 
 /// How a responder is built. The real one is [`deepseek`]; a test substitutes its own.
 type Factory = fn(&std::path::Path, &Scenario) -> Result<Box<dyn Responder>, String>;
+type WorkerSpawner = fn(Box<dyn FnOnce() + Send>) -> std::io::Result<std::thread::JoinHandle<()>>;
+type ModelStatus = fn() -> Result<(String, String), String>;
+
+fn spawn_worker(job: Box<dyn FnOnce() + Send>) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("stkcraft-assistant".to_owned())
+        .spawn(job)
+}
+
+fn model_status() -> Result<(String, String), String> {
+    crate::prefs::model_provider().map(|provider| (provider.model, provider.base_url))
+}
+
+/// The receivers and cancellation identity of exactly one accepted job.
+struct ActiveRun {
+    trace: Receiver<String>,
+    result: Receiver<Reply>,
+    token: CancellationToken,
+}
 
 /// One question for the worker.
 struct Job {
@@ -70,6 +96,8 @@ struct Job {
     trace: Sender<String>,
     /// Where the answer goes, once.
     result: Sender<Reply>,
+    /// Shared with the panel; it remains valid even after a reply was queued.
+    token: CancellationToken,
 }
 
 impl Command {
@@ -90,6 +118,20 @@ pub trait Responder: Send {
     /// Answer one question about `scenario`, reporting each tool call to `trace`.
     fn ask(&mut self, scenario: &Scenario, question: &str, trace: &Sender<String>) -> Reply;
 
+    /// Cooperative adapter for existing responders. Only an override can interrupt an in-flight call.
+    fn ask_controlled(
+        &mut self,
+        scenario: &Scenario,
+        question: &str,
+        trace: &Sender<String>,
+        control: &RequestControl,
+    ) -> Reply {
+        control.check().map_err(|error| error.to_string())?;
+        let result = self.ask(scenario, question, trace);
+        control.check().map_err(|error| error.to_string())?;
+        result
+    }
+
     /// Forget the conversation, keeping whatever the tools have built.
     ///
     /// A discussion that has gone wrong — a wrong assumption the model keeps building on, a
@@ -105,13 +147,26 @@ struct DeepSeekResponder {
 
 impl Responder for DeepSeekResponder {
     fn ask(&mut self, scenario: &Scenario, question: &str, trace: &Sender<String>) -> Reply {
+        self.ask_controlled(scenario, question, trace, &RequestControl::default())
+    }
+
+    fn ask_controlled(
+        &mut self,
+        scenario: &Scenario,
+        question: &str,
+        trace: &Sender<String>,
+        control: &RequestControl,
+    ) -> Reply {
         // The window owns the document; the session takes whatever it is given before answering, so
         // an answer is always about the scenario on screen.
         self.agent.server_mut().set_scenario(scenario.clone());
         let mut report = |line: &str| {
             let _ = trace.send(line.to_owned());
         };
-        let answer = self.agent.ask_observing(question, &mut report)?;
+        let answer = self
+            .agent
+            .ask_observing_controlled(question, &mut report, control)
+            .map_err(|error| error.to_string())?;
         Ok((answer.text, self.agent.server().scenario().clone()))
     }
 
@@ -152,13 +207,18 @@ pub struct Assistant {
     /// Where questions go, once the worker exists.
     jobs: Option<Sender<Command>>,
     /// The answer in flight: its trace lines and its one result.
-    run: Option<(Receiver<String>, Receiver<Reply>)>,
+    run: Option<ActiveRun>,
     /// A scenario the model produced, waiting to be adopted by the window exactly once.
     adopt: Option<Scenario>,
     /// Complete document captured when the current request was accepted.
     base: Option<Scenario>,
+    /// Keep the job identity until adoption, closing the reply/Stop race.
+    adoption_token: Option<CancellationToken>,
+    forget_after_stop: bool,
     /// How a responder is built.
     factory: Factory,
+    spawn: WorkerSpawner,
+    model_status: ModelStatus,
     /// How many questions the session has answered, for the panel's own readout.
     answered: usize,
 }
@@ -174,7 +234,11 @@ impl Default for Assistant {
             run: None,
             adopt: None,
             base: None,
+            adoption_token: None,
+            forget_after_stop: false,
             factory: deepseek,
+            spawn: spawn_worker,
+            model_status,
             answered: 0,
         }
     }
@@ -184,7 +248,7 @@ impl Assistant {
     /// Whether a question is currently running.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        matches!(self.state, State::Running)
+        self.run.is_some()
     }
 
     /// Start the worker, if it is not running.
@@ -192,15 +256,14 @@ impl Assistant {
     /// Started on the first question rather than when the panel opens: a window that is merely
     /// visible must not have made a network call, and a person who never uses the panel never pays
     /// for it.
-    fn worker(&mut self, scenario: &Scenario, skills: &std::path::Path) {
+    fn worker(&mut self, skills: &std::path::Path) -> Result<(), std::io::Error> {
         if self.jobs.is_some() {
-            return;
+            return Ok(());
         }
         let (tx, rx) = channel::<Command>();
         let factory = self.factory;
-        let scenario = scenario.clone();
         let skills = skills.to_path_buf();
-        std::thread::spawn(move || {
+        (self.spawn)(Box::new(move || {
             // Built once per worker, so the conversation survives between questions. A failure
             // (no key, say) is reported per question rather than ending the thread: a person may
             // export a key and ask again without restarting the window.
@@ -216,6 +279,13 @@ impl Assistant {
                 let Some(job) = command.job() else {
                     continue;
                 };
+                if job.token.is_cancelled() {
+                    responder = None;
+                    let _ = job
+                        .result
+                        .send(Err("The assistant request was cancelled.".to_owned()));
+                    continue;
+                }
                 if responder.is_none() {
                     match factory(&skills, &job.scenario) {
                         Ok(built) => {
@@ -242,7 +312,11 @@ impl Assistant {
                     job.trace.clone(),
                     job.result.clone(),
                 );
-                let outcome = active.ask(&scenario, &question, &trace);
+                let control = RequestControl::new(job.token.clone());
+                let mut outcome = active.ask_controlled(&scenario, &question, &trace, &control);
+                if job.token.is_cancelled() {
+                    outcome = Err("The assistant request was cancelled.".to_owned());
+                }
                 if outcome.is_err() {
                     // A failed turn may have left a partial conversation behind; the next question
                     // should start from a session whose history is still consistent.
@@ -250,9 +324,9 @@ impl Assistant {
                 }
                 let _ = result.send(outcome);
             }
-        });
+        }))?;
         self.jobs = Some(tx);
-        let _ = scenario;
+        Ok(())
     }
 
     /// Ask the model, on the worker thread.
@@ -260,30 +334,37 @@ impl Assistant {
     /// The model is configured when the worker starts rather than when the app started: a person
     /// who exports a key while the window is open should not have to restart it.
     fn start(&mut self, scenario: &Scenario, skills: &std::path::Path) {
+        if self.is_running() {
+            return;
+        }
         let question = self.question.trim().to_owned();
         if question.is_empty() {
             self.state = State::Failed("Type a question first.".to_owned());
             return;
         }
-        if self.is_running() {
-            return;
-        }
         self.base = None;
         self.adopt = None;
-        self.worker(scenario, skills);
+        self.adoption_token = None;
+        self.forget_after_stop = false;
+        if self.worker(skills).is_err() {
+            self.state = State::WorkerUnavailable;
+            return;
+        }
         let Some(jobs) = &self.jobs else {
             self.state = State::Failed("The assistant could not start.".to_owned());
             return;
         };
         let (trace_tx, trace_rx) = channel();
         let (result_tx, result_rx) = channel();
+        let token = CancellationToken::default();
         let job = Job {
             question,
             scenario: scenario.clone(),
             trace: trace_tx,
             result: result_tx,
+            token: token.clone(),
         };
-        if jobs.send(Command::Ask(job)).is_err() {
+        if jobs.send(Command::Ask(Box::new(job))).is_err() {
             self.jobs = None;
             self.state =
                 State::Failed("The assistant stopped; ask again to restart it.".to_owned());
@@ -292,7 +373,30 @@ impl Assistant {
         self.base = Some(scenario.clone());
         self.trace.clear();
         self.state = State::Running;
-        self.run = Some((trace_rx, result_rx));
+        self.run = Some(ActiveRun {
+            trace: trace_rx,
+            result: result_rx,
+            token,
+        });
+    }
+
+    /// Cancel this job, retaining its receivers so a late success cannot become a new result.
+    fn stop(&mut self) {
+        if let Some(run) = &self.run {
+            run.token.cancel();
+        }
+        if let Some(token) = self.adoption_token.take() {
+            token.cancel();
+        }
+        if self.adopt.take().is_some() {
+            self.answered = self.answered.saturating_sub(1);
+        }
+        self.base = None;
+        self.state = if self.run.is_some() {
+            State::Stopping
+        } else {
+            State::Cancelled
+        };
     }
 
     /// Start a new conversation: empty the panel and let the worker forget.
@@ -301,6 +405,8 @@ impl Assistant {
     /// throwing away the satellites as well as the argument would make this button something nobody
     /// dares press.
     fn forget(&mut self) {
+        self.stop();
+        self.forget_after_stop = self.run.is_some();
         if let Some(jobs) = &self.jobs
             && jobs.send(Command::Forget).is_err()
         {
@@ -308,22 +414,43 @@ impl Assistant {
             self.jobs = None;
         }
         self.trace.clear();
-        self.state = State::Idle;
+        if self.run.is_none() {
+            self.state = State::Idle;
+        }
         self.answered = 0;
     }
 
     /// Drain whatever the worker has reported. Never blocks.
     fn poll(&mut self) {
-        let Some((trace, result)) = &self.run else {
+        let Some(run) = &self.run else {
             return;
         };
-        while let Ok(line) = trace.try_recv() {
-            self.trace.push(line);
+        while let Ok(line) = run.trace.try_recv() {
+            if !run.token.is_cancelled() {
+                self.trace.push(line);
+            }
         }
-        match result.try_recv() {
+        let cancelled = run.token.is_cancelled();
+        let token = run.token.clone();
+        let result = run.result.try_recv();
+        if cancelled && !matches!(&result, Err(TryRecvError::Empty)) {
+            self.run = None;
+            self.adopt = None;
+            self.base = None;
+            self.adoption_token = None;
+            self.state = if self.forget_after_stop {
+                State::Idle
+            } else {
+                State::Cancelled
+            };
+            self.forget_after_stop = false;
+            return;
+        }
+        match result {
             Ok(Ok((text, scenario))) => {
                 self.state = State::Answered { text };
                 self.adopt = Some(scenario);
+                self.adoption_token = Some(token);
                 self.run = None;
                 self.answered += 1;
             }
@@ -344,7 +471,12 @@ impl Assistant {
     /// Consume a result only if the window still contains the request's complete base document.
     fn take_candidate(&mut self, current: &Scenario) -> Option<Scenario> {
         let candidate = self.adopt.take()?;
+        let token = self.adoption_token.take()?;
         let base = self.base.take();
+        if token.is_cancelled() {
+            self.state = State::Cancelled;
+            return None;
+        }
         if base.as_ref() == Some(current) {
             Some(candidate)
         } else {
@@ -367,7 +499,6 @@ impl Assistant {
         language: &str,
     ) -> Option<Scenario> {
         self.poll();
-        let candidate = self.take_candidate(scenario);
         // The panel translates its own chrome from the same catalogs the rest of the window uses;
         // the answer itself is the model's text and stays in whatever language it answered in.
         macro_rules! tr {
@@ -376,7 +507,7 @@ impl Assistant {
             };
         }
         ui.heading(tr!("Assistant"));
-        if self.answered > 0 {
+        if self.answered > 0 || self.is_running() {
             ui.horizontal(|ui| {
                 ui.label(stkcraft_framework_i18n::trn!(
                     translations,
@@ -394,14 +525,13 @@ impl Assistant {
                 }
             });
         }
-        match crate::prefs::model_provider() {
-            Ok(model) => {
-                let host = model
-                    .base_url
+        match (self.model_status)() {
+            Ok((model, base_url)) => {
+                let host = base_url
                     .split('/')
                     .nth(2)
                     .unwrap_or("the configured endpoint");
-                ui.label(format!("{} at {host}", model.model));
+                ui.label(format!("{model} at {host}"));
             }
             Err(message) => {
                 ui.colored_label(egui::Color32::from_rgb(230, 170, 120), message);
@@ -430,10 +560,26 @@ impl Assistant {
             self.start(scenario, skills);
         }
 
-        if self.is_running() {
+        if self.is_running() || self.adopt.is_some() {
             ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(tr!("Running the engine's commands…"));
+                // Keep Stop in the same position if a queued answer arrives in this frame.
+                if ui
+                    .add_enabled(
+                        !matches!(self.state, State::Stopping),
+                        egui::Button::new(tr!("Stop")),
+                    )
+                    .clicked()
+                {
+                    self.stop();
+                }
+                if self.is_running() {
+                    ui.spinner();
+                    if matches!(self.state, State::Stopping) {
+                        ui.label(tr!("Stopping…"));
+                    } else {
+                        ui.label(tr!("Running the engine's commands…"));
+                    }
+                }
             });
         }
 
@@ -451,7 +597,15 @@ impl Assistant {
         }
 
         match &self.state {
-            State::Idle | State::Running => {}
+            State::Idle | State::Running | State::Stopping => {}
+            State::Cancelled => {
+                ui.label(tr!(
+                    "The assistant request was cancelled. Its result was not applied."
+                ));
+            }
+            State::WorkerUnavailable => {
+                ui.label(tr!("The assistant could not start its worker. Try again."));
+            }
             State::Answered { text } => {
                 ui.separator();
                 ui.label(tr!("Answer"));
@@ -466,7 +620,18 @@ impl Assistant {
                 ui.colored_label(egui::Color32::from_rgb(230, 120, 120), message);
             }
         }
-        candidate
+        self.take_candidate(scenario)
+    }
+}
+
+impl Drop for Assistant {
+    fn drop(&mut self) {
+        if let Some(run) = &self.run {
+            run.token.cancel();
+        }
+        if let Some(token) = &self.adoption_token {
+            token.cancel();
+        }
     }
 }
 
@@ -475,6 +640,249 @@ impl Assistant {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    fn pending() -> (Assistant, Job, Scenario) {
+        let base = Scenario::empty("window");
+        let (jobs, receiver) = channel();
+        let mut assistant = panel(twice);
+        assistant.jobs = Some(jobs);
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        let Ok(Command::Ask(job)) = receiver.recv() else {
+            panic!("missing job")
+        };
+        // Keep the fake worker alive, as a real worker would be while computing.
+        assistant.jobs = None;
+        (assistant, *job, base)
+    }
+
+    #[test]
+    fn stop_keeps_the_request_active_until_a_late_success_is_discarded() {
+        let (mut assistant, job, base) = pending();
+        assistant.stop();
+        assert!(job.token.is_cancelled());
+        assert!(assistant.is_running());
+        assert!(matches!(assistant.state, State::Stopping));
+        assistant.start(&base, std::path::Path::new("skills"));
+        assert!(matches!(assistant.state, State::Stopping));
+        assert!(
+            job.result
+                .send(Ok(("late".into(), Scenario::empty("unwanted"))))
+                .is_ok()
+        );
+        assistant.poll();
+        assert!(!assistant.is_running());
+        assert!(matches!(assistant.state, State::Cancelled));
+        assert!(assistant.take_candidate(&base).is_none());
+        assert_eq!(assistant.answered, 0);
+        assistant.start(&base, std::path::Path::new("skills"));
+        settle(&mut assistant);
+        assert!(assistant.take_candidate(&base).is_some());
+    }
+
+    #[test]
+    fn stop_invalidates_success_already_waiting_for_adoption() {
+        let (mut assistant, job, base) = pending();
+        assert!(
+            job.result
+                .send(Ok(("queued".into(), Scenario::empty("changed"))))
+                .is_ok()
+        );
+        assistant.poll();
+        assert!(assistant.adopt.is_some());
+        assistant.stop();
+        assert!(job.token.is_cancelled());
+        assert!(assistant.take_candidate(&base).is_none());
+        assert_eq!(assistant.answered, 0);
+        assert!(matches!(assistant.state, State::Cancelled));
+    }
+
+    #[test]
+    fn adoption_rechecks_cancellation_even_after_a_successful_poll() {
+        let (mut assistant, job, base) = pending();
+        assert!(
+            job.result
+                .send(Ok(("queued".into(), Scenario::empty("changed"))))
+                .is_ok()
+        );
+        assistant.poll();
+        job.token.cancel();
+        assert!(assistant.take_candidate(&base).is_none());
+    }
+
+    #[test]
+    fn dropping_the_panel_cancels_its_active_job() {
+        let (assistant, job, _) = pending();
+        drop(assistant);
+        assert!(job.token.is_cancelled());
+    }
+
+    #[test]
+    fn worker_start_failure_leaves_no_job_or_candidate() {
+        let mut assistant = panel(twice);
+        assistant.spawn = |_| Err(std::io::Error::other("injected worker start failure"));
+        assistant.question = "compute".into();
+        assistant.start(&Scenario::empty("window"), std::path::Path::new("skills"));
+        assert!(!assistant.is_running());
+        assert!(assistant.jobs.is_none());
+        assert!(assistant.base.is_none());
+        assert!(assistant.adopt.is_none());
+        assert!(matches!(assistant.state, State::WorkerUnavailable));
+    }
+
+    #[test]
+    fn a_stop_click_discards_a_success_arriving_in_the_same_frame() {
+        let (mut assistant, job, base) = pending();
+        let ctx = egui::Context::default();
+        let translations =
+            stkcraft_framework_i18n::Translations::from_embedded(crate::catalogs::EMBEDDED);
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut candidate = None;
+            let capture = events.is_empty();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 600.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        candidate = assistant.ui(
+                            ui,
+                            &base,
+                            std::path::Path::new("skills"),
+                            &translations,
+                            "en",
+                        );
+                    });
+                },
+            );
+            if capture
+                && let Ok(path) = std::env::var("STKCRAFT_TEST_PANEL_PNG")
+                && let Err(error) = crate::screenshot::scripted_ui(&ctx, output.clone(), &path)
+            {
+                panic!("could not render the scripted Stop panel: {error}");
+            }
+            output.textures_delta.clear();
+            (candidate, output)
+        };
+        let (_, initial) = frame(Vec::new());
+        let Some(position) = initial.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text == "Stop" => {
+                Some(text.visual_bounding_rect().center())
+            }
+            _ => None,
+        }) else {
+            panic!("Stop was not drawn")
+        };
+        let button = |pressed| egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let _ = frame(vec![egui::Event::PointerMoved(position), button(true)]);
+        assert!(
+            job.result
+                .send(Ok(("ready".into(), Scenario::empty("changed"))))
+                .is_ok()
+        );
+        let (candidate, _) = frame(vec![button(false)]);
+        assert!(
+            candidate.is_none(),
+            "a success selected before Stop escaped cancellation"
+        );
+        assert!(
+            job.token.is_cancelled(),
+            "the Stop click did not reach the request"
+        );
+        assert!(matches!(assistant.state, State::Cancelled));
+    }
+
+    struct Waiting;
+
+    impl Responder for Waiting {
+        fn ask(&mut self, _: &Scenario, _: &str, _: &Sender<String>) -> Reply {
+            Err("controlled responder required".to_owned())
+        }
+
+        fn ask_controlled(
+            &mut self,
+            scenario: &Scenario,
+            _: &str,
+            trace: &Sender<String>,
+            control: &RequestControl,
+        ) -> Reply {
+            let _ = trace.send("entered controlled responder".to_owned());
+            for _ in 0..3_000 {
+                if control.check().is_err() {
+                    return Ok(("late legacy success".to_owned(), scenario.clone()));
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err("test responder did not receive cancellation".to_owned())
+        }
+    }
+
+    #[test]
+    fn stop_reaches_the_worker_and_discards_even_an_ok_reply() {
+        let mut assistant = panel(|_, _| Ok(Box::new(Waiting)));
+        let base = Scenario::empty("window");
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        for _ in 0..3_000 {
+            assistant.poll();
+            if !assistant.trace.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            assistant.trace.first().map(String::as_str),
+            Some("entered controlled responder")
+        );
+        assistant.stop();
+        settle(&mut assistant);
+        assert!(assistant.take_candidate(&base).is_none());
+        assert!(matches!(assistant.state, State::Cancelled));
+    }
+
+    #[test]
+    fn forgetting_discards_a_queued_success() {
+        let base = Scenario::empty("window");
+        let mut assistant = panel(twice);
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        settle(&mut assistant);
+        assistant.forget();
+        assert_eq!(draw(&mut assistant, &base), None);
+        assert_eq!(assistant.answered, 0);
+    }
+
+    #[test]
+    fn forgetting_in_flight_discards_a_late_success() {
+        let base = Scenario::empty("window");
+        let (jobs, receiver) = channel();
+        let mut assistant = panel(twice);
+        assistant.jobs = Some(jobs);
+        assistant.question = "compute".into();
+        assistant.start(&base, std::path::Path::new("skills"));
+        let Ok(Command::Ask(job)) = receiver.recv() else {
+            panic!("missing job")
+        };
+        assistant.forget();
+        assert!(
+            job.result
+                .send(Ok(("late".into(), Scenario::empty("unwanted"))))
+                .is_ok()
+        );
+        assistant.poll();
+        assert_eq!(assistant.take_candidate(&base), None);
+        assert_eq!(assistant.answered, 0);
+    }
 
     /// A responder that answers from a script, so the panel's threading, adoption and restart are
     /// exercised without a model, a key or a socket.
@@ -534,11 +942,13 @@ mod tests {
         Err("DEEPSEEK_API_KEY is not set".to_owned())
     }
 
+    // A Drop type cannot use struct-update syntax to move the default receivers.
+    #[allow(clippy::field_reassign_with_default)]
     fn panel(factory: Factory) -> Assistant {
-        Assistant {
-            factory,
-            ..Assistant::default()
-        }
+        let mut assistant = Assistant::default();
+        assistant.factory = factory;
+        assistant.model_status = || Err("Scripted responder; no provider connection.".to_owned());
+        assistant
     }
 
     /// Wait for the worker to finish. The loop is bounded so a worker that never reports fails the

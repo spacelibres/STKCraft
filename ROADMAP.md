@@ -32,7 +32,7 @@ Shipped, in the order it landed:
 | Extensions: manifest, ids, trust tiers | done, no store yet | 0.1.27 |
 | Knowledge base: chunking, BM25 index, cache | done, measured on 2 000 documents | 0.1.31, 0.1.35 |
 | Crate taxonomy, storage decision record | done, enforced by the gate | 0.1.32–0.1.34 |
-| Control channel: token, methods, MCP-routed | done, CLI only | 0.1.36 |
+| Control channel: token, methods, MCP-routed | done, served by the window too | 0.1.36, 0.1.43 |
 | Crate names repeat their directory | done, enforced by the gate | 0.1.37 |
 | PDF reading with page-level citations | done, measured on real papers | 0.1.38 |
 | Paper corpus fetcher, checksummed | done | 0.1.39 |
@@ -40,11 +40,11 @@ Shipped, in the order it landed:
 | The window serves the control channel, with `ui.state` and `ui.screenshot` | done | 0.1.43 |
 | The model layer: any OpenAI-compatible endpoint, the credential stored `0600` | done | 0.1.44 |
 | Every CCSDS publication collected, hashed and searchable | done, 495 documents | 0.1.47 |
-| Compaction writes a model-written summary that survives a resume | done | 0.1.46 |
-| Formula region detection, storage, provenance, search, transcription table | done | 0.1.51–0.1.65 |
+| Compaction: size-triggered, with a model-written summary | done, the summary survives a resume | 0.1.46 |
+| Formula region detection, search, transcription table | done; the record table has no production writer yet | 0.1.51–0.1.65 |
 | Mathlib lexicon and classifier, with no-match acceptance | done, 217 declarations | 0.1.66–0.1.69 |
 | `cargo xtask verify-formulas` (re-extract, re-classify, fail on drift) | done, 0 drifts | 0.1.68 |
-| OCR through a configured engine, verified in CI | done, `ocr` job green | 0.1.62, 0.1.70 |
+| OCR through a configured engine | done, exercised by the knowledge tests | 0.1.62, 0.1.70 |
 | Extension runtime: packages load and their commands are tools | done | 0.1.71–0.1.72 |
 | Sensors (`station.sensor`) and targets (`target.add`, `access.targets`) | done, hand-computable tests | 0.1.73–0.1.75 |
 | CCSDS and NAIF corpora, hashed and searchable | done | 0.1.47, 0.1.76 |
@@ -74,8 +74,9 @@ MCP and knowledge library; it does not move models or network clients into the n
   preservation, with generic endpoint compatibility. See [model configuration](docs/guides/model-provider.md).
 - **Output/usage shipped in 0.1.85:** configurable generated-token caps, persisted optional usage,
   separate summary costs and refusal of truncated responses before tool dispatch.
-- **Then:** bounded model transport and cancellation,
-  role contracts, a controlled executor, and separately evaluated product/development pilots.
+- **Then:** bounded model transport and cancellation (F2c). Role contracts, a controlled executor and
+  product/development pilots are not scheduled; they are to be re-evaluated after F2 and planned again only
+  if that re-evaluation supports them.
 
 The existing single-model loop is still the shipped runtime. A task graph, a role registry and
 development-tool execution are not claimed as implemented by this roadmap.
@@ -92,20 +93,21 @@ half-done. The order below is dependency order, not preference.
 stored `0600` in `model.key`; `stkcraft model` to show and set it; settings beat the environment and
 the environment beats the shipped defaults. **Verified** with nothing in the environment at all.
 
-#### F2. Memory and context, at harness parity — next
+#### F2. Memory and context, at harness parity — partly shipped
 
-Today a long conversation is trimmed **by message count** and compaction *drops* turns with a fixed
-note. That is not memory; it is forgetting with a comment.
+Compaction shipped in 0.1.46: it is triggered by the size of the request the model would receive, the
+dropped span is replaced by a summary the model wrote, and a test proves a fact from the dropped span
+can still be recalled. Session metadata (title, created, updated, scenario) shipped in the same
+version. What remains is the window's session surface: listing stored sessions and resuming one.
 
-**Done when**: the drop is triggered by the size of the request the model would receive, not by a
-count; the dropped span is replaced by a **summary the model wrote** (with a test proving a fact from
-the dropped span can still be recalled); pinned material — system prompt, skill index, the scenario
-document — is never cut; a session carries metadata (title, created, last used, scenario); and the
-window lists sessions and resumes one.
+**Done when**: the window lists sessions and resumes one, and a resumed conversation keeps the summary
+and the pinned material — system prompt, skill index, the scenario document — without re-reading the
+whole transcript.
 
 #### F3. The extension runtime
 
-`stkcraft-framework-extensions` validates a manifest and admits a trust tier, and nothing loads one.
+`stkcraft-framework-extensions` validates a manifest and admits a trust tier, and the app loads a
+package's commands, skills and catalogs; no third-party code executes.
 **Done when** an installed package can contribute commands (an engine command with preset parameters),
 skills, a language catalog and a knowledge root; discovery, validation and registration go through the
 same command registry the menus use, so the CLI, MCP and the control channel see it too; third-party
@@ -114,10 +116,11 @@ were refused, with the reason.
 
 #### F4. The window's agent surface
 
-The assistant panel runs one conversation with no session, no model choice and no stop. **Done when**
-it uses F2's sessions, shows citations as places (`paper.pdf:page 7`), can be stopped mid-turn, and has
-a settings section for model, key, language and the knowledge directory — the parts F1 and F3 made
-settable, reachable without a command line.
+The assistant panel can be stopped mid-turn, and runs one conversation with no session and no
+model/language settings section; its citations are not yet shown as places. **Done when** it uses
+F2's sessions, shows citations as places (`paper.pdf:page 7`), and has a settings section for model,
+key, language and the knowledge directory — the parts F1 and F3 made settable, reachable without a
+command line.
 
 #### F4b. Mathematics as a first-class store — the correctness floor
 
@@ -135,7 +138,7 @@ stated: classification, never proof; and (5) every formula carries its **provena
 digest, page, box, region digest, reading engine, the introducing sentence, the Mathlib revision — with
 `cargo xtask verify-formulas` re-extracting and re-classifying it and failing on drift.
 
-#### F5. Sensors and targets, and what they can see — mostly shipped (0.1.73–0.1.75)
+#### F5a. Sensors and targets — first part shipped (0.1.73–0.1.75)
 
 **Shipped**: `station.sensor` (a cone, a horizon mask, a range), `Target { vertices, sensor }` in the scenario
 document, `target.add` from `lat,lon;lat,lon`, and `access.targets` whose windows are the union of the target's

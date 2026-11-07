@@ -1,0 +1,7 @@
+STKCraft albatross mark
+
+Copyright (c) 2026 the STKCraft / ArtCraft team. All rights reserved.
+
+This artwork is a brand mark. It is not covered by the MIT OR Apache-2.0 licence of the source code.
+Forks and modified versions must replace it with their own mark, as README.md says of the ArtCraft
+name, wordmark and logos.
