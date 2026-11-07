@@ -361,11 +361,26 @@ fn validate_implementation(root: &Path, where_: &str, formula: &Formula, errors:
             .rsplit("::")
             .next()
             .unwrap_or_default();
-        if !body.contains(test) {
+        let test_path = if formula.verification.test_path.trim().is_empty() {
+            path.clone()
+        } else {
+            root.join(&formula.verification.test_path)
+        };
+        let test_body = match fs::read_to_string(&test_path) {
+            Ok(test_body) => test_body,
+            Err(error) => {
+                errors.push(format!(
+                    "{where_}: test file {} could not be read: {error}",
+                    test_path.display()
+                ));
+                return;
+            }
+        };
+        if !test_body.contains(test) {
             errors.push(format!(
                 "{where_}: test `{}` is not in {}",
                 formula.verification.test,
-                path.display()
+                test_path.display()
             ));
         }
     }
@@ -445,6 +460,9 @@ struct Verification {
     case: String,
     tolerance: String,
     test: String,
+    /// Optional crate-relative test file when the test is not in the implementation file.
+    #[serde(default)]
+    test_path: String,
 }
 
 #[cfg(test)]

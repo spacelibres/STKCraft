@@ -1,0 +1,7 @@
+{"id":"access-001","question":"Where is a station at 51.5 N, 0.13 W on WGS84?","expect":{"formula":"access.geodetic-to-itrf","value":"the WGS84 Earth-fixed position","citation":"NIMA TR8350.2"}}
+{"id":"access-002","question":"What is the elevation of a satellite directly overhead?","expect":{"formula":"access.look-angles","value":"90 degrees","citation":"Vallado (2013) topocentric geometry"}}
+{"id":"access-003","question":"Is a satellite on the far side of the Earth visible?","expect":{"formula":"access.occultation","value":"no, the segment passes through the Earth","citation":"WGS84 mean-radius occultation"}}
+{"id":"access-004","question":"Does a target outside the sensor cone count as visible?","expect":{"formula":"access.sensor-cone","value":"no; elevation and cone must both accept it","citation":"Vallado (2013) sensor geometry"}}
+{"id":"access-005","question":"A 20 s pass falls entirely between two 60 s samples. Is it found?","expect":{"refusal":"No. The sampler can miss a window that opens and closes between samples; the step must be stated.","citation":"access window sampling"}}
+{"id":"access-006","question":"What is the link margin for this pass?","expect":{"refusal":"Out of scope. Visibility is geometric, not a link budget.","citation":"access-geometry non-goals"}}
+{"id":"access-007","question":"What is the percentage of the polygon covered?","expect":{"refusal":"Out of scope. Target windows are the union of vertex windows, not polygon-interior coverage.","citation":"access target model"}}

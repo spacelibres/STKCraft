@@ -1,0 +1,8 @@
+{"id":"sgp4-001","question":"How is a TLE line checksum computed?","expect":{"formula":"sgp4.tle.checksum","value":"(sum of digits + count of '-') mod 10","citation":"CelesTrak TLE format"}}
+{"id":"sgp4-002","question":"What year is TLE epoch year 56?","expect":{"formula":"sgp4.tle.epoch-window","value":"2056","citation":"CelesTrak TLE format"}}
+{"id":"sgp4-003","question":"Why does the SGP4 mean motion differ from the TLE value?","expect":{"formula":"sgp4.unkozai","value":"the un-Kozai correction in initl","citation":"AIAA 2006-6753 initl"}}
+{"id":"sgp4-004","question":"What proves the SGP4 implementation matches the published model?","expect":{"formula":"sgp4.kepler","value":"the 33 AIAA verification vectors, near-Earth and deep-space","citation":"AIAA 2006-6753"}}
+{"id":"sgp4-005","question":"What does the deep-space branch add?","expect":{"formula":"sgp4.deep-space","value":"lunar-solar periodics and resonance integration","citation":"AIAA 2006-6753 dscom/dspace/dpper"}}
+{"id":"sgp4-006","question":"A TLE fails its checksum. Can you repair it?","expect":{"refusal":"No. A bad checksum is refused, not repaired.","citation":"CelesTrak TLE format"}}
+{"id":"sgp4-007","question":"Can SGP4 give a precision orbit determination?","expect":{"refusal":"No. SGP4 is a fitted simplified model, not precision OD; it has no covariance.","citation":"AIAA 2006-6753; Vallado (2013)"}}
+{"id":"sgp4-008","question":"The TLE is three weeks old. Is the answer still exact?","expect":{"refusal":"No. Accuracy degrades away from the element-set epoch; the answer states the age.","citation":"SGP4 model limits"}}
