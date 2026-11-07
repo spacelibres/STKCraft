@@ -177,8 +177,8 @@ COMMANDS
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
                 (`mcp --expert time-frames` restricts it to that expert's allowlist)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
-                (`ask --json <question>` prints the ResultEnvelope, not the model text;
-                 `ask --plan <question>` plans and executes a graph on the demo scenario)
+                (`ask` plans and executes first, then falls back to the tool loop;
+                 `ask --plan` refuses instead of falling back)
     agent-eval  Run the fixed agent cases against the configured model (needs a key)
     workflow    Run a deterministic task graph (`workflow --file graph.json`)
     plan        Ask the model for a graph, validate it, and run it
@@ -930,6 +930,12 @@ fn load_limits() -> Result<Vec<stkcraft_agent_knowledge::capability::CapabilityL
     let root = beside_executable
         .filter(|root| root.join("share/capabilities/limits.toml").is_file())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+    #[cfg(test)]
+    let root = if root.join("share/capabilities/limits.toml").is_file() {
+        root
+    } else {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    };
     stkcraft_agent_knowledge::capability::load_limits(&root)
         .map_err(|errors| format!("capability limits: {}", errors.join("; ")))
 }
@@ -951,8 +957,9 @@ fn load_expert_role(id: &str) -> Result<stkcraft_agent_knowledge::expert::Expert
 }
 
 /// Plan a graph against the demo scenario, execute it, and print a `ResultEnvelope`.
-fn ask_plan(request: &AskRequest) -> Result<(), String> {
-    let model = crate::prefs::model_provider()?;
+fn planned_envelope(
+    request: &AskRequest,
+) -> Result<stkcraft_agent_runtime::ResultEnvelope, String> {
     let mut scenario = app_demo_scenario()?;
     let satellites = scenario
         .satellites
@@ -986,12 +993,7 @@ fn ask_plan(request: &AskRequest) -> Result<(), String> {
             errors: Vec::new(),
             reason: Some(reason),
         };
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&envelope)
-                .map_err(|error| format!("could not print the answer: {error}"))?
-        );
-        return Ok(());
+        return Ok(envelope);
     }
     let tools: Vec<serde_json::Value> = server
         .tools_json()
@@ -1002,6 +1004,7 @@ fn ask_plan(request: &AskRequest) -> Result<(), String> {
                 .is_some_and(|name| !name.starts_with("knowledge.") && name != "agent.report")
         })
         .collect();
+    let model = crate::prefs::model_provider()?;
     let planner = stkcraft_agent_runtime::task::Planner::new(model);
     let graph = planner.plan_corrected(&plan_question, &tools, &Registry::builtin())?;
     let outcomes = graph
@@ -1053,21 +1056,47 @@ fn ask_plan(request: &AskRequest) -> Result<(), String> {
         errors,
         reason: None,
     };
+    Ok(envelope)
+}
+
+fn print_envelope(envelope: &stkcraft_agent_runtime::ResultEnvelope) -> Result<(), String> {
     println!(
         "{}",
-        serde_json::to_string_pretty(&envelope)
+        serde_json::to_string_pretty(envelope)
             .map_err(|error| format!("could not print the answer: {error}"))?
     );
-    if status == "complete" || status == "unsupported" {
+    Ok(())
+}
+
+fn ask_plan(request: &AskRequest) -> Result<(), String> {
+    let envelope = planned_envelope(request)?;
+    print_envelope(&envelope)?;
+    if envelope.status == "complete" || envelope.status == "unsupported" {
         Ok(())
     } else {
-        Err(format!("ask --plan: {status}"))
+        Err(format!("ask --plan: {}", envelope.status))
     }
 }
 
 fn ask(request: &AskRequest) -> Result<(), String> {
     if request.plan {
         return ask_plan(request);
+    }
+    match planned_envelope(request) {
+        Ok(envelope) if envelope.status == "complete" || envelope.status == "unsupported" => {
+            return print_envelope(&envelope);
+        }
+        Ok(envelope) => {
+            eprintln!(
+                "stkcraft: the planner ended in `{}`; continuing with the tool loop",
+                envelope.status
+            );
+        }
+        Err(error) => {
+            eprintln!(
+                "stkcraft: the planner could not run ({error}); continuing with the tool loop"
+            );
+        }
     }
     let model = crate::prefs::model_provider()?;
     let server = stkcraft_agent_mcp::Server::new(
@@ -1874,6 +1903,18 @@ fn agent_eval(request: &AgentEvalRequest) -> Result<(), String> {
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_guarded_question_is_unsupported_without_a_key() {
+        let request = AskRequest {
+            question: "Compute the RF link margin for the ISS over London.".to_owned(),
+            json: true,
+            plan: false,
+        };
+        let envelope = planned_envelope(&request).expect("guard answer");
+        assert_eq!(envelope.status, "unsupported");
+        assert_eq!(envelope.trace, ["capability.guard(rf-link)"]);
+    }
 
     #[test]
     fn ask_accepts_json_and_plan_flags() {
