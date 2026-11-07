@@ -9,6 +9,35 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.97] — The gate keeps its temporary files inside `target/`
+
+### Changed
+
+- `[profile.dev]` uses `debug = "line-tables-only"`. The shared CI gate already sets
+  `CARGO_PROFILE_DEV_DEBUG=line-tables-only`; a local `cargo xtask ci` now builds the same profile,
+  with file/line backtraces but without the multi-gigabyte PDBs full debug info produced on Windows.
+- `xtask` runs its child `cargo` commands with `TMP`, `TEMP` and `TMPDIR` pointed at
+  `target/xtask-tmp`. A terminal that can write the workspace but not the system temp directory no
+  longer fails with `LNK1104` on the linker's `.tmp` file.
+
+### Fixed
+
+- The build no longer depends on a writable `%TEMP%` for the gate's clippy, test and wasm steps.
+  The failure read as a compiler error, but it was a permission error from `link.exe`.
+
+### Not built yet
+
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- With the parent `TEMP`/`TMP` set to the system directory this machine's sandbox cannot write,
+  `target/debug/xtask.exe ci` ran the whole gate and passed; the child builds used
+  `target/xtask-tmp`.
+- `cargo xtask ci` at 0.1.97.
+
 ## [0.1.96] — Contributor credits use the shared generator's fields
 
 ### Fixed

@@ -149,19 +149,24 @@ Tasks:
 }
 
 fn run_cargo(args: &[&str]) -> Result<(), String> {
-    run_program("cargo", args)
-}
-
-fn run_program(program: &str, args: &[&str]) -> Result<(), String> {
-    let status = Command::new(program)
+    // Keep Cargo's and the linker's temporary files with the build. A terminal that can write the
+    // workspace but not the system `%TEMP%` otherwise fails with LNK1104 on the `.tmp` file
+    // `link.exe` asks for, which reads as a compiler error rather than a permission one.
+    let temp = workspace_root().join("target/xtask-tmp");
+    std::fs::create_dir_all(&temp)
+        .map_err(|error| format!("could not create {}: {error}", temp.display()))?;
+    let status = Command::new("cargo")
         .args(args)
         .current_dir(workspace_root())
+        .env("TMP", &temp)
+        .env("TEMP", &temp)
+        .env("TMPDIR", &temp)
         .status()
-        .map_err(|e| format!("could not run `{program}`: {e}"))?;
+        .map_err(|error| format!("could not run `cargo`: {error}"))?;
     if status.success() {
         Ok(())
     } else {
-        Err(format!("`{program} {}` failed", args.join(" ")))
+        Err(format!("`cargo {}` failed", args.join(" ")))
     }
 }
 
