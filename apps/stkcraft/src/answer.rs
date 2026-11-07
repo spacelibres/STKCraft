@@ -67,6 +67,12 @@ pub fn text(outcome: &CommandOutcome, scenario: &Scenario) -> String {
             let _ = write!(text, "\n- {limitation}");
         }
     }
+    if !outcome.formulas.is_empty() {
+        text.push_str("\n\nFormulas:");
+        for formula in &outcome.formulas {
+            let _ = write!(text, "\n- {} — {}", formula.id, formula.source);
+        }
+    }
     text
 }
 
@@ -80,6 +86,10 @@ pub fn json(outcome: &CommandOutcome, scenario: &Scenario) -> Value {
         "passes": outcome.passes.as_ref().map(|passes| passes_json(passes, epoch)),
         "targets": outcome.targets.as_ref().map(|targets| targets_json(targets, scenario, epoch)),
         "limitations": outcome.limitations.clone(),
+        "formulas": outcome.formulas.iter().map(|formula| json!({
+            "id": formula.id,
+            "source": formula.source,
+        })).collect::<Vec<Value>>(),
     })
 }
 
@@ -184,6 +194,8 @@ fn instant(epoch: Epoch, offset_seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use stkcraft_astro_engine::FormulaCitation;
+
     use super::*;
 
     #[test]
@@ -202,6 +214,34 @@ mod tests {
                 .get("limitations")
                 .and_then(Value::as_array)
                 .is_some_and(Vec::is_empty)
+        );
+        assert!(
+            value
+                .get("formulas")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        );
+    }
+
+    #[test]
+    fn formulas_survive_the_text_and_json_answers() {
+        let scenario = Scenario::empty("answer test");
+        let outcome = CommandOutcome::new("Computed access").with_formulas(vec![FormulaCitation {
+            id: "access.look-angles",
+            source: "Vallado (2013)",
+        }]);
+        let text = text(&outcome, &scenario);
+        assert!(text.contains("access.look-angles"), "{text}");
+        assert!(text.contains("Vallado (2013)"), "{text}");
+        let value = json(&outcome, &scenario);
+        assert_eq!(
+            value
+                .get("formulas")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("id"))
+                .and_then(Value::as_str),
+            Some("access.look-angles")
         );
     }
 

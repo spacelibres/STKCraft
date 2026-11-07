@@ -638,6 +638,11 @@ impl Server {
             .run(&target, &mut self.scenario, &args)
             .map_err(|error| format!("{name}: {error}"))?;
         let limitations = outcome.limitations.clone();
+        let formulas: Vec<Value> = outcome
+            .formulas
+            .iter()
+            .map(|formula| json!({"id": formula.id, "source": formula.source}))
+            .collect();
         let mut text = outcome.summary;
         let mut structured = None;
         if let Some(access) = outcome.access {
@@ -652,6 +657,7 @@ impl Server {
                 "kind": "access",
                 "pairs": pairs,
                 "limitations": limitations.clone(),
+                "formulas": formulas.clone(),
             }));
         }
         if let Some(passes) = outcome.passes {
@@ -663,6 +669,7 @@ impl Server {
                 "epoch": self.scenario.epoch,
                 "passes": listed,
                 "limitations": limitations.clone(),
+                "formulas": formulas.clone(),
             }));
         }
         if let Some(targets) = outcome.targets {
@@ -674,12 +681,21 @@ impl Server {
                 "epoch": self.scenario.epoch,
                 "pairs": listed,
                 "limitations": limitations.clone(),
+                "formulas": formulas.clone(),
             }));
         }
         if !limitations.is_empty() {
             let _ = write!(text, "\n\nLimitations:");
             for limitation in &limitations {
                 let _ = write!(text, "\n- {limitation}");
+            }
+        }
+        if !formulas.is_empty() {
+            let _ = write!(text, "\n\nFormulas:");
+            for formula in &formulas {
+                let id = formula.get("id").and_then(Value::as_str).unwrap_or("?");
+                let source = formula.get("source").and_then(Value::as_str).unwrap_or("?");
+                let _ = write!(text, "\n- {id} — {source}");
             }
         }
         Ok((text, structured))

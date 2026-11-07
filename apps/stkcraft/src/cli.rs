@@ -660,6 +660,9 @@ fn passes(request: &PassRequest) -> Result<(), String> {
     for limitation in &outcome.limitations {
         println!("note: {limitation}");
     }
+    for formula in &outcome.formulas {
+        println!("formula: {} — {}", formula.id, formula.source);
+    }
     Ok(())
 }
 
@@ -759,6 +762,9 @@ fn planet(request: &PlanetRequest) -> Result<(), String> {
     }
     for limitation in &outcome.limitations {
         println!("note: {limitation}");
+    }
+    for formula in &outcome.formulas {
+        println!("formula: {} — {}", formula.id, formula.source);
     }
     Ok(())
 }
