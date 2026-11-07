@@ -26,7 +26,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.105"
+version = "0.1.106"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/spacelibres/STKCraft"
@@ -36,22 +36,22 @@ authors = ["ArtCraft Team and the STKCraft contributors"]
 [workspace.dependencies]
 # Internal crates. Sibling crates reference each other by path and inherit the single
 # workspace version, so a version bump is one edit in `[workspace.package]`.
-stkcraft-framework-core = { path = "crates/framework/core", version = "0.1.105" }
-stkcraft-framework-time = { path = "crates/framework/time", version = "0.1.105" }
-stkcraft-astro-body = { path = "crates/astro/body", version = "0.1.105" }
-stkcraft-astro-ephemeris = { path = "crates/astro/ephemeris", version = "0.1.105" }
-stkcraft-framework-extensions = { path = "crates/framework/extensions", version = "0.1.105" }
-stkcraft-framework-storage = { path = "crates/framework/storage", version = "0.1.105" }
-stkcraft-astro-frames = { path = "crates/astro/frames", version = "0.1.105" }
-stkcraft-framework-i18n = { path = "crates/framework/i18n", version = "0.1.105" }
-stkcraft-agent-control = { path = "crates/agent/control", version = "0.1.105" }
-stkcraft-agent-knowledge = { path = "crates/agent/knowledge", version = "0.1.105" }
-stkcraft-astro-sgp4 = { path = "crates/astro/sgp4", version = "0.1.105" }
-stkcraft-astro-access = { path = "crates/astro/access", version = "0.1.105" }
-stkcraft-astro-engine = { path = "crates/astro/engine", version = "0.1.105" }
-stkcraft-agent-mcp = { path = "crates/agent/mcp", version = "0.1.105" }
-stkcraft-agent-runtime = { path = "crates/agent/runtime", version = "0.1.105" }
-stkcraft-ui-viewport = { path = "crates/ui/viewport", version = "0.1.105" }
+stkcraft-framework-core = { path = "crates/framework/core", version = "0.1.106" }
+stkcraft-framework-time = { path = "crates/framework/time", version = "0.1.106" }
+stkcraft-astro-body = { path = "crates/astro/body", version = "0.1.106" }
+stkcraft-astro-ephemeris = { path = "crates/astro/ephemeris", version = "0.1.106" }
+stkcraft-framework-extensions = { path = "crates/framework/extensions", version = "0.1.106" }
+stkcraft-framework-storage = { path = "crates/framework/storage", version = "0.1.106" }
+stkcraft-astro-frames = { path = "crates/astro/frames", version = "0.1.106" }
+stkcraft-framework-i18n = { path = "crates/framework/i18n", version = "0.1.106" }
+stkcraft-agent-control = { path = "crates/agent/control", version = "0.1.106" }
+stkcraft-agent-knowledge = { path = "crates/agent/knowledge", version = "0.1.106" }
+stkcraft-astro-sgp4 = { path = "crates/astro/sgp4", version = "0.1.106" }
+stkcraft-astro-access = { path = "crates/astro/access", version = "0.1.106" }
+stkcraft-astro-engine = { path = "crates/astro/engine", version = "0.1.106" }
+stkcraft-agent-mcp = { path = "crates/agent/mcp", version = "0.1.106" }
+stkcraft-agent-runtime = { path = "crates/agent/runtime", version = "0.1.106" }
+stkcraft-ui-viewport = { path = "crates/ui/viewport", version = "0.1.106" }
 
 # PDF reading, from the family's shared reader: the same `craft-pdf` the siblings use, over the
 # same patched reader backends, so a paper parses here exactly as it does in `pdfcraft`. Only the

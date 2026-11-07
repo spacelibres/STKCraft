@@ -9,6 +9,35 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.106] — The agent can return a result envelope instead of prose
+
+### Added
+
+- `Answer::results`: the structured content every tool returned, in call order.
+- `ResultEnvelope { status, question, results, trace }` in `stkcraft-agent-runtime`.
+- `stkcraft ask --json <question>` prints that envelope and suppresses the model's prose. The status
+  is `complete` when at least one structured result exists, `unsupported` otherwise.
+
+### Fixed
+
+- A successful tool call's `structuredContent` no longer disappears after the model reads its text.
+  The platform now has the windows, formulas and limitations as data, not only as sentences.
+
+### Not built yet
+
+- The desktop assistant panel still renders the model text; the envelope is CLI/MCP data for now.
+- Object-level capability manifests and the task-graph orchestrator.
+- A model request whose answer has no structured result is marked `unsupported`; it is not yet a
+  clean `needs_input`/`failed` classification.
+- Sub-daily EOP; release packaging; macOS CI.
+
+### Verification
+
+- Real DeepSeek test at 0.1.106: `ask --json` for the ISS-over-London demo returned `complete`, five
+  windows with UTC start/end/duration, the access limitations and the formula citations.
+- The same access question without `--json` still prints the model text, for compatibility.
+- `cargo xtask ci` at 0.1.106 passes all eleven steps.
+
 ## [0.1.105] — Expert roles restrict the runtime tool surface
 
 ### Added
