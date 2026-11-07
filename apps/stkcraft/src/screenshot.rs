@@ -374,14 +374,11 @@ fn render_output(
         },
     );
     // `egui` 0.37 hands several deltas per texture in one entry; each is an upload of its own.
-    for (id, deltas) in &output.textures_delta.set {
+    for (id, deltas) in output.textures_delta.set.drain() {
         for delta in deltas {
-            renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
+            renderer.update_texture(&gpu.device, &gpu.queue, id, &delta);
         }
     }
-    // This one-frame renderer owns the uploaded textures and drops them after readback.
-    // The pinned egui fork requires explicit consumption even when the renderer is disposable.
-    output.textures_delta.clear();
 
     let (color_texture, depth_texture) = gpu.targets();
     let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -437,7 +434,13 @@ fn render_output(
             .chain(std::iter::once(encoder.finish())),
     );
 
-    gpu.read_rgb(&color_texture)
+    let rgb = gpu.read_rgb(&color_texture);
+    // Like the pinned egui-wgpu painter, consume frees only after submission. Keep the
+    // renderer's resources through readback, and drain even when readback returns an error.
+    for id in output.textures_delta.free.drain() {
+        renderer.free_texture(&id);
+    }
+    rgb
 }
 
 /// Render the window's panels — and only the panels — to a file.
@@ -926,6 +929,54 @@ mod tests {
     use super::*;
 
     const TRACK: [u8; 3] = [222, 26, 12];
+
+    #[test]
+    #[ignore = "requires a native GPU adapter; run explicitly on a rendering host"]
+    fn offscreen_text_frame_applies_and_releases_texture_deltas() {
+        // Use the real renderer without App, preferences, credentials or installed fonts.
+        let gpu = Gpu::open().expect("native GPU adapter");
+        let context = egui::Context::default();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(WIDTH as f32, HEIGHT as f32),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                ui.painter().text(
+                    egui::pos2(50.0, 50.0),
+                    egui::Align2::LEFT_TOP,
+                    "Offscreen text",
+                    egui::FontId::proportional(32.0),
+                    egui::Color32::WHITE,
+                );
+                // A texture created and dropped in this frame also exercises deferred frees.
+                let texture = context.load_texture(
+                    "temporary test texture",
+                    egui::ColorImage::filled([1, 1], egui::Color32::WHITE),
+                    egui::TextureOptions::default(),
+                );
+                drop(texture);
+            },
+        );
+        assert!(!output.textures_delta.set.is_empty(), "no font upload");
+        assert!(!output.textures_delta.free.is_empty(), "no texture release");
+        let rgb = render_output(&gpu, &context, output).expect("render text frame");
+        assert_eq!(rgb.len(), (WIDTH * HEIGHT * 3) as usize);
+        let bright_pixels = rgb
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .filter(|pixel| pixel.iter().all(|channel| *channel > 200))
+            .count();
+        assert!(bright_pixels > 100, "text did not draw: {bright_pixels}");
+        assert!(
+            bright_pixels < 10_000,
+            "a fill passed as text: {bright_pixels}"
+        );
+    }
 
     /// An image of the verification size, with one track-coloured pixel.
     fn image_with_pixel(x: u32, y: u32) -> Vec<u8> {

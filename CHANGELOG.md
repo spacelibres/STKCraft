@@ -9,6 +9,29 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.89] — Consume offscreen texture updates before dropping the frame
+
+### Fixed
+
+- The offscreen renderer dropped egui's texture deltas before the readback, so a frame that uploaded
+  a font or a texture could draw with stale texture state. It now drains the uploads, renders, then
+  frees the deferred textures after submission; the drain happens even when the readback fails.
+- A native-GPU test (`offscreen_text_frame_applies_and_releases_texture_deltas`, ignored in the
+  ordinary gate because it needs a rendering host) proves the text frame draws and that the free list
+  is non-empty.
+
+### Not built yet
+
+- Nothing in this version changes the list in 0.1.88: the release workflow and platform packaging,
+  a typed `target.add` parameter, the assistant/frame translation gaps and `ui.json` remain as they
+  were.
+
+### Verification
+
+- `cargo xtask ci` at 0.1.89.
+- The ignored GPU test was run on a Vulkan adapter and passed: text drew, and the texture free list
+  was applied after the render.
+
 ## [0.1.88] — The albatross mark, a reachable command surface, and a gate that reads the notebook
 
 ### Added
