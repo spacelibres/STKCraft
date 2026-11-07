@@ -116,6 +116,13 @@ parameters, scenario digest, engine version, result JSON and verifier errors. A 
 failure is reported but does not turn a valid answer into an error; the transcript is still not the
 workflow database.
 
+`stkcraft agent-eval` runs the fixed cases in `share/evals/agent/` against a real provider. It is a
+manual, networked check, not a CI step: a case records the expected status, result kind, window
+count and formula citation, and a failure stays visible instead of being relaxed in the fixture.
+The first recorded failure is a capability gap: an RF link-budget question produced access windows
+and a `complete` envelope because "some structured result exists" is not "the question was
+answered". Capability preflight is the next milestone.
+
 ## Task lifecycle and resource policy
 
 The proposed task envelope names the task/parent, role version, input-schema version, fixed
