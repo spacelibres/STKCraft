@@ -111,6 +111,11 @@ Keep facts outside conversation summaries. User-provided values, document eviden
 results, model inferences and pending assumptions must remain distinguishable. Summaries are
 navigation aids; authoritative parameters and results need structured records and identifiers.
 
+The computation ledger is the structured record for this rule: a tool call stores its command,
+parameters, scenario digest, engine version, result JSON and verifier errors. A ledger write
+failure is reported but does not turn a valid answer into an error; the transcript is still not the
+workflow database.
+
 ## Task lifecycle and resource policy
 
 The proposed task envelope names the task/parent, role version, input-schema version, fixed

@@ -12,7 +12,7 @@
 //!   is the version nobody develops on.
 
 /// The schema version this build writes.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// The statements that create version 1.
 ///
@@ -133,6 +133,7 @@ pub fn migration(version: i64) -> Option<&'static str> {
     match version {
         1 => Some(V1),
         2 => Some(V2),
+        3 => Some(V3),
         _ => None,
     }
 }
@@ -179,6 +180,16 @@ CREATE INDEX formula_by_domain ON formula(mathlib_domain);
 CREATE INDEX formula_by_document ON formula(document, page);
 ";
 
+/// The statements that create version 3: the structured result and its verification errors.
+///
+/// The summary is for a person; the result is the JSON the platform rendered, and `errors` is the
+/// verifier's verdict. Keeping both makes "what did the tool actually return" answerable without
+/// re-running it, which is the ledger's purpose.
+pub const V3: &str = r"
+ALTER TABLE computation ADD COLUMN result TEXT NOT NULL DEFAULT '';
+ALTER TABLE computation ADD COLUMN errors TEXT NOT NULL DEFAULT '';
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,7 +205,7 @@ mod tests {
     #[test]
     fn every_table_is_strict() {
         // The rule the schema exists for: an `INTEGER` column cannot quietly hold text.
-        for statement in V1.split(';').chain(V2.split(';')) {
+        for statement in V1.split(';').chain(V2.split(';')).chain(V3.split(';')) {
             let statement = statement.trim_start().to_ascii_uppercase();
             if statement.starts_with("CREATE TABLE") {
                 assert!(

@@ -794,6 +794,8 @@ pub struct Agent<M: ChatModel> {
     pub max_turns: usize,
     /// The transcript this conversation is written to and resumed from, when there is one.
     session: Option<crate::session::Session>,
+    /// The record every tool call is written to, when the caller opened one.
+    ledger: Option<stkcraft_framework_storage::Store>,
     /// The conversation so far, including the system prompt once it exists.
     ///
     /// Kept across questions so a follow-up can refer to the previous answer: "and the day after?"
@@ -813,7 +815,19 @@ impl<M: ChatModel> Agent<M> {
             max_turns: MAX_TURNS,
             messages: Vec::new(),
             session: None,
+            ledger: None,
         }
+    }
+
+    /// Record every tool call to the computation ledger.
+    ///
+    /// The ledger is the "what did the tool actually return" record: command, parameters, input
+    /// digest, engine version, result JSON and the verifier's errors. A session without one still
+    /// answers; it simply cannot replay its computations later.
+    #[must_use]
+    pub fn with_ledger(mut self, ledger: stkcraft_framework_storage::Store) -> Self {
+        self.ledger = Some(ledger);
+        self
     }
 
     /// Continue a stored conversation, or write a new one to `session`.
@@ -1275,6 +1289,38 @@ impl<M: ChatModel> Agent<M> {
     }
 
     /// Execute one tool call, returning the content for the model and a line for the trace.
+    fn record_tool(
+        &mut self,
+        command: &str,
+        call: &ToolCall,
+        summary: &str,
+        structured: Option<&serde_json::Value>,
+    ) {
+        let Some(store) = self.ledger.as_mut() else {
+            return;
+        };
+        let scenario_name = self.server.scenario().name.clone();
+        let Ok(scenario_json) = serde_json::to_string(self.server.scenario()) else {
+            return;
+        };
+        let result = structured.map_or_else(|| "{}".to_owned(), serde_json::Value::to_string);
+        let errors = structured.map_or_else(Vec::new, |value| {
+            verify_results(std::slice::from_ref(value))
+        });
+        let errors = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_owned());
+        let _ = store.record_computation(&stkcraft_framework_storage::Computation {
+            scenario_name,
+            scenario_revision: None,
+            command: command.to_owned(),
+            parameters: call.arguments.to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_owned(),
+            inputs_digest: stkcraft_framework_storage::digest(scenario_json.as_bytes()),
+            summary: summary.to_owned(),
+            result,
+            errors,
+        });
+    }
+
     fn run_tool(&mut self, call: &ToolCall) -> (String, String, Option<serde_json::Value>) {
         let id = command_id(&call.name);
         if id == SCENARIO_TOOL {
@@ -1353,6 +1399,7 @@ impl<M: ChatModel> Agent<M> {
                     .get("result")
                     .and_then(|result| result.get("structuredContent"))
                     .cloned();
+                self.record_tool(&id, call, &summary, structured.as_ref());
                 (text, summary, structured)
             }
             Some(answer) => {
@@ -1417,6 +1464,43 @@ mod tests {
             total_tokens: tokens,
             ..Usage::default()
         }
+    }
+
+    #[test]
+    fn a_tool_call_is_written_to_the_computation_ledger() {
+        let ledger = stkcraft_framework_storage::Store::open_in_memory().expect("in-memory ledger");
+        let mut agent = agent(vec![
+            Turn {
+                calls: vec![ToolCall {
+                    id: "c".into(),
+                    name: "satellite.add".into(),
+                    arguments: json!({
+                        "name": "ISS",
+                        "line1": "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009",
+                        "line2": "2 25544  51.6400 208.9163 0006317  69.9862  25.2906 15.49569600 12343"
+                    }),
+                }],
+                usage: Some(reported_usage(11)),
+                finish_reason: Some("tool_calls".into()),
+                ..Turn::default()
+            },
+            Turn {
+                text: "added".into(),
+                usage: Some(reported_usage(22)),
+                finish_reason: Some("stop".into()),
+                ..Turn::default()
+            },
+        ])
+        .with_ledger(ledger);
+        let answer = agent.ask("add the ISS").expect("answer");
+        assert_eq!(answer.trace.len(), 1);
+        let ledger = agent.ledger.as_ref().expect("ledger");
+        let stored = ledger.computations(1).expect("stored");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].record.command, "satellite.add");
+        assert_eq!(stored[0].record.engine_version, env!("CARGO_PKG_VERSION"));
+        assert!(stored[0].record.result.starts_with('{'));
+        assert_eq!(stored[0].record.errors, "[]");
     }
 
     #[test]

@@ -9,6 +9,38 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.111] — Every tool call can be replayed from the computation ledger
+
+### Added
+
+- Schema version 3: `computation.result` and `computation.errors`. The result is the structured JSON
+  the platform rendered; the errors are the verifier's verdict. A version-2 record migrates forward
+  without losing its rows.
+- `Agent::with_ledger`: every successful tool call is written with its command, parameters, scenario
+  digest, engine version, summary, result JSON and verification errors.
+- `ask` and `chat` open the installation's record automatically, and the `passes` CLI stores its
+  structured answer instead of only a summary.
+- The storage test suite proves a version-2 database gains the columns and can still record a row.
+
+### Changed
+
+- A ledger write failure does not fail the answer; the answer is the user's, the record is
+  best-effort. The code says so where the result is ignored.
+
+### Not built yet
+
+- Formula dimension algebra and the offline PhyE2E-style discovery pipeline.
+- The task-graph orchestrator and the fixed real-provider evaluation set.
+- A ledger read view in the desktop app; `stkcraft history` reads the existing computation table.
+- Sub-daily EOP; release packaging; macOS CI.
+
+### Verification
+
+- Storage tests: 35 pass, including the version-2 migration and the result/errors round trip.
+- Runtime test: an agent with an in-memory ledger records `satellite.add` with its result and `[]`
+  errors.
+- `cargo xtask ci` at 0.1.111 passes all twelve steps.
+
 ## [0.1.110] — A role is restricted to the objects it may touch
 
 ### Added
