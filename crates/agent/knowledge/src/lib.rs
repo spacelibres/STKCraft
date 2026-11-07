@@ -64,6 +64,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cache;
+pub mod capability;
 pub mod chunk;
 pub mod expert;
 pub mod html;

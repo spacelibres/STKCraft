@@ -63,6 +63,7 @@ fn main() -> ExitCode {
         Some("math-regions") => task_math_regions(args.get(1..).unwrap_or_default()),
         Some("formulas") => task_formulas(args.get(1..).unwrap_or_default()),
         Some("experts") => task_experts(args.get(1..).unwrap_or_default()),
+        Some("capabilities") => task_capabilities(args.get(1..).unwrap_or_default()),
         Some("mathlib") => task_mathlib(args.get(1..).unwrap_or_default()),
         Some("verify-formulas") => task_verify_formulas(),
         Some("naif" | "fetch-naif") => task_fetch_naif(args.get(1..).unwrap_or_default()),
@@ -124,8 +125,9 @@ fn print_help() {
 Usage: cargo xtask <task>
 
 Tasks:
-  ci        fmt check, clippy, tests, assets, experts, experts-eval, layers, wasm, i18n, api-docs,
-            version and the lockfile check — what the GitHub Actions gate runs, in one command
+  ci        fmt check, clippy, tests, assets, experts, experts-eval, capabilities, layers, wasm,
+            i18n, api-docs, version and the lockfile check — what the GitHub Actions gate runs,
+            in one command
   fmt       cargo fmt --check over the workspace
   layers    enforce crate layering (a crate may depend only on lower layers)
   assets    every asset in the repo has a row in ATTRIBUTION.md
@@ -139,6 +141,7 @@ Tasks:
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   experts   validate expert packages and their formula records (`experts check`);
             run their evaluation cases (`experts eval`)
+  capabilities  validate the object capability manifests (`capabilities check`)
   mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
   verify-formulas  re-extract every recorded formula, re-classify, fail on drift
   release   tag the version and print the command that publishes it (`release` checks the changelog)
@@ -217,8 +220,46 @@ fn task_experts_eval() -> Result<(), String> {
     }
 }
 
+/// `cargo xtask capabilities [check]`: every object manifest names a real command.
+fn task_capabilities(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        None | Some("check") => task_capabilities_check(),
+        Some(other) => Err(format!(
+            "unknown `capabilities` subcommand `{other}`; use `cargo xtask capabilities check`"
+        )),
+    }
+}
+
+fn task_capabilities_check() -> Result<(), String> {
+    let manifests = stkcraft_agent_knowledge::capability::load_all(&workspace_root())
+        .map_err(|errors| errors.join("\n"))?;
+    let registry = stkcraft_astro_engine::Registry::builtin();
+    let mut errors = Vec::new();
+    let mut references = 0;
+    for manifest in &manifests {
+        for command in &manifest.commands {
+            references += 1;
+            if registry.get(command).is_none() {
+                errors.push(format!(
+                    "capability `{}` names `{command}`, which is not in the command registry",
+                    manifest.id
+                ));
+            }
+        }
+    }
+    if errors.is_empty() {
+        println!(
+            "capabilities: {} object(s), {references} command reference(s)",
+            manifests.len()
+        );
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
 fn task_ci() -> Result<(), String> {
-    let steps: [CiStep; 11] = [
+    let steps: [CiStep; 12] = [
         ("fmt", || run_cargo(&["fmt", "--all", "--", "--check"])),
         ("clippy", || {
             run_cargo(&[
@@ -234,6 +275,7 @@ fn task_ci() -> Result<(), String> {
         ("assets", task_assets),
         ("experts", task_experts_check),
         ("experts-eval", task_experts_eval),
+        ("capabilities", task_capabilities_check),
         ("i18n", task_i18n_check),
         ("api-docs", task_api_docs_check),
         ("layers", task_layers),

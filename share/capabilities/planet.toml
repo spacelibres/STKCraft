@@ -1,0 +1,11 @@
+id = "planet"
+label = "Planet-centred station"
+commands = ["planet.access"]
+evidence = [
+  "The body name and the station's planetodetic coordinates.",
+  "The circular orbit radius, inclination and the engine's pass table.",
+]
+limitations = [
+  "The orbit is a specified circle, not a propagated element set.",
+  "The body is treated with the radius and rotation the engine has for it; no oblateness model is applied.",
+]

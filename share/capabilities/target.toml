@@ -1,0 +1,11 @@
+id = "target"
+label = "Ground target"
+commands = ["target.add", "access.targets"]
+evidence = [
+  "The target vertices and the number of vertices the engine used.",
+  "The per-vertex window union, formula citations and limitations.",
+]
+limitations = [
+  "Target access is the union of its vertex windows, not complete polygon-interior coverage.",
+  "Adding vertices changes the result; the vertex count travels with the answer.",
+]

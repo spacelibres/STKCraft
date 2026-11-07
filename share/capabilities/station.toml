@@ -1,0 +1,11 @@
+id = "station"
+label = "Ground station"
+commands = ["station.add", "station.remove", "station.sensor", "access.compute", "access.targets"]
+evidence = [
+  "The station's WGS-84 geodetic latitude, longitude and height.",
+  "The sensor mask and cone, and the engine's window table with formulas and limitations.",
+]
+limitations = [
+  "The line of sight is geometric: no terrain, atmosphere, refraction or light time.",
+  "A sampled window can begin and end between samples; the answer states the step.",
+]

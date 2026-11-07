@@ -1,0 +1,11 @@
+id = "satellite"
+label = "Satellite"
+commands = ["satellite.add", "satellite.remove", "access.compute", "access.targets"]
+evidence = [
+  "The satellite id and the scenario digest from the command result.",
+  "The engine's window table, formula citations and limitations.",
+]
+limitations = [
+  "A two-line element set is a snapshot: no manoeuvres, thrust or attitude are modelled.",
+  "SGP4 accuracy degrades away from the element epoch; the answer carries the epoch.",
+]
