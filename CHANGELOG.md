@@ -9,6 +9,38 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.112] — Fixed agent cases, and the capability gap they exposed
+
+### Added
+
+- `share/evals/agent/basic.jsonl`: fixed cases with an expected `status`, result `kind`, minimum
+  window count and required formula id.
+- `stkcraft agent-eval [--file <jsonl>]`: runs those cases against the configured provider and
+  reports PASS/FAIL. It needs a real key and network, so it is not part of the offline CI gate.
+- `ask --json` now writes its tool trace to stderr, leaving stdout as one parseable envelope.
+
+### Found, not fixed
+
+- The `out-of-scope-link-budget` case asked for an RF link margin, which no command implements.
+  The agent called `access.compute` (5 windows), returned `status: complete`, and the expected
+  `unsupported` failed. The envelope currently means "some structured result exists", not "the
+  question was answered". A capability preflight or planner is required; the failure is recorded
+  rather than hidden by changing the expectation.
+
+### Not built yet
+
+- Capability preflight and `needs_input`/`unsupported` classification before tool execution.
+- Formula dimension algebra; the task-graph orchestrator.
+- A real-provider CI run (it would need a secret and network, so the fixed cases stay a manual
+  task until a deliberately gated environment exists).
+
+### Verification
+
+- Real DeepSeek run at 0.1.112: `PASS iss-passes (complete)`, `FAIL out-of-scope-link-budget
+  (complete): status complete, expected unsupported`; 1 of 2 passed.
+- Unit test for the expectation checker: status, kind, window count and formula citation.
+- `cargo xtask ci` at 0.1.112 passes all twelve steps; the real evaluation is not in that gate.
+
 ## [0.1.111] — Every tool call can be replayed from the computation ledger
 
 ### Added

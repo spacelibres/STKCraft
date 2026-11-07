@@ -1,0 +1,2 @@
+{"id":"iss-passes","question":"In the demo scenario, list the ISS passes over London in the next 24 hours with UTC start, end and duration. Use the engine tools, do not estimate.","expect":{"status":"complete","kind":"access","min_windows":1,"formula":"access.look-angles"}}
+{"id":"out-of-scope-link-budget","question":"Compute the RF link margin for the ISS over London at the next pass. Use the engine where possible, and do not invent a link model.","expect":{"status":"unsupported"}}

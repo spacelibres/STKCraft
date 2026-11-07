@@ -42,6 +42,8 @@ pub enum Invocation {
     Knowledge(KnowledgeRequest),
     /// Run one registry command by id, optionally against a scenario document.
     Run(RunRequest),
+    /// Run the fixed agent evaluation cases against the configured model.
+    AgentEval(AgentEvalRequest),
     /// List every command id, its parameters and its menu.
     Commands,
 }
@@ -59,6 +61,12 @@ pub struct RunRequest {
     eop: Option<String>,
     /// The parameters, as the strings the caller typed; `args_from` converts them by kind.
     params: serde_json::Value,
+}
+
+/// The fixed agent evaluation cases to run.
+pub struct AgentEvalRequest {
+    /// The JSONL file; `share/evals/agent/basic.jsonl` by default.
+    path: Option<String>,
 }
 
 /// One question for the model-backed agent.
@@ -121,6 +129,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Model(request) => model(&request),
         Invocation::Knowledge(request) => knowledge(&request),
         Invocation::Run(request) => run_command(&request),
+        Invocation::AgentEval(request) => agent_eval(&request),
         Invocation::Commands => {
             print!("{}", command_list());
             Ok(())
@@ -149,6 +158,7 @@ COMMANDS
                 (`mcp --expert time-frames` restricts it to that expert's allowlist)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
                 (`ask --json <question>` prints the ResultEnvelope, not the model text)
+    agent-eval  Run the fixed agent cases against the configured model (needs a key)
     chat        Ask questions in one conversation, reading them from standard input
                 (`chat --session <id>` resumes one; `chat --sessions` lists them)
     extensions  List the extension packages installed for this person
@@ -254,6 +264,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
             Ok(Invocation::Ask(AskRequest { question, json }))
         }
         "run" => parse_run(arguments),
+        "agent-eval" => parse_agent_eval(arguments),
         "commands" => Ok(Invocation::Commands),
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
@@ -907,8 +918,15 @@ fn ask(request: &AskRequest) -> Result<(), String> {
         agent = agent.with_ledger(store);
     }
     // Printed as they happen rather than collected and printed at the end: a question can take a
-    // minute, and a step nobody can see while it runs is a step nobody can interrupt.
-    let mut print = |line: &str| println!("  · {line}");
+    // minute, and a step nobody can see while it runs is a step nobody can interrupt. In JSON mode
+    // the trace goes to stderr so stdout stays one parseable envelope.
+    let mut print = |line: &str| {
+        if request.json {
+            eprintln!("  · {line}");
+        } else {
+            println!("  · {line}");
+        }
+    };
     match agent.ask_observing(&request.question, &mut print) {
         Ok(answer) if request.json => {
             let envelope = answer.envelope(&request.question);
@@ -1451,10 +1469,191 @@ fn app_demo_scenario() -> Result<stkcraft_astro_engine::Scenario, String> {
     crate::app::demo_scenario()
 }
 
+/// Parse `agent-eval [--file FILE]`.
+fn parse_agent_eval<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let mut path = None;
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--file" => {
+                path = Some(arguments.next().ok_or(
+                    "`--file` needs a JSONL path, e.g. `--file share/evals/agent/basic.jsonl`",
+                )?);
+            }
+            other => return Err(format!("unknown option `{other}` for `agent-eval`")),
+        }
+    }
+    Ok(Invocation::AgentEval(AgentEvalRequest { path }))
+}
+
+/// Check one case's expectation against the result envelope.
+fn check_expectation(
+    expect: &serde_json::Value,
+    envelope: &stkcraft_agent_runtime::ResultEnvelope,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    if let Some(status) = expect.get("status").and_then(serde_json::Value::as_str)
+        && status != envelope.status
+    {
+        problems.push(format!("status `{}`, expected `{status}`", envelope.status));
+    }
+    if let Some(kind) = expect.get("kind").and_then(serde_json::Value::as_str)
+        && !envelope
+            .results
+            .iter()
+            .any(|result| result.get("kind").and_then(serde_json::Value::as_str) == Some(kind))
+    {
+        problems.push(format!("no result of kind `{kind}`"));
+    }
+    if let Some(minimum) = expect
+        .get("min_windows")
+        .and_then(serde_json::Value::as_u64)
+    {
+        let windows = envelope
+            .results
+            .iter()
+            .filter_map(|result| result.get("pairs").and_then(serde_json::Value::as_array))
+            .flatten()
+            .filter_map(|pair| pair.get("windows").and_then(serde_json::Value::as_array))
+            .map(Vec::len)
+            .sum::<usize>()
+            + envelope
+                .results
+                .iter()
+                .filter_map(|result| result.get("passes").and_then(serde_json::Value::as_array))
+                .map(Vec::len)
+                .sum::<usize>();
+        if windows < minimum as usize {
+            problems.push(format!("{windows} window(s), expected at least {minimum}"));
+        }
+    }
+    if let Some(formula) = expect.get("formula").and_then(serde_json::Value::as_str)
+        && !envelope.results.iter().any(|result| {
+            result
+                .get("formulas")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|formulas| {
+                    formulas.iter().any(|entry| {
+                        entry.get("id").and_then(serde_json::Value::as_str) == Some(formula)
+                    })
+                })
+        })
+    {
+        problems.push(format!("no citation of formula `{formula}`"));
+    }
+    problems
+}
+
+/// Run the fixed cases against the configured provider; this is a real network run.
+fn agent_eval(request: &AgentEvalRequest) -> Result<(), String> {
+    let path = request
+        .path
+        .clone()
+        .unwrap_or_else(|| "share/evals/agent/basic.jsonl".to_owned());
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("could not read `{path}`: {error}"))?;
+    let mut total = 0_usize;
+    let mut failures = 0_usize;
+    for (line_number, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let case: serde_json::Value = serde_json::from_str(line)
+            .map_err(|error| format!("{path}:{}: {error}", line_number + 1))?;
+        let id = case
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("{path}:{}: case has no id", line_number + 1))?;
+        let question = case
+            .get("question")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("{path}:{}: case `{id}` has no question", line_number + 1))?;
+        let expect = case
+            .get("expect")
+            .ok_or_else(|| format!("{path}:{}: case `{id}` has no expect", line_number + 1))?;
+        total += 1;
+        let model = crate::prefs::model_provider()?;
+        let server = stkcraft_agent_mcp::Server::new(
+            app_demo_scenario()?,
+            stkcraft_agent_mcp::load_skills(&skills_directory()),
+        )
+        .with_knowledge(knowledge_library()?)
+        .with_capabilities(load_capabilities()?);
+        let mut agent = stkcraft_agent_runtime::Agent::new(model, server);
+        let mut trace = |line: &str| eprintln!("  · {line}");
+        match agent.ask_observing(question, &mut trace) {
+            Ok(answer) => {
+                let envelope = answer.envelope(question);
+                let problems = check_expectation(expect, &envelope);
+                if problems.is_empty() {
+                    println!("PASS {id} ({})", envelope.status);
+                } else {
+                    failures += 1;
+                    println!("FAIL {id} ({}): {}", envelope.status, problems.join("; "));
+                }
+            }
+            Err(message) => {
+                failures += 1;
+                println!("FAIL {id}: {message}");
+            }
+        }
+    }
+    if failures == 0 {
+        println!("agent-eval: {total} case(s), all passed");
+        Ok(())
+    } else {
+        Err(format!("agent-eval: {failures}/{total} case(s) failed"))
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_eval_expectations_check_status_kind_windows_and_formula() {
+        let envelope = stkcraft_agent_runtime::ResultEnvelope {
+            status: "complete".to_owned(),
+            question: "q".to_owned(),
+            results: vec![serde_json::json!({
+                "kind": "access",
+                "pairs": [{"windows": [{"start_utc": "a"}, {"start_utc": "b"}]}],
+                "formulas": [{"id": "access.look-angles", "source": "Vallado"}]
+            })],
+            trace: Vec::new(),
+            errors: Vec::new(),
+        };
+        let expect = serde_json::json!({
+            "status": "complete",
+            "kind": "access",
+            "min_windows": 2,
+            "formula": "access.look-angles"
+        });
+        assert_eq!(check_expectation(&expect, &envelope), Vec::<String>::new());
+        let expect = serde_json::json!({
+            "status": "unsupported",
+            "kind": "planet-passes",
+            "min_windows": 3,
+            "formula": "access.window-sampling"
+        });
+        let problems = check_expectation(&expect, &envelope);
+        assert!(problems.iter().any(|problem| problem.contains("status")));
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.contains("planet-passes"))
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.contains("at least 3"))
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.contains("window-sampling"))
+        );
+    }
 
     #[test]
     fn model_protocol_flags_are_parsed_without_a_credential() {
