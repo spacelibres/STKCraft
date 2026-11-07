@@ -1,7 +1,7 @@
 <p align="center">
   <a href="https://www.stkcraft.com">
     <img src="assets/app-icon/albatross.png" width="128" height="128"
-         alt="The STKCraft albatross mark: an engraved albatross in flight on the ArtCraft-blue tile">
+         alt="The STKCraft albatross mark: an engraved albatross in flight on a deep-blue tile">
   </a>
 </p>
 
@@ -20,7 +20,7 @@
   timeline; and answer when something can see something else, and for how long. It runs
   natively on macOS, Windows, Linux and FreeBSD, and its analysis core compiles to
   WebAssembly; a browser shell is not shipped yet.<br>
-  <i>By the ArtCraft team.</i>
+  <i>An independent Craft-style project, applying to join the ArtCraft family.</i>
 </p>
 
 <p align="center">
@@ -142,14 +142,15 @@ DOCX/XLSX text extraction for the knowledge base.
 ## License and credits
 
 STKCraft is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your
-option. Copyright (c) 2026 ArtCraft Team and the STKCraft contributors. Required notices are
+option. Copyright (c) 2026 the STKCraft contributors. Required notices are
 in [NOTICE](NOTICE).
 
 Bundled assets, if any, keep their own open licenses; each one is listed with its author,
 source and license in [ATTRIBUTION.md](ATTRIBUTION.md).
 
 The ArtCraft name, wordmark and logos are trademarks of the ArtCraft Team and are not covered
-by this license. Forks and modified versions must remove them.
+by this license. STKCraft is an independent project applying to join the ArtCraft family and does
+not claim these marks; forks and modified versions must remove them.
 
 STKCraft is a clean-room implementation. It is built from published standards and public
 papers; no commercial mission-analysis product's code, data files or artwork is used.

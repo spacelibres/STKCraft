@@ -1,7 +1,7 @@
 # Translating the interface
 
 STKCraft's interface is written in English in the source and translated by catalogs. The catalogs are
-the ArtCraft family's format — the same one `storytold/craft-i18n` holds and the other Craft apps
+the Craft family's format — the same one `storytold/craft-i18n` holds and the other Craft apps
 read — so a translation written here can be contributed there, and a rule that disagrees with the
 shared checker is a bug here rather than a local preference. See
 [standards.md](../standards.md) for the rule that governs all of this.
