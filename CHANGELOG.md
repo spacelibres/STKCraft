@@ -9,6 +9,36 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.107] — The assistant panel renders the numbers, not the article
+
+### Added
+
+- The assistant panel now draws structured tool results as tables: satellite/station or
+  satellite/target pair, start (UTC), end (UTC), duration. A planet pass is the same table without a
+  window array. An unknown result shape falls back to a collapsible raw JSON view.
+- The model's text is a collapsed "Model note" when a structured result exists; it is still the
+  answer when no result exists.
+
+### Changed
+
+- `Reply` carries the structured results alongside the text and the scenario; the worker sends them
+  in one message rather than a second channel.
+- The table headers and the note/raw labels are translatable (`Results`, `Start (UTC)`,
+  `End (UTC)`, `Duration`, `Model note`, `Raw result`). The Chinese catalog covers them; the report
+  is 69/69 with 0 missing.
+
+### Not built yet
+
+- Object-level capability manifests and the task-graph orchestrator.
+- A `needs_input`/`failed` classification for a model run with no structured result.
+- Sub-daily EOP; release packaging; macOS CI.
+
+### Verification
+
+- `cargo test -p stkcraft assistant` passes 21 tests, including the Stop/adoption races with the
+  new reply shape.
+- `cargo xtask ci` at 0.1.107 passes all eleven steps.
+
 ## [0.1.106] — The agent can return a result envelope instead of prose
 
 ### Added

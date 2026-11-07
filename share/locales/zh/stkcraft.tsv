@@ -73,3 +73,9 @@
 	{satellites} satellite marker(s), {stations} station(s), {tracks} track(s)	{satellites} 个卫星标记，{stations} 个地面站，{tracks} 条轨迹
 	{satellite} over {station}: {passes}, {total}	卫星 {satellite} 过境 {station}：{passes}，{total}
 @plural	{n} pass over {pairs} pair|{n} passes over {pairs} pairs	{n} 次过境，覆盖 {pairs} 对
+	Results	结果
+	Start (UTC)	开始（UTC）
+	End (UTC)	结束（UTC）
+	Duration	时长
+	Model note	模型说明
+	Raw result	原始结果
