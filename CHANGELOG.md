@@ -9,6 +9,34 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.119] — A formula can decompose into checked sub-formulas
+
+### Added
+
+- `decomposition = ["sub.id", …]` on a formula record. The validator rejects an empty entry, a
+  self-reference, a duplicate, a reference to a formula outside the same expert, and a cycle.
+- The cycle report names the remaining nodes, so a package author can see the loop rather than
+  guess.
+- Tests: a missing reference is refused; a two-node cycle is found and named.
+
+### What this is not
+
+- No current expert package uses `decomposition`; this is the validation contract for the PhyE2E
+  decomposition workflow, not a claim that the published formulas have been decomposed.
+- Expression-level dimensional balance is still not checked. The unit/dimension pair check from
+  0.1.117 and this decomposition graph are separate steps.
+
+### Not built yet
+
+- The offline candidate-decomposition workflow; expression-level dimensional algebra.
+- Planner budgets, parallel execution, cancellation and durable state.
+
+### Verification
+
+- Expert tests: missing decomposition reference, cycle.
+- `cargo xtask experts check`: 3 packages, 11 sources, 18 formulas, 16 verified, 2 implemented.
+- `cargo xtask ci` at 0.1.119 passes all twelve steps.
+
 ## [0.1.118] — The planner gets exactly one correction
 
 ### Added

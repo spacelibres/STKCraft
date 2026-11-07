@@ -103,6 +103,7 @@ structured access and pass results, and `ResultEnvelope` reports `complete`, `un
 | No capability manifest per object | Enumerated action space | Satellite/station/target/scenario/planet manifests, validated against the command registry and exposed as an MCP resource | Declared; role-scoped dispatch is enforced, a session without a role is not |
 | No task ledger | "Stick" | `Agent::with_ledger` records command, parameters, scenario digest, engine version, result and verifier errors; the CLI `passes` path stores its structured answer too | Implemented; best-effort when the record opens |
 | Formula records have no dimension algebra | PhyE2E dimensional consistency | Known unit/dimension pairs must agree in the expert validator | Pair check implemented; expression-level balance and decomposition remain |
+| No formula decomposition contract | PhyE2E decomposition | `decomposition` references must stay inside the expert, and cycles are refused | Contract implemented; no package is decomposed yet |
 | Formula discovery is not a workflow | PhyE2E data-to-law pipeline | Offline candidate pipeline with held-out evaluation | Later |
 | No planner/executor | Proposer/verifier separation | Deterministic `TaskGraph` executor; `Planner` asks a model for a graph, `stkcraft plan` validates and runs it | Executor and one-shot planner implemented; correction, budgets, cancellation and durable state remain |
 | Agent evaluation is ad hoc | Prophecy/counterfactual evaluation | Fixed JSONL cases for complete/needs-input/unsupported/failed | In progress |
