@@ -9,6 +9,33 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.124] — A task graph stops at the next task boundary when cancelled
+
+### Added
+
+- `TaskGraph::execute_controlled` checks the shared `RequestControl` before each task. A cancelled
+  graph keeps the outcomes of tasks that already ran and records a `cancelled` outcome for the next
+  task; it does not start it.
+- `TaskStatus::Cancelled`.
+- A test cancels before the first task and proves the scenario stays empty and no command runs.
+
+### Changed
+
+- `TaskGraph::execute` remains the uncancelled convenience path; it delegates to
+  `execute_controlled` with a fresh token.
+- Cancellation is cooperative at task boundaries. A command that is already running finishes
+  synchronously; there is no mid-command interrupt.
+
+### Not built yet
+
+- Planner budgets and failure budgets, parallel branches, durable task state.
+- Expression-level dimension algebra and offline formula discovery.
+
+### Verification
+
+- Runtime test: a pre-cancelled graph returns one `cancelled` outcome and does not add a satellite.
+- `cargo xtask ci` at 0.1.124 passes all twelve steps.
+
 ## [0.1.123] — The fixed cases now include a real failure
 
 ### Added

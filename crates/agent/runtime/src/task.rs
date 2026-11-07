@@ -49,6 +49,8 @@ pub enum TaskStatus {
     Failed,
     /// A dependency did not complete.
     Blocked,
+    /// The caller cancelled before this task ran.
+    Cancelled,
 }
 
 /// One task's result.
@@ -183,6 +185,28 @@ impl TaskGraph {
         registry: &Registry,
         scenario: &mut Scenario,
     ) -> Result<Vec<TaskOutcome>, Vec<String>> {
+        self.execute_controlled(
+            registry,
+            scenario,
+            &crate::RequestControl::new(crate::CancellationToken::default()),
+        )
+    }
+
+    /// Run the graph with cooperative cancellation between tasks.
+    ///
+    /// A cancelled graph keeps the outcomes of tasks that already ran and records a `cancelled`
+    /// outcome for the task that would have run next. Commands already executing finish
+    /// synchronously; the check is at the task boundary, not inside a command.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::execute`], before any command runs.
+    pub fn execute_controlled(
+        &self,
+        registry: &Registry,
+        scenario: &mut Scenario,
+        control: &crate::RequestControl,
+    ) -> Result<Vec<TaskOutcome>, Vec<String>> {
         let order = self.validate(registry)?;
         let by_id: BTreeMap<&str, &TaskSpec> = self
             .tasks
@@ -195,6 +219,16 @@ impl TaskGraph {
             let Some(task) = by_id.get(id.as_str()).copied() else {
                 continue;
             };
+            if control.check().is_err() {
+                outcomes.push(TaskOutcome {
+                    id: task.id.clone(),
+                    status: TaskStatus::Cancelled,
+                    summary: String::new(),
+                    error: Some("the caller cancelled the graph".to_owned()),
+                    result: None,
+                });
+                break;
+            }
             let blocked_by = task
                 .depends_on
                 .iter()
@@ -569,6 +603,20 @@ mod tests {
         assert!(access.result.is_some(), "{access:?}");
         assert_eq!(scenario.satellites.len(), 1);
         assert_eq!(scenario.stations.len(), 1);
+    }
+
+    #[test]
+    fn a_cancelled_graph_does_not_run_the_next_task() {
+        let mut scenario = Scenario::empty("cancel");
+        let token = crate::CancellationToken::default();
+        token.cancel();
+        let control = crate::RequestControl::new(token);
+        let outcomes = graph()
+            .execute_controlled(&registry(), &mut scenario, &control)
+            .expect("valid graph");
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].status, TaskStatus::Cancelled);
+        assert_eq!(scenario.satellites.len(), 0);
     }
 
     #[test]
