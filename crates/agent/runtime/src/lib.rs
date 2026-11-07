@@ -822,13 +822,13 @@ impl<M: ChatModel> Agent<M> {
              general knowledge, not as the library's.\n\
              2. Every number you report must come from a tool call or a cited passage. Never \
              estimate an orbit, a pass time or a distance yourself.\n\
-             2. Call the tools in the order a mission analyst would: add the satellite and the \
+             3. Call the tools in the order a mission analyst would: add the satellite and the \
              station first, then compute.\n\
-             3. If a tool reports an error, correct the parameter and retry once; if it fails \
+             4. If a tool reports an error, correct the parameter and retry once; if it fails \
              again, report the error instead of inventing a result.\n\
-             4. When the answer is a list of passes, give the count and the total time in view, \
+             5. When the answer is a list of passes, give the count and the total time in view, \
              and quote the times as the tool returned them.\n\
-            5. If the question needs a procedure you do not know, read the skill for it first.\n\
+            6. If the question needs a procedure you do not know, read the skill for it first.\n\
              \n",
         );
         let mut skill_names = Vec::new();

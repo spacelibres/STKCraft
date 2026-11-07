@@ -9,6 +9,26 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.86] — Assistant rule numbering and the xtask help text
+
+### Fixed
+
+- The assistant's system prompt numbered two rules `2`, so the order of its rules was ambiguous. It now
+  numbers its rules 1 to 6, once each. The rules themselves are unchanged.
+- `cargo xtask help` listed six commands twice and did not list `release`. Each command now appears once,
+  and `release` is documented.
+
+### Not built yet
+
+- Nothing in this version adds a capability. The larger items that `docs/standards.md` and `ROADMAP.md`
+  mark as not built remain not built.
+
+### Verification
+
+This version was prepared in an environment without a Rust toolchain, so `cargo xtask ci` was not run
+against it. Each code change is a single string literal, checked by reading the diff. The version
+consistency check (newest changelog heading against `Cargo.toml`) was checked by hand.
+
 ## [0.1.85] — Bounded model output and honest token accounting
 
 ### Added

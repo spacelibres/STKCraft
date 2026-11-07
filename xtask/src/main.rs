@@ -138,12 +138,7 @@ Tasks:
   formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
   mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
   verify-formulas  re-extract every recorded formula, re-classify, fail on drift
-  standards download every CCSDS publication, verified (the set we align to)
-  naif      download NAIF's required reading, verified (the algorithms behind the standards)
-  math-regions  print the formula regions of a PDF as TSV, for the transcription table
-  formulas  check the transcription table against the corpus (needs `cargo xtask standards`)
-  mathlib   read a Mathlib checkout into a table of declarations (MATHLIB_DIR=<checkout>)
-  verify-formulas  re-extract every recorded formula, re-classify, fail on drift
+  release   tag the version and print the command that publishes it (`release` checks the changelog)
   fetch-data  download the ephemeris kernels and tables, verified
   lockfile  Cargo.lock matches what is committed (the workflow's last check)
   api-docs  generate the API reference from the code; `check` verifies the committed copy
