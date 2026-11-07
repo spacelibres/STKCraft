@@ -9,6 +9,36 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.91] — The window's error sentences are translatable
+
+### Changed
+
+- Frame problems are data (`FrameProblem::Station`, `Satellite`, `SatelliteAt`) instead of finished
+  English strings; the window composes the sentence with `tr!`, so the prefix around a station or
+  satellite name follows the interface language while the engine's error detail stays as written.
+- The assistant's fixed failure messages ("Type a question first.", "The assistant could not
+  start.", the stopped/cancelled cases) are translated at render. An unknown runtime error is shown
+  as the runtime wrote it rather than hidden or guessed at.
+- The source now has 63 extractable interface strings.
+
+### Fixed
+
+- The Diagnostics panel and the assistant's failure line were the last window text that could not
+  be translated at all.
+
+### Not built yet
+
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask ci` at 0.1.91 (fmt, clippy, tests, assets, i18n, api-docs, layers, wasm, version,
+  lockfile).
+- `cargo xtask i18n` extracts 63 strings and every catalog stays well-formed; the `zh` catalog falls
+  back to English for the new rows until someone reviews translations.
+
 ## [0.1.90] — Target corners are typed pairs
 
 ### Changed

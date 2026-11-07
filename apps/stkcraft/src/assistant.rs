@@ -617,6 +617,25 @@ impl Assistant {
             }
             State::Failed(message) => {
                 ui.separator();
+                // The runtime's own error is English detail; the panel's sentences are translated.
+                // Matching the exact source keeps the extraction literal and leaves an unknown
+                // engine message as the engine wrote it rather than hiding it.
+                let message = match message.as_str() {
+                    "Type a question first." => tr!("Type a question first.").to_owned(),
+                    "The assistant could not start." | "the assistant could not start" => {
+                        tr!("The assistant could not start.").to_owned()
+                    }
+                    "The assistant stopped; ask again to restart it." => {
+                        tr!("The assistant stopped; ask again to restart it.").to_owned()
+                    }
+                    "The assistant stopped without an answer." => {
+                        tr!("The assistant stopped without an answer.").to_owned()
+                    }
+                    "The assistant request was cancelled." => {
+                        tr!("The assistant request was cancelled.").to_owned()
+                    }
+                    _ => message.clone(),
+                };
                 ui.colored_label(egui::Color32::from_rgb(230, 120, 120), message);
             }
         }
