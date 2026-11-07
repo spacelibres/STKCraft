@@ -1622,6 +1622,7 @@ mod tests {
             })],
             trace: Vec::new(),
             errors: Vec::new(),
+            reason: None,
         };
         let expect = serde_json::json!({
             "status": "complete",

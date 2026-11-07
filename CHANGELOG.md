@@ -9,6 +9,43 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.113] — The model concludes with a status the platform can check
+
+### Added
+
+- `agent.report`, a control tool with `status` (`complete`, `needs_input`, `unsupported`,
+  `failed`) and an optional `reason`. It is listed with the engine tools, accepted by the MCP
+  dispatch and allowed to every expert role.
+- The system prompt requires the report before the final message and says plainly: never report
+  `complete` for a computation that does not answer the question.
+- `ResultEnvelope.reason`, and `needs_input` as a status. A reported `complete` with no structured
+  result is `failed`, not `complete`.
+- A session that never calls `agent.report` keeps the old inference (results → complete, none →
+  unsupported); the report takes precedence when present.
+
+### Changed
+
+- `verify_results` remains the independent check on the numbers. The model's status is a conclusion,
+  not evidence: `complete` still has to pass the duration/citation/limitation checks.
+
+### Not built yet
+
+- A deterministic capability preflight before tool execution. The current status is model-declared
+  and therefore still relies on the prompt; a model that ignores it falls back to inference.
+- Formula dimension algebra and the task-graph orchestrator.
+
+### Verification
+
+- Real DeepSeek run at 0.1.113: `PASS iss-passes (complete)` and
+  `PASS out-of-scope-link-budget (unsupported)`; 2 of 2 passed.
+- The RF run called `access.compute`, then reported `unsupported` with the reason that no registered
+  command computes a link margin; the geometry windows stayed in the trace but not in the answer's
+  status.
+- MCP test: `agent.report` is listed, returns its structured status, and rejects an invalid status.
+- Runtime test: reported `unsupported` overrides a present result; reported `complete` without one
+  becomes `failed`.
+- `cargo xtask ci` at 0.1.113 passes all twelve steps.
+
 ## [0.1.112] — Fixed agent cases, and the capability gap they exposed
 
 ### Added

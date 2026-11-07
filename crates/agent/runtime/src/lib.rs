@@ -741,6 +741,10 @@ pub struct Answer {
     pub trace: Vec<String>,
     /// The structured results the tools returned, in call order.
     pub results: Vec<serde_json::Value>,
+    /// The status the model concluded with through `agent.report`, when it did.
+    pub reported_status: Option<String>,
+    /// The reason the model gave with that status.
+    pub reported_reason: Option<String>,
     /// Reported usage and gaps for this answer and its compaction requests.
     pub usage: AnswerUsage,
 }
@@ -761,19 +765,38 @@ pub struct ResultEnvelope {
     pub trace: Vec<String>,
     /// The invariants a result failed; empty when every result passed.
     pub errors: Vec<String>,
+    /// The reason the model gave for a non-complete status.
+    pub reason: Option<String>,
 }
 
 impl Answer {
     /// Build the result envelope for this answer.
     #[must_use]
     pub fn envelope(&self, question: &str) -> ResultEnvelope {
-        let errors = verify_results(&self.results);
-        let status = if self.results.is_empty() {
-            "unsupported"
-        } else if errors.is_empty() {
-            "complete"
-        } else {
-            "failed"
+        let mut errors = verify_results(&self.results);
+        let status = match self.reported_status.as_deref() {
+            Some("complete") => {
+                if self.results.is_empty() {
+                    errors.push(
+                        "the answer reported complete but returned no structured result".to_owned(),
+                    );
+                    "failed"
+                } else if errors.is_empty() {
+                    "complete"
+                } else {
+                    "failed"
+                }
+            }
+            Some("needs_input") => "needs_input",
+            Some("unsupported") => "unsupported",
+            Some("failed") => "failed",
+            Some(other) => {
+                errors.push(format!("unknown agent report status `{other}`"));
+                "failed"
+            }
+            None if self.results.is_empty() => "unsupported",
+            None if errors.is_empty() => "complete",
+            None => "failed",
         };
         ResultEnvelope {
             status: status.to_owned(),
@@ -781,6 +804,7 @@ impl Answer {
             results: self.results.clone(),
             trace: self.trace.clone(),
             errors,
+            reason: self.reported_reason.clone(),
         }
     }
 }
@@ -907,9 +931,14 @@ impl<M: ChatModel> Agent<M> {
              station first, then compute.\n\
              4. If a tool reports an error, correct the parameter and retry once; if it fails \
              again, report the error instead of inventing a result.\n\
-             5. When the answer is a list of passes, give the count and the total time in view, \
+             5. Before your final message, call `agent.report` with one status: `complete`, \
+             `needs_input`, `unsupported` or `failed`. Use `unsupported` when no registered \
+             command implements the request, and `needs_input` when a required object or \
+             parameter is missing. Never report `complete` for a computation that does not \
+             answer the question.\n\
+             6. When the answer is a list of passes, give the count and the total time in view, \
              and quote the times as the tool returned them.\n\
-            6. If the question needs a procedure you do not know, read the skill for it first.\n\
+            7. If the question needs a procedure you do not know, read the skill for it first.\n\
              \n",
         );
         let mut skill_names = Vec::new();
@@ -1063,7 +1092,19 @@ impl<M: ChatModel> Agent<M> {
                 observer(&summary);
                 control.check()?;
                 if let Some(structured) = structured {
-                    answer.results.push(structured);
+                    if structured.get("kind").and_then(Value::as_str) == Some("agent.report") {
+                        answer.reported_status = structured
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        answer.reported_reason = structured
+                            .get("reason")
+                            .and_then(Value::as_str)
+                            .filter(|reason| !reason.is_empty())
+                            .map(str::to_owned);
+                    } else {
+                        answer.results.push(structured);
+                    }
                 }
                 answer.trace.push(summary);
                 self.push(Message::Tool {
@@ -1464,6 +1505,30 @@ mod tests {
             total_tokens: tokens,
             ..Usage::default()
         }
+    }
+
+    #[test]
+    fn a_reported_status_controls_the_envelope() {
+        let mut answer = Answer {
+            results: vec![json!({"kind": "access", "pairs": []})],
+            reported_status: Some("unsupported".to_owned()),
+            reported_reason: Some("no link model".to_owned()),
+            ..Answer::default()
+        };
+        let envelope = answer.envelope("link budget");
+        assert_eq!(envelope.status, "unsupported");
+        assert_eq!(envelope.reason.as_deref(), Some("no link model"));
+
+        answer.reported_status = Some("complete".to_owned());
+        answer.results.clear();
+        let envelope = answer.envelope("link budget");
+        assert_eq!(envelope.status, "failed");
+        assert!(
+            envelope
+                .errors
+                .iter()
+                .any(|error| error.contains("no structured result"))
+        );
     }
 
     #[test]

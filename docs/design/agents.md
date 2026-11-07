@@ -119,9 +119,11 @@ workflow database.
 `stkcraft agent-eval` runs the fixed cases in `share/evals/agent/` against a real provider. It is a
 manual, networked check, not a CI step: a case records the expected status, result kind, window
 count and formula citation, and a failure stays visible instead of being relaxed in the fixture.
-The first recorded failure is a capability gap: an RF link-budget question produced access windows
+The first recorded failure was a capability gap: an RF link-budget question produced access windows
 and a `complete` envelope because "some structured result exists" is not "the question was
-answered". Capability preflight is the next milestone.
+answered". The model now concludes with `agent.report`; the real run reports `unsupported` for that
+case and passes both fixed cases. The status is still model-declared, so a deterministic capability
+preflight remains a milestone; a model that ignores the tool falls back to inference.
 
 ## Task lifecycle and resource policy
 

@@ -7,5 +7,6 @@ tools = [
   "engine.commands",
   "access.compute",
   "access.targets",
+  "agent.report",
 ]
 objects = ["scenario"]
