@@ -9,6 +9,46 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.121] — `ask --plan` runs the planner and executor on the demo scenario
+
+### Added
+
+- `stkcraft ask --plan "<question>"`: one planner call (with the one-correction path), validation,
+  execution against the demo scenario, and a `ResultEnvelope` on stdout. No model prose.
+- The planner prompt now includes the existing satellite and station names, so a request for a
+  pass over the demo's London station does not add a duplicate station.
+- CLI parse test for `--json --plan`.
+
+### Real result
+
+```text
+tasks: scenario.set-duration, access.compute
+1 pair, 5 windows
+status: complete
+```
+
+The first `ask --plan` run without scenario context added a duplicate London and produced 11
+windows; the fix was the context in the planner prompt, not a hand-edited expected count. The
+re-run produced the five windows.
+
+### Changed
+
+- `ask` without `--plan` still uses the tool loop; `ask --plan` is the strict planner path. The
+  default switch is deliberately not made in this change.
+
+### Not built yet
+
+- Planner budgets, parallel execution, cancellation and durable state.
+- Making planner execution the default `ask` path.
+- Expression-level dimension algebra and offline formula discovery.
+
+### Verification
+
+- Real DeepSeek run at 0.1.121: `ask --plan` produced one pair with five windows and
+  `status: complete`.
+- CLI parse test for the flags.
+- `cargo xtask ci` at 0.1.121 passes all twelve steps.
+
 ## [0.1.120] — The fixed cases cover target access and missing input
 
 ### Added

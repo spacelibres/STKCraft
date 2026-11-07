@@ -91,6 +91,8 @@ pub struct AskRequest {
     question: String,
     /// Print the machine-readable `ResultEnvelope` instead of the model text.
     json: bool,
+    /// Plan a task graph and execute it instead of running the model tool loop.
+    plan: bool,
 }
 
 /// The parameters of the `passes` subcommand.
@@ -175,7 +177,8 @@ COMMANDS
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
                 (`mcp --expert time-frames` restricts it to that expert's allowlist)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
-                (`ask --json <question>` prints the ResultEnvelope, not the model text)
+                (`ask --json <question>` prints the ResultEnvelope, not the model text;
+                 `ask --plan <question>` plans and executes a graph on the demo scenario)
     agent-eval  Run the fixed agent cases against the configured model (needs a key)
     workflow    Run a deterministic task graph (`workflow --file graph.json`)
     plan        Ask the model for a graph, validate it, and run it
@@ -265,10 +268,13 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         })),
         "ask" => {
             let mut json = false;
+            let mut plan = false;
             let mut question = None;
             for argument in arguments {
                 if argument == "--json" {
                     json = true;
+                } else if argument == "--plan" {
+                    plan = true;
                 } else if question.is_none() {
                     question = Some(argument);
                 } else {
@@ -281,7 +287,11 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
                 "`ask` needs a question, e.g. `stkcraft ask --json \"when does the ISS pass over London?\"`"
                     .to_owned()
             })?;
-            Ok(Invocation::Ask(AskRequest { question, json }))
+            Ok(Invocation::Ask(AskRequest {
+                question,
+                json,
+                plan,
+            }))
         }
         "run" => parse_run(arguments),
         "agent-eval" => parse_agent_eval(arguments),
@@ -940,12 +950,125 @@ fn load_expert_role(id: &str) -> Result<stkcraft_agent_knowledge::expert::Expert
         .map_err(|error| format!("expert `{id}`: {error}"))
 }
 
-/// Ask `DeepSeek` a question, with the engine's commands as its tools and the skills as its library.
-///
-/// The model needs `DEEPSEEK_API_KEY`; without one the message says so instead of failing inside a
-/// request. Every tool call it makes is printed as it happens, because an analysis whose steps a
-/// person cannot see is an analysis nobody can check.
+/// Plan a graph against the demo scenario, execute it, and print a `ResultEnvelope`.
+fn ask_plan(request: &AskRequest) -> Result<(), String> {
+    let model = crate::prefs::model_provider()?;
+    let mut scenario = app_demo_scenario()?;
+    let satellites = scenario
+        .satellites
+        .iter()
+        .map(|satellite| satellite.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let stations = scenario
+        .stations
+        .iter()
+        .map(|station| station.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let plan_question = format!(
+        "{}\nThe scenario already contains satellites: {satellites}; stations: {stations}. Do not add an object that already exists.",
+        request.question
+    );
+    let server = stkcraft_agent_mcp::Server::new(
+        scenario.clone(),
+        stkcraft_agent_mcp::load_skills(&skills_directory()),
+    )
+    .with_knowledge(knowledge_library()?)
+    .with_capabilities(load_capabilities()?)
+    .with_limits(load_limits()?);
+    if let Some((id, reason)) = server.unsupported_reason(&request.question) {
+        let envelope = stkcraft_agent_runtime::ResultEnvelope {
+            status: "unsupported".to_owned(),
+            question: request.question.clone(),
+            results: Vec::new(),
+            trace: vec![format!("capability.guard({id})")],
+            errors: Vec::new(),
+            reason: Some(reason),
+        };
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&envelope)
+                .map_err(|error| format!("could not print the answer: {error}"))?
+        );
+        return Ok(());
+    }
+    let tools: Vec<serde_json::Value> = server
+        .tools_json()
+        .into_iter()
+        .filter(|tool| {
+            tool.get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| !name.starts_with("knowledge.") && name != "agent.report")
+        })
+        .collect();
+    let planner = stkcraft_agent_runtime::task::Planner::new(model);
+    let graph = planner.plan_corrected(&plan_question, &tools, &Registry::builtin())?;
+    let outcomes = graph
+        .execute(&Registry::builtin(), &mut scenario)
+        .map_err(|errors| errors.join("\n"))?;
+    let results: Vec<serde_json::Value> = outcomes
+        .iter()
+        .filter_map(|outcome| outcome.result.clone())
+        .collect();
+    let errors: Vec<String> = outcomes
+        .iter()
+        .filter_map(|outcome| outcome.error.clone())
+        .collect();
+    let all_completed = outcomes
+        .iter()
+        .all(|outcome| outcome.status == stkcraft_agent_runtime::task::TaskStatus::Completed);
+    let any_needs_input = outcomes
+        .iter()
+        .any(|outcome| outcome.status == stkcraft_agent_runtime::task::TaskStatus::NeedsInput);
+    let status = if all_completed && !results.is_empty() {
+        "complete"
+    } else if any_needs_input {
+        "needs_input"
+    } else if all_completed {
+        "unsupported"
+    } else {
+        "failed"
+    };
+    let envelope = stkcraft_agent_runtime::ResultEnvelope {
+        status: status.to_owned(),
+        question: request.question.clone(),
+        results,
+        trace: outcomes
+            .iter()
+            .map(|outcome| {
+                format!(
+                    "{}: {} {}",
+                    outcome.id,
+                    match outcome.status {
+                        stkcraft_agent_runtime::task::TaskStatus::Completed => "completed",
+                        stkcraft_agent_runtime::task::TaskStatus::NeedsInput => "needs_input",
+                        stkcraft_agent_runtime::task::TaskStatus::Failed => "failed",
+                        stkcraft_agent_runtime::task::TaskStatus::Blocked => "blocked",
+                    },
+                    outcome.summary
+                )
+            })
+            .collect(),
+        errors,
+        reason: None,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&envelope)
+            .map_err(|error| format!("could not print the answer: {error}"))?
+    );
+    if status == "complete" || status == "unsupported" {
+        Ok(())
+    } else {
+        Err(format!("ask --plan: {status}"))
+    }
+}
+
 fn ask(request: &AskRequest) -> Result<(), String> {
+    if request.plan {
+        return ask_plan(request);
+    }
     let model = crate::prefs::model_provider()?;
     let server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
@@ -1751,6 +1874,20 @@ fn agent_eval(request: &AgentEvalRequest) -> Result<(), String> {
 #[allow(clippy::indexing_slicing, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ask_accepts_json_and_plan_flags() {
+        let Ok(Invocation::Ask(request)) = parse(
+            ["ask", "--json", "--plan", "when?"]
+                .into_iter()
+                .map(str::to_owned),
+        ) else {
+            panic!("ask flags were not accepted");
+        };
+        assert!(request.json);
+        assert!(request.plan);
+        assert_eq!(request.question, "when?");
+    }
 
     #[test]
     fn agent_eval_expectations_check_status_kind_windows_and_formula() {
