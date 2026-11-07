@@ -9,6 +9,32 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.93] — Parameter kinds are named consistently
+
+### Changed
+
+- `AGENTS.md`, `docs/standards.md` and `docs/design/architecture.md` now list all four parameter
+  kinds: `Number`, `Text`, `Degrees` and `DegreesPair`. The fourth was added in 0.1.90 for
+  `target.add`, but the rule book still described three, so a reader could believe a target's
+  corners were still untyped text.
+
+### Fixed
+
+- The documentation drifted from the code after the typed-target change; the API reference already
+  said `degrees-pair`, while the prose said only number/text/degrees.
+
+### Not built yet
+
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask ci` at 0.1.93 (fmt, clippy, tests, assets, i18n, api-docs, layers, wasm, version,
+  lockfile).
+- `cargo xtask api-docs check` reports the generated reference matches the registry.
+
 ## [0.1.92] — Control tokens come from the operating system's RNG
 
 ### Fixed

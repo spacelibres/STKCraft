@@ -142,7 +142,7 @@ corrupts an analysis without telling anyone. **This outranks feature work.**
   (`id`, label, menu path, shortcut, parameter documentation, `enabled`, `run`) plus tests.
   The menus, shortcuts, CLI, control channel and MCP server all dispatch commands by id, so
   an agent can do anything a user can.
-- **A parameter declares its kind** (`Number`, `Text`, `Degrees`), not just its name and prose.
+- **A parameter declares its kind** (`Number`, `Text`, `Degrees`, `DegreesPair`), not just its name and prose.
   Every transport converts a caller's value through that declaration, so the schema a model
   reads and the typed value the command receives cannot disagree — the alternative, inferring
   the type from the parameter's name, sent a latitude to a command as a plain number and the
