@@ -517,18 +517,28 @@ fn next_number<I: Iterator<Item = String>>(arguments: &mut I, flag: &str) -> Res
 /// and refusing to print it because a database was busy would be the tail wagging the dog. What is
 /// *not* optional is that the record carries the inputs' digest — a row without it cannot be
 /// reproduced, and the storage layer refuses to pretend otherwise.
-fn record_run(
-    command: &str,
-    parameters: &str,
-    inputs: &str,
-    summary: &str,
-    windows: &[stkcraft_framework_storage::AccessWindowRecord],
-) {
+/// Open the computation record for this installation, when there is one.
+fn open_ledger() -> Option<stkcraft_framework_storage::Store> {
+    let paths = stkcraft_framework_storage::Paths::for_user().ok()?;
+    stkcraft_framework_storage::Store::open(&paths.record()).ok()
+}
+
+struct RunRecord<'a> {
+    command: &'a str,
+    parameters: &'a str,
+    inputs: &'a str,
+    summary: &'a str,
+    result: &'a str,
+    errors: &'a [String],
+    windows: &'a [stkcraft_framework_storage::AccessWindowRecord],
+}
+
+fn record_run(record: &RunRecord<'_>) {
     let Ok(paths) = stkcraft_framework_storage::Paths::for_user() else {
         eprintln!("stkcraft: the run was not recorded: no data directory");
         return;
     };
-    if let Err(message) = record_run_at(&paths, command, parameters, inputs, summary, windows) {
+    if let Err(message) = record_run_at(&paths, record) {
         eprintln!("stkcraft: the run was not recorded: {message}");
     }
 }
@@ -536,26 +546,26 @@ fn record_run(
 /// [`record_run`] against an explicit data directory, which is what a test uses.
 fn record_run_at(
     paths: &stkcraft_framework_storage::Paths,
-    command: &str,
-    parameters: &str,
-    inputs: &str,
-    summary: &str,
-    windows: &[stkcraft_framework_storage::AccessWindowRecord],
+    record: &RunRecord<'_>,
 ) -> Result<(), String> {
     let mut store = stkcraft_framework_storage::Store::open(&paths.record())
         .map_err(|error| error.to_string())?;
+    let errors_json = serde_json::to_string(record.errors)
+        .map_err(|error| format!("could not record the verifier errors: {error}"))?;
     let id = store
         .record_computation(&stkcraft_framework_storage::Computation {
             scenario_name: "CLI".to_owned(),
             scenario_revision: None,
-            command: command.to_owned(),
-            parameters: parameters.to_owned(),
+            command: record.command.to_owned(),
+            parameters: record.parameters.to_owned(),
             engine_version: env!("CARGO_PKG_VERSION").to_owned(),
-            inputs_digest: stkcraft_framework_storage::digest(inputs.as_bytes()),
-            summary: summary.to_owned(),
+            inputs_digest: stkcraft_framework_storage::digest(record.inputs.as_bytes()),
+            summary: record.summary.to_owned(),
+            result: record.result.to_owned(),
+            errors: errors_json,
         })
         .map_err(|error| error.to_string())?;
-    for window in windows {
+    for window in record.windows {
         store
             .record_window(id, window)
             .map_err(|error| error.to_string())?;
@@ -637,6 +647,9 @@ fn passes(request: &PassRequest) -> Result<(), String> {
         )
         .map_err(|error| format!("could not compute access: {error}"))?;
 
+    let ledger_result = serde_json::to_string(&crate::answer::json(&outcome, &scenario))
+        .unwrap_or_else(|_| "{}".to_owned());
+    let ledger_errors: Vec<String> = Vec::new();
     let results = outcome.access.unwrap_or_default();
 
     // The provenance: what ran, on what, with which parameters.
@@ -654,16 +667,18 @@ fn passes(request: &PassRequest) -> Result<(), String> {
             });
         }
     }
-    record_run(
-        "access.compute",
-        &format!(
+    record_run(&RunRecord {
+        command: "access.compute",
+        parameters: &format!(
             "{{\"step-seconds\":{},\"hours\":{}}}",
             request.step_seconds, request.hours
         ),
-        &format!("{}{}{}", request.line1, request.line2, request.name),
-        &outcome.summary,
-        &windows,
-    );
+        inputs: &format!("{}{}{}", request.line1, request.line2, request.name),
+        summary: &outcome.summary,
+        result: &ledger_result,
+        errors: &ledger_errors,
+        windows: &windows,
+    });
 
     print!(
         "{}",
@@ -888,6 +903,9 @@ fn ask(request: &AskRequest) -> Result<(), String> {
     .with_knowledge(knowledge_library()?)
     .with_capabilities(load_capabilities()?);
     let mut agent = stkcraft_agent_runtime::Agent::new(model, server);
+    if let Some(store) = open_ledger() {
+        agent = agent.with_ledger(store);
+    }
     // Printed as they happen rather than collected and printed at the end: a question can take a
     // minute, and a step nobody can see while it runs is a step nobody can interrupt.
     let mut print = |line: &str| println!("  · {line}");
@@ -985,6 +1003,9 @@ fn chat(request: &ChatRequest) -> Result<(), String> {
     };
     let id = session.id.clone();
     let mut agent = stkcraft_agent_runtime::Agent::new(model, server).with_session(session);
+    if let Some(store) = open_ledger() {
+        agent = agent.with_ledger(store);
+    }
     println!(
         "STKCraft {} — session {id}; `exit` ends it, `stkcraft chat --session {id}` resumes it.",
         env!("CARGO_PKG_VERSION")
@@ -1474,11 +1495,15 @@ mod tests {
         }];
         record_run_at(
             &paths,
-            "access.compute",
-            "{\"step-seconds\":30}",
-            "1 25544U ...2 25544 ...London",
-            "Computed access: 1 pair(s), 1 window(s)",
-            &windows,
+            &RunRecord {
+                command: "access.compute",
+                parameters: "{\"step-seconds\":30}",
+                inputs: "1 25544U ...2 25544 ...London",
+                summary: "Computed access: 1 pair(s), 1 window(s)",
+                result: "{\"kind\":\"access\"}",
+                errors: &[],
+                windows: &windows,
+            },
         )
         .expect("recorded");
 
@@ -1488,6 +1513,8 @@ mod tests {
         let computation = &computations[0];
         assert_eq!(computation.record.command, "access.compute");
         assert_eq!(computation.record.engine_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(computation.record.result, "{\"kind\":\"access\"}");
+        assert_eq!(computation.record.errors, "[]");
         assert_eq!(computation.windows, 1);
         // The digest is of the inputs as given, so two runs of the same inputs share it and a
         // different scenario does not.

@@ -31,6 +31,10 @@ pub struct Computation {
     pub inputs_digest: String,
     /// What the command reported, in one line.
     pub summary: String,
+    /// The structured result as JSON, when the command returned one.
+    pub result: String,
+    /// The verifier's errors as a JSON array; `[]` when the result passed.
+    pub errors: String,
 }
 
 /// A computation as stored, with what the store added.
@@ -204,8 +208,8 @@ impl Store {
             .execute(
                 "INSERT INTO computation (
                     scenario_name, scenario_revision, command, parameters, engine_version,
-                    inputs_digest, started_at, duration_ms, summary
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    inputs_digest, started_at, duration_ms, summary, result, errors
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
                     record.scenario_name,
                     record.scenario_revision,
@@ -216,6 +220,8 @@ impl Store {
                     started_at,
                     0_i64,
                     record.summary,
+                    record.result,
+                    record.errors,
                 ],
             )
             .map_err(|error| Error::invalid("computation row", error.to_string()))?;
@@ -302,6 +308,7 @@ impl Store {
             .prepare(
                 "SELECT c.id, c.scenario_name, c.scenario_revision, c.command, c.parameters,
                         c.engine_version, c.inputs_digest, c.summary, c.started_at, c.duration_ms,
+                        c.result, c.errors,
                         (SELECT COUNT(*) FROM access_window w WHERE w.computation_id = c.id)
                  FROM computation c ORDER BY c.id DESC LIMIT ?1",
             )
@@ -319,10 +326,12 @@ impl Store {
                         engine_version: row.get(5)?,
                         inputs_digest: row.get(6)?,
                         summary: row.get(7)?,
+                        result: row.get(10)?,
+                        errors: row.get(11)?,
                     },
                     started_at: row.get(8)?,
                     duration: Duration::from_millis(u64::try_from(duration_ms).unwrap_or(0)),
-                    windows: row.get::<_, i64>(10)? as usize,
+                    windows: row.get::<_, i64>(12)? as usize,
                 })
             })
             .map_err(|error| Error::invalid("computation query", error.to_string()))?;
@@ -593,7 +602,41 @@ mod tests {
             engine_version: "0.1.33".to_owned(),
             inputs_digest: crate::digest(b"demo"),
             summary: "done".to_owned(),
+            result: "{}".to_owned(),
+            errors: "[]".to_owned(),
         }
+    }
+
+    #[test]
+    fn a_version_two_record_gains_the_result_columns() {
+        use crate::schema::{V1, V2};
+
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("v2-ledger-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("target directory");
+        }
+        {
+            let connection = Connection::open(&path).expect("a v2 database");
+            connection.execute_batch(V1).expect("v1 schema");
+            connection.execute_batch(V2).expect("v2 schema");
+            connection
+                .execute_batch("PRAGMA user_version = 2;")
+                .expect("v2 version");
+        }
+        let mut store = Store::open(&path).expect("migrated store");
+        assert_eq!(store.schema_version().expect("a version"), SCHEMA_VERSION);
+        let id = store
+            .record_computation(&computation("access.compute"))
+            .expect("a row after the migration");
+        let stored = store.computations(1).expect("read");
+        assert_eq!(stored[0].id, id);
+        assert_eq!(stored[0].record.result, "{}");
+        assert_eq!(stored[0].record.errors, "[]");
+        drop(store);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

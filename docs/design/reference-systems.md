@@ -100,7 +100,7 @@ structured access and pass results, and `ResultEnvelope` reports `complete`, `un
 | A model can describe a number the tool did not return | CosmoAgent's secretary | Deterministic result verifier | Implemented |
 | A failed result has no status | Separate approval/rejection | `ResultEnvelope.errors` and `failed` status | Implemented |
 | No capability manifest per object | Enumerated action space | Satellite/station/target/scenario/planet manifests, validated against the command registry and exposed as an MCP resource | Declared; role-scoped dispatch is enforced, a session without a role is not |
-| No task ledger | "Stick" | Store command, input digest, engine version, result and errors behind `framework/storage` | Next |
+| No task ledger | "Stick" | `Agent::with_ledger` records command, parameters, scenario digest, engine version, result and verifier errors; the CLI `passes` path stores its structured answer too | Implemented; best-effort when the record opens |
 | Formula records have no dimension algebra | PhyE2E dimensional consistency | Add symbol dimensions and a formula dimension checker | Next |
 | Formula discovery is not a workflow | PhyE2E data-to-law pipeline | Offline candidate pipeline with held-out evaluation | Later |
 | No planner/executor | Proposer/verifier separation | Rust task graph, bounded retries, cancellation | Later |
