@@ -9,6 +9,34 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.117] — A formula's unit and dimension must agree
+
+### Added
+
+- The expert validator maps known units (`km`, `m`, `s`, `min`, `century`, `rad`, `deg`,
+  `rad/min`, `1`, …) and known dimension labels (`length`, `time`, `time offset`, `angle`,
+  `angular rate`, `ratio`, `integer`, …) to one base dimension and rejects a symbol whose two
+  declarations disagree.
+- `experts check` applies the check to all 18 formulas; the current set passes.
+
+### What this is not
+
+- It is a unit/dimension **pair** check, not expression-level dimensional analysis. It does not
+  parse the formula's expression, so it cannot yet prove that both sides of an equation balance.
+  Unknown units or labels are left alone rather than guessed, which keeps future expert packages
+  from being rejected by a vocabulary this build has not seen.
+
+### Not built yet
+
+- Expression-level dimension algebra and the PhyE2E decomposition pipeline.
+- Planner correction, budgets, parallelism, cancellation and durable task state.
+
+### Verification
+
+- Expert test: a symbol with unit `km` and dimension `time` is refused.
+- `cargo xtask experts check`: 3 packages, 11 sources, 18 formulas, 16 verified, 2 implemented.
+- `cargo xtask ci` at 0.1.117 passes all twelve steps.
+
 ## [0.1.116] — The model proposes a graph; Rust validates and executes it
 
 ### Added
