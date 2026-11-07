@@ -4,6 +4,8 @@ STKCraft's agent programme has two execution domains: mission analysis in the ap
 software development in isolated source workspaces. DeepSeek is the primary reasoning provider;
 Rust validates requests, executes numerical algorithms, schedules work and accepts state changes.
 This is an implementation direction, not a claim that a multi-agent executor already ships.
+The lessons taken from the published PhyE2E and CosmoAgent systems, and what is deliberately not
+copied, are recorded in `docs/design/reference-systems.md`.
 
 ## Existing foundation
 
