@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.102] — The IERS Earth-orientation series is in the kernel path
+
+### Added
+
+- `stkcraft-astro-frames::Finals2000A`: an IERS `finals2000A.all` loader with a 64 MiB bound, the
+  fixed daily columns, linear interpolation between rows, and an out-of-range error instead of a
+  silent fallback.
+- `Propagator::with_eop_model`: the series is queried at each instant, because EOP changes across a
+  multi-day scenario; `Scenario` carries the loaded series outside its saved document.
+- `stkcraft passes --eop <file>` and `stkcraft run … --eop <file>` load the series. Without it the
+  answer keeps the zero-EOP limitation; with it the limitation is removed.
+
+### Fixed
+
+- `Propagator::itrf_state` now converts the instant to UTC before the EOP lookup and the UT1 Julian
+  Date. It previously used `at.julian()` directly, which is wrong for a TDB epoch; the periodic
+  TDB-TT term would shift the EOP lookup instead of being applied where it belongs.
+
+### Not built yet
+
+- Sub-daily EOP and tidal terms; the loader interpolates daily values.
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- Three loader tests: daily interpolation, out-of-range refusal, a file with no EOP row.
+- A propagation test proves a loaded series changes the Earth-fixed position by more than 10 m.
+- `stkcraft passes --tle … --eop data/finals2000A.all` ran against the real 3.7 MB file and printed
+  the pass table with the sampling and geometric notes, without the zero-EOP note.
+- `cargo xtask ci` at 0.1.102 passes all ten steps.
+
 ## [0.1.101] — SGP4 and Access experts join the foundation
 
 ### Added

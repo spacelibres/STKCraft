@@ -5,9 +5,12 @@
 //! document honest: a saved scenario never changes meaning when the physics improves, it only
 //! produces different numbers — and that is the correct outcome.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use stkcraft_astro_access::{GroundSite, Sensor};
 use stkcraft_astro_body::Body;
+use stkcraft_astro_frames::Finals2000A;
 use stkcraft_astro_sgp4::TwoLineElement;
 use stkcraft_framework_core::{Error, Result};
 use stkcraft_framework_time::Epoch;
@@ -106,6 +109,12 @@ pub struct Scenario {
     pub targets: Vec<Target>,
     /// The instant the timeline starts.
     pub epoch: Epoch,
+    /// The IERS Earth-orientation series, when the caller loaded one.
+    ///
+    /// It is not part of the saved document: it is a data series, not a mission decision, and a
+    /// scenario loaded without it falls back to the zero-EOP limitation the answer states.
+    #[serde(skip)]
+    pub eop_model: Option<Arc<Finals2000A>>,
     /// How long the timeline runs, in seconds.
     ///
     /// Seconds rather than a `Duration` in the document so a hand-written JSON file reads
@@ -139,6 +148,7 @@ impl Scenario {
             stations: Vec::new(),
             targets: Vec::new(),
             epoch,
+            eop_model: None,
             duration_seconds: 86_400.0,
             next_satellite: 1,
             next_station: 1,

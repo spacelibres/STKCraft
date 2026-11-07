@@ -161,7 +161,8 @@ Two failure modes are forbidden:
 
 The existing access limitations are part of this contract: point sampling, union of vertex windows,
 geometric line of sight, no refraction/light-time/aberration, and zero Earth-orientation parameters
-until an EOP loader exists.
+when no IERS file is supplied. `stkcraft passes --eop <file>` and `stkcraft run --eop <file>` load
+a `finals2000A.all` series; the answer then states that the series was used.
 
 ## Non-goals for this foundation
 

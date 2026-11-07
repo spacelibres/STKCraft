@@ -16,7 +16,8 @@ the formulas the kernel already implements; it does not invent a conversion or a
 - It is not an orbit-determination or precise-ephemeris expert.
 - It does not claim IAU 2006/2000A; the kernel implements IAU-77/80, which is the series SGP4/TEME
   is defined against.
-- It does not provide an EOP value. Until an IERS loader exists, it reports the zero-EOP limitation.
+- It does not invent an EOP value. When no IERS series is loaded it reports the zero-EOP
+  limitation; when one is supplied with `--eop`, the series is interpolated at the instant.
 - It does not answer a numeric question from memory. A number comes from a command or a formula
   record with a reference test.
 
@@ -58,7 +59,8 @@ It must not use the filesystem, a shell, or a command that changes the scenario.
 - A date before 1972 or after the published leap table: report the range, do not guess a leap second.
 - A request for IAU 2006/2000A or a "precise ITRF" claim: refuse the claim; the kernel implements
   IAU-77/80.
-- A request for an EOP value or a polar-motion time series: the library has no loader yet.
+- A request for an EOP value with no series loaded: say that no IERS file is loaded and the
+  computation uses zero EOP; do not make up a value.
 - A formula not in this package: say the library does not cover it.
 
 ## Evaluation

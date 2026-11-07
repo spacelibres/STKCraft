@@ -22,6 +22,15 @@ sha256 = ""
 adopted_by = ["IERS"]
 
 [[source]]
+id = "iers-finals2000a"
+title = "IERS finals2000A"
+edition = "Bulletin A Earth orientation series"
+url = "https://datacenter.iers.org/data/9/finals2000A.all"
+path = ""
+sha256 = "4c2308a3a782f561a84f549ab0e074e745aa950facd9dff56e2e60a7eac8f042"
+adopted_by = ["IERS"]
+
+[[source]]
 id = "sofa-erfa"
 title = "IAU SOFA / ERFA reference implementations"
 edition = "SOFA-derived ERFA release used by the kernel tests"
