@@ -9,6 +9,40 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.120] — The fixed cases cover target access and missing input
+
+### Added
+
+- Two fixed agent cases: a four-vertex target plus `access.targets`, and a request for a satellite
+  named `NOPE` that must end in `needs_input`.
+- The target case expects a `target-access` result with at least one window and the
+  `access.window-sampling` citation; the missing-satellite case forbids adding a satellite.
+
+### Real result
+
+```text
+PASS iss-passes (complete)
+PASS out-of-scope-link-budget (unsupported)
+PASS target-access (complete)
+PASS missing-satellite (needs_input)
+agent-eval: 4 case(s), all passed
+```
+
+The target run added `Site` with four vertices, computed six windows (51m 39s total) and reported
+`complete`. The missing-satellite run found only `ISS`, did not add one, and reported
+`needs_input` with the missing name and the need for a TLE.
+
+### Not built yet
+
+- Expression-level dimension algebra and the offline formula-discovery pipeline.
+- Planner budgets, parallel execution, cancellation and durable state; `ask` still uses the tool
+  loop.
+
+### Verification
+
+- Real DeepSeek run at 0.1.120: four of four cases passed.
+- `cargo xtask ci` at 0.1.120 passes all twelve steps.
+
 ## [0.1.119] — A formula can decompose into checked sub-formulas
 
 ### Added

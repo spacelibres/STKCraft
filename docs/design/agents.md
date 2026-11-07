@@ -127,7 +127,8 @@ count and formula citation, and a failure stays visible instead of being relaxed
 The first recorded failure was a capability gap: an RF link-budget question produced access windows
 and a `complete` envelope because "some structured result exists" is not "the question was
 answered". The model now concludes with `agent.report`; the real run reports `unsupported` for that case and
-passes both fixed cases. Known unmodelled domains are also refused **before** the model runs by
+passes the fixed cases, including target access and a missing-object `needs_input`. Known unmodelled
+domains are also refused **before** the model runs by
 `share/capabilities/limits.toml`: RF link budget, manoeuvre and attitude currently have no command,
 so a request that names one returns `unsupported` with a `capability.guard(<id>)` trace. This is a
 known-domain guard, not a general semantic planner; requests outside its list still rely on the
