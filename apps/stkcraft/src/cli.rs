@@ -816,6 +816,7 @@ fn mcp(expert: Option<&str>) -> Result<(), String> {
         stkcraft_agent_mcp::load_skills(&skills),
     )
     .with_knowledge(knowledge_library()?)
+    .with_capabilities(load_capabilities()?)
     .with_extensions(&loaded);
     if let Some(id) = expert {
         let role = load_expert_role(id)?;
@@ -840,6 +841,21 @@ fn parse_mcp<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation,
         }
     }
     Ok(Invocation::Mcp(expert))
+}
+
+fn load_capabilities()
+-> Result<Vec<stkcraft_agent_knowledge::capability::CapabilityManifest>, String> {
+    let beside_executable = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    let root = beside_executable
+        .filter(|root| root.join("share/capabilities").is_dir())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    if !root.join("share/capabilities").is_dir() {
+        return Ok(Vec::new());
+    }
+    stkcraft_agent_knowledge::capability::load_all(&root)
+        .map_err(|errors| format!("capabilities: {}", errors.join("; ")))
 }
 
 fn load_expert_role(id: &str) -> Result<stkcraft_agent_knowledge::expert::ExpertRole, String> {
@@ -869,7 +885,8 @@ fn ask(request: &AskRequest) -> Result<(), String> {
         app_demo_scenario()?,
         stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
-    .with_knowledge(knowledge_library()?);
+    .with_knowledge(knowledge_library()?)
+    .with_capabilities(load_capabilities()?);
     let mut agent = stkcraft_agent_runtime::Agent::new(model, server);
     // Printed as they happen rather than collected and printed at the end: a question can take a
     // minute, and a step nobody can see while it runs is a step nobody can interrupt.
@@ -957,7 +974,8 @@ fn chat(request: &ChatRequest) -> Result<(), String> {
         app_demo_scenario()?,
         stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
-    .with_knowledge(knowledge_library()?);
+    .with_knowledge(knowledge_library()?)
+    .with_capabilities(load_capabilities()?);
     // A conversation is a session on disk, so closing the terminal does not lose it: `--session`
     // resumes one and the id is printed for next time. This is the same shape a harness keeps its own
     // sessions in — a transcript that outlives the process.
@@ -1225,6 +1243,7 @@ pub(crate) fn control_session() -> Result<stkcraft_agent_mcp::Server, String> {
         stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
     .with_knowledge(knowledge_library()?)
+    .with_capabilities(load_capabilities()?)
     .with_extensions(&loaded))
 }
 

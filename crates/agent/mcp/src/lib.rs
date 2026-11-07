@@ -138,6 +138,8 @@ pub struct Server {
     aliases: Vec<stkcraft_framework_extensions::Alias>,
     /// The expert role, when the session was opened for one. Its tool list is an allowlist.
     role: Option<stkcraft_agent_knowledge::expert::ExpertRole>,
+    /// The object capability manifests, when the deployment ships them.
+    capabilities: Vec<stkcraft_agent_knowledge::capability::CapabilityManifest>,
 }
 
 impl Server {
@@ -151,7 +153,24 @@ impl Server {
             skills,
             knowledge: stkcraft_agent_knowledge::Library::default(),
             role: None,
+            capabilities: Vec::new(),
         }
+    }
+
+    /// Offer the object capability manifests as a resource.
+    #[must_use]
+    pub fn with_capabilities(
+        mut self,
+        capabilities: Vec<stkcraft_agent_knowledge::capability::CapabilityManifest>,
+    ) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
+    /// The object capability manifests this session knows.
+    #[must_use]
+    pub fn capabilities(&self) -> &[stkcraft_agent_knowledge::capability::CapabilityManifest] {
+        &self.capabilities
     }
 
     /// Open the session as an expert role: only its allowlisted tools are listed and callable.
@@ -917,6 +936,12 @@ impl Server {
                 "description": "Every command the engine knows, with its parameters.",
                 "mimeType": "application/json",
             }),
+            json!({
+                "uri": "stkcraft://capabilities",
+                "name": "Object capabilities",
+                "description": "What each object type may do, with its evidence and limitations.",
+                "mimeType": "application/json",
+            }),
         ];
         for skill in &self.skills {
             resources.push(json!({
@@ -940,6 +965,9 @@ impl Server {
                     .map(|text| ("application/json", text))
                     .map_err(|error| format!("the catalogue cannot be written as JSON: {error}"))
             }
+            "stkcraft://capabilities" => serde_json::to_string_pretty(&self.capabilities)
+                .map(|text| ("application/json", text))
+                .map_err(|error| format!("the capabilities cannot be written as JSON: {error}")),
             other => self
                 .skills
                 .iter()
@@ -1444,6 +1472,7 @@ mod tests {
             .filter_map(|resource| resource["uri"].as_str())
             .collect();
         assert!(uris.contains(&"stkcraft://scenario"));
+        assert!(uris.contains(&"stkcraft://capabilities"));
         assert!(uris.contains(&"stkcraft://skills/compute-passes"));
 
         let scenario = ask(
@@ -1465,6 +1494,29 @@ mod tests {
             .as_str()
             .expect("text");
         assert!(text.contains("Stations on other bodies"), "{text}");
+    }
+
+    #[test]
+    fn object_capabilities_are_a_readable_resource() {
+        let manifest = stkcraft_agent_knowledge::capability::CapabilityManifest {
+            id: "satellite".to_owned(),
+            label: "Satellite".to_owned(),
+            commands: vec!["satellite.add".to_owned()],
+            evidence: vec!["the satellite id".to_owned()],
+            limitations: vec!["the element epoch".to_owned()],
+        };
+        let mut server = server().with_capabilities(vec![manifest]);
+        let answer = ask(
+            &mut server,
+            "resources/read",
+            &json!({"uri": "stkcraft://capabilities"}),
+        );
+        let text = answer["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("text");
+        let parsed: Value = serde_json::from_str(text).expect("JSON");
+        assert_eq!(parsed[0]["id"], "satellite");
+        assert_eq!(parsed[0]["commands"][0], "satellite.add");
     }
 
     #[test]

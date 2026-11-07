@@ -31,6 +31,18 @@ evidence, propose plans and explain verified results.
 An agent's role prompt is not evidence of expertise. Every enabled specialist needs rejection
 conditions and tests with expected outcomes, including missing evidence and unsupported inputs.
 
+## Object capabilities
+
+`share/capabilities/<object>.toml` declares what a satellite, station, target, scenario or planet
+may do: the command ids, the evidence a result must carry and the limitations it must state. The
+manifest is not a second command registry. `cargo xtask capabilities check` requires every command
+id to exist in the engine registry, and the engine's parameter schema remains the only schema. An
+MCP client reads the manifests at `stkcraft://capabilities`.
+
+The manifest is a declaration, not yet an authorization boundary. Dispatch still uses the role
+allowlist; filtering a tool by object type is the next step, and it must be enforced at dispatch,
+not only in the description a model reads.
+
 ## Product execution domain
 
 The initial mission workflow is:

@@ -1,0 +1,17 @@
+id = "scenario"
+label = "Scenario"
+commands = [
+  "scenario.rename",
+  "scenario.set-duration",
+  "access.compute",
+  "access.targets",
+  "planet.access",
+]
+evidence = [
+  "The scenario document: its epoch, duration, satellites, stations, targets and sensors.",
+  "The engine version, the command inputs and the result digest.",
+]
+limitations = [
+  "The timeline starts at the scenario epoch, not at the present unless the caller set it so.",
+  "Earth orientation is zero unless an IERS finals2000A series is loaded with --eop.",
+]

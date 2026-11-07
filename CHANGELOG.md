@@ -9,6 +9,37 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.109] — Object capabilities are declared, checked and readable
+
+### Added
+
+- `share/capabilities/*.toml`: satellite, station, target, scenario and planet each declare their
+  command ids, the evidence a result must carry and the limitations it must state.
+- `stkcraft-agent-knowledge::capability::load_all`: parses every manifest and rejects an empty
+  command list, an empty limitation, a duplicate command or a duplicate object id.
+- `cargo xtask capabilities check`: every command id must exist in the engine registry. It is the
+  twelfth gate step.
+- MCP exposes the manifests at `stkcraft://capabilities`; `mcp`, `ask`, `chat` and the control
+  session load them. A model can read what an object may do before it calls a tool.
+
+### Changed
+
+- The command registry remains the only schema and the only dispatch path. A manifest is a
+  declaration: filtering a call by object type is not implemented yet, and the document says so.
+
+### Not built yet
+
+- Dispatch-time object filtering, the computation ledger, formula dimension algebra and the
+  task-graph orchestrator.
+- Sub-daily EOP; release packaging; macOS CI.
+
+### Verification
+
+- Five manifests, 17 command references, all resolved by the registry.
+- Knowledge tests: valid manifest, duplicate command, empty limitation.
+- MCP test: the capability resource is readable and carries the object id and command.
+- `cargo xtask ci` at 0.1.109 passes all twelve steps.
+
 ## [0.1.108] — A deterministic verifier checks the numbers before display
 
 ### Added
