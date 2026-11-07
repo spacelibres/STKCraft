@@ -53,6 +53,13 @@ pub enum ParameterKind {
     Text,
     /// An angle in degrees, converted to the typed [`Angle`] before the command sees it.
     Degrees,
+    /// One or more `[latitude, longitude]` pairs in degrees, converted to typed sites.
+    ///
+    /// A target is a region, and its corners are all angles; carrying them as text made every
+    /// transport parse a private mini-language and left the MCP schema unable to say what a corner
+    /// is. The array form is the schema; the command line's `lat,lon;…` spelling is still accepted
+    /// by [`args_from`] for the terminal.
+    DegreesPair,
 }
 
 /// The static description of a command.
@@ -79,6 +86,8 @@ pub enum Arg {
     Text(String),
     /// An angle, already in its typed form so no unit can be guessed.
     Angle(Angle),
+    /// Target corners, already in their typed form.
+    Corners(Vec<GroundSite>),
     /// A duration.
     Duration(Duration),
 }
@@ -118,6 +127,21 @@ impl Arg {
         match self {
             Self::Angle(value) => Ok(*value),
             _ => Err(Error::invalid(name, "expected an angle")),
+        }
+    }
+
+    /// Read this argument as target corners.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Invalid`] naming the argument when it is not a corner list.
+    fn as_corners(&self, name: &'static str) -> Result<&[GroundSite]> {
+        match self {
+            Self::Corners(values) => Ok(values),
+            _ => Err(Error::invalid(
+                name,
+                "expected `[latitude, longitude]` pairs in degrees",
+            )),
         }
     }
 }
@@ -377,6 +401,10 @@ pub fn args_from(descriptor: &CommandDescriptor, values: &serde_json::Value) -> 
                 Some(degrees) => Arg::Angle(Angle::from_deg(degrees)),
                 None => Arg::Text(value.to_string()),
             },
+            ParameterKind::DegreesPair => match corners_from(value) {
+                Some(corners) => Arg::Corners(corners),
+                None => Arg::Text(value.to_string()),
+            },
         };
         args = args.with(parameter.name, argument);
     }
@@ -388,6 +416,35 @@ fn number_from(value: &serde_json::Value) -> Option<f64> {
     match value {
         serde_json::Value::Number(number) => number.as_f64(),
         serde_json::Value::String(text) => text.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Target corners from the schema's array form or the command line's `lat,lon;…` form.
+///
+/// The bound is checked before the allocation: `items.len()` comes from the caller.
+fn corners_from(value: &serde_json::Value) -> Option<Vec<GroundSite>> {
+    match value {
+        serde_json::Value::String(text) => parse_vertices(text).ok(),
+        serde_json::Value::Array(items) => {
+            if items.is_empty() || items.len() > crate::scenario::MAX_TARGET_VERTICES {
+                return None;
+            }
+            let mut corners = Vec::with_capacity(items.len());
+            for item in items {
+                let pair = item.as_array()?;
+                if pair.len() != 2 {
+                    return None;
+                }
+                let latitude = number_from(pair.first()?)?;
+                let longitude = number_from(pair.get(1)?)?;
+                corners.push(
+                    GroundSite::new(Angle::from_deg(latitude), Angle::from_deg(longitude), 0.0)
+                        .ok()?,
+                );
+            }
+            Some(corners)
+        }
         _ => None,
     }
 }
@@ -698,9 +755,10 @@ const BUILTIN: [Builtin; 11] = [
                 },
                 Parameter {
                     name: "points",
-                    kind: ParameterKind::Text,
-                    description: "The target's corners as `lat,lon` pairs separated by semicolons, \
-                                  e.g. `40.4,-3.7` for a point or `0,0;0,1;1,1` for a triangle.",
+                    kind: ParameterKind::DegreesPair,
+                    description: "The target's corners as `[latitude, longitude]` pairs in degrees; \
+                                  the command line also accepts `lat,lon;…`, e.g. `40.4,-3.7` or \
+                                  `0,0;0,1;1,1`.",
                     required: true,
                 },
                 Parameter {
@@ -720,8 +778,7 @@ const BUILTIN: [Builtin; 11] = [
         ALWAYS,
         |scenario, args| {
             let name = args.required("name")?.as_text("name")?.to_owned();
-            let points = args.required("points")?.as_text("points")?;
-            let vertices = parse_vertices(points)?;
+            let vertices = args.required("points")?.as_corners("points")?.to_vec();
             let half_angle = args
                 .get("half-angle")
                 .map(|argument| argument.as_angle("half-angle"))
@@ -1350,6 +1407,28 @@ mod tests {
     }
 
     #[test]
+    fn target_corners_are_typed_from_both_forms() {
+        let registry = Registry::builtin();
+        let command = registry.get("target.add").expect("target.add");
+        let array = args_from(
+            &command.descriptor,
+            &serde_json::json!({"name": "x", "points": [[51.5, -0.13], [51.6, -0.2]]}),
+        );
+        assert!(matches!(
+            array.get("points"),
+            Some(Arg::Corners(corners)) if corners.len() == 2
+        ));
+        let text = args_from(
+            &command.descriptor,
+            &serde_json::json!({"name": "x", "points": "51.5,-0.13"}),
+        );
+        assert!(matches!(
+            text.get("points"),
+            Some(Arg::Corners(corners)) if corners.len() == 1
+        ));
+    }
+
+    #[test]
     fn a_target_is_added_from_points_and_its_windows_are_the_union_of_its_vertices() {
         // The command-level version of the geometry test: a two-vertex target must see exactly what the two
         // point targets see together, merged — so "the region is visible while any corner is" holds through
@@ -1373,9 +1452,10 @@ mod tests {
                 .run(
                     "target.add",
                     &mut scenario,
-                    &Args::none()
-                        .with("name", Arg::Text(name.to_owned()))
-                        .with("points", Arg::Text(points.to_owned())),
+                    &Args::none().with("name", Arg::Text(name.to_owned())).with(
+                        "points",
+                        Arg::Corners(parse_vertices(points).expect("the corners")),
+                    ),
                 )
                 .expect("adds target");
         }

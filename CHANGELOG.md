@@ -9,6 +9,34 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.90] — Target corners are typed pairs
+
+### Changed
+
+- `target.add`'s `points` parameter is `ParameterKind::DegreesPair`, not text. Every transport
+  converts it through the declaration: MCP's schema is an array of `[latitude, longitude]` pairs
+  with `x-unit: degrees`, the command line's `lat,lon;…` spelling is accepted by `args_from`, and
+  the command receives typed `GroundSite` values rather than a string it has to parse itself.
+- The schema and the engine both cap a target at 1024 corners, and `args_from` refuses a larger
+  array before allocating it.
+- The API reference labels the parameter `degrees-pair`; `stkcraft commands` labels it `corners`.
+
+### Fixed
+
+- The `points` mini-language is no longer parsed inside the command: a caller that sent a valid
+  array had to know the text form, and the MCP schema could not say what a corner was.
+
+### Not built yet
+
+- The release workflow and platform packaging, assistant/frame translation gaps and `ui.json`
+  remain as stated in 0.1.89; macOS is still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask ci` at 0.1.90.
+- `args_from` converts both the array form and the terminal spelling to `Arg::Corners`; the MCP
+  schema test asserts the nested `x-unit` and the engine test asserts a two-corner target.
+
 ## [0.1.89] — Consume offscreen texture updates before dropping the frame
 
 ### Fixed

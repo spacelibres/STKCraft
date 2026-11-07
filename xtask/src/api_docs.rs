@@ -359,6 +359,7 @@ fn kind_name(kind: ParameterKind) -> &'static str {
         ParameterKind::Number => "number",
         ParameterKind::Text => "text",
         ParameterKind::Degrees => "degrees",
+        ParameterKind::DegreesPair => "degrees-pair",
     }
 }
 

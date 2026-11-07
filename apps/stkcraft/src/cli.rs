@@ -384,6 +384,7 @@ fn command_list() -> String {
                 stkcraft_astro_engine::commands::ParameterKind::Text => "text",
                 stkcraft_astro_engine::commands::ParameterKind::Number => "number",
                 stkcraft_astro_engine::commands::ParameterKind::Degrees => "degrees",
+                stkcraft_astro_engine::commands::ParameterKind::DegreesPair => "corners",
             };
             let _ = writeln!(
                 text,
