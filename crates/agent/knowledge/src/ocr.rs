@@ -102,8 +102,12 @@ mod tests {
     fn a_command_reads_a_page_and_its_output_is_the_text() {
         // The plumbing, with the engine replaced by one that prints a fixed page: the variables are handed
         // over, standard output is the text, and nothing is added by us.
+        //
+        // The folder name is ASCII on purpose. On Windows, `cmd` echoes the variable through the console code
+        // page, and a non-ASCII path came back as replacement characters, so the test failed on the codec
+        // rather than on the plumbing it is meant to check.
         let page = std::env::temp_dir()
-            .join("OCR papers 轨道")
+            .join("OCR papers")
             .join("a paper.pdf");
         #[cfg(windows)]
         let command = "chcp 65001 >nul & echo file=%STKCRAFT_OCR_FILE% page=%STKCRAFT_OCR_PAGE% & echo the recognised line";

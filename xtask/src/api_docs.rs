@@ -518,7 +518,11 @@ pub fn run(root: &Path, action: &Action) -> Result<(), String> {
     let english = root.join(API_DIR).join("en").join(PAGE);
     let rendered = document.render();
     if *action == Action::Check {
-        let committed = std::fs::read_to_string(&english).unwrap_or_default();
+        // Git on Windows checks text files out with CRLF line endings (autocrlf), while the generator writes
+        // LF. Compare line endings, not bytes, so the same committed page passes on every platform.
+        let committed = std::fs::read_to_string(&english)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         if committed != rendered {
             return Err(format!(
                 "{} is stale: run `cargo xtask api-docs` and commit the result",

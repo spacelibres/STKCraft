@@ -9,6 +9,29 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.87] — Test OCR on Windows without a non-ASCII path; api reference check ignores line endings
+
+### Fixed
+
+- `ocr::tests::a_command_reads_a_page_and_its_output_is_the_text` failed on Windows. Its folder name
+  contained Chinese characters, which `cmd` printed through the console code page as replacement
+  characters, so the assertion failed on the codec rather than on the plumbing it checks. The folder is
+  now ASCII. The test still checks that the variables are passed and that standard output is the text.
+- `cargo xtask api-docs` reported `docs/api/en/index.md` as stale on any checkout that converts line
+  endings to CRLF (Windows with autocrlf), even when the content matched. The check now compares line
+  endings, so one committed page passes on every platform.
+
+### Not built yet
+
+- Nothing in this version adds a capability.
+
+### Verification
+
+Checked on Windows with `cargo xtask ci` run in a clean checkout of the previous commit: fmt, clippy,
+tests, assets, i18n and the api-docs step were the steps reached before this change; the api-docs
+failure is the one this version fixes. The OCR test passed in the knowledge crate after the change
+(84 passed, 0 failed). The complete gate must be run on the commit that contains this version.
+
 ## [0.1.86] — Assistant rule numbering and the xtask help text
 
 ### Fixed
