@@ -843,6 +843,7 @@ fn mcp(expert: Option<&str>) -> Result<(), String> {
     )
     .with_knowledge(knowledge_library()?)
     .with_capabilities(load_capabilities()?)
+    .with_limits(load_limits()?)
     .with_extensions(&loaded);
     if let Some(id) = expert {
         let role = load_expert_role(id)?;
@@ -884,6 +885,17 @@ fn load_capabilities()
         .map_err(|errors| format!("capabilities: {}", errors.join("; ")))
 }
 
+fn load_limits() -> Result<Vec<stkcraft_agent_knowledge::capability::CapabilityLimit>, String> {
+    let beside_executable = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    let root = beside_executable
+        .filter(|root| root.join("share/capabilities/limits.toml").is_file())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    stkcraft_agent_knowledge::capability::load_limits(&root)
+        .map_err(|errors| format!("capability limits: {}", errors.join("; ")))
+}
+
 fn load_expert_role(id: &str) -> Result<stkcraft_agent_knowledge::expert::ExpertRole, String> {
     let beside_executable = std::env::current_exe()
         .ok()
@@ -912,7 +924,8 @@ fn ask(request: &AskRequest) -> Result<(), String> {
         stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
     .with_knowledge(knowledge_library()?)
-    .with_capabilities(load_capabilities()?);
+    .with_capabilities(load_capabilities()?)
+    .with_limits(load_limits()?);
     let mut agent = stkcraft_agent_runtime::Agent::new(model, server);
     if let Some(store) = open_ledger() {
         agent = agent.with_ledger(store);
@@ -1011,7 +1024,8 @@ fn chat(request: &ChatRequest) -> Result<(), String> {
         stkcraft_agent_mcp::load_skills(&skills_directory()),
     )
     .with_knowledge(knowledge_library()?)
-    .with_capabilities(load_capabilities()?);
+    .with_capabilities(load_capabilities()?)
+    .with_limits(load_limits()?);
     // A conversation is a session on disk, so closing the terminal does not lose it: `--session`
     // resumes one and the id is printed for next time. This is the same shape a harness keeps its own
     // sessions in — a transcript that outlives the process.
@@ -1283,6 +1297,7 @@ pub(crate) fn control_session() -> Result<stkcraft_agent_mcp::Server, String> {
     )
     .with_knowledge(knowledge_library()?)
     .with_capabilities(load_capabilities()?)
+    .with_limits(load_limits()?)
     .with_extensions(&loaded))
 }
 
@@ -1577,7 +1592,8 @@ fn agent_eval(request: &AgentEvalRequest) -> Result<(), String> {
             stkcraft_agent_mcp::load_skills(&skills_directory()),
         )
         .with_knowledge(knowledge_library()?)
-        .with_capabilities(load_capabilities()?);
+        .with_capabilities(load_capabilities()?)
+        .with_limits(load_limits()?);
         let mut agent = stkcraft_agent_runtime::Agent::new(model, server);
         let mut trace = |line: &str| eprintln!("  · {line}");
         match agent.ask_observing(question, &mut trace) {

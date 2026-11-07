@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.114] — Known gaps are refused before the model runs
+
+### Added
+
+- `share/capabilities/limits.toml`: RF link budget, manoeuvre and attitude are domains with no
+  command in this build, with the phrases that ask for them and the reason.
+- `CapabilityLimit`, `load_limits` and `matched_limit`. A single word matches as a whole token, so
+  `RF` does not match `performance`; a phrase matches as a substring.
+- The MCP server carries the limits, and the agent checks them **before** the model call. A match
+  returns `unsupported` with the reason and a `capability.guard(<id>)` trace line.
+- `agent-eval` loads the limits too, so the RF case no longer spends a model call.
+
+### Changed
+
+- The RF fixed case now passes through `capability.guard(rf-link)` rather than a model conclusion.
+  The model path still exists for requests the guard does not know; this is a known-domain guard,
+  not a general semantic planner.
+
+### Not built yet
+
+- A general capability preflight that derives the required capability from any request.
+- Formula dimension algebra and the task-graph orchestrator.
+
+### Verification
+
+- Real DeepSeek run at 0.1.114: `PASS iss-passes (complete)` and
+  `PASS out-of-scope-link-budget (unsupported)`; the second case produced only
+  `capability.guard(rf-link)` and no model call.
+- Knowledge test: phrase match, whole-word match, and `performance` not matching `RF`.
+- Runtime test: a guarded question returns `unsupported` before the scripted model is consulted.
+- MCP test: an unsupported-domain helper installs the limit without naming the knowledge type.
+- `cargo xtask ci` at 0.1.114 passes all twelve steps.
+
 ## [0.1.113] — The model concludes with a status the platform can check
 
 ### Added

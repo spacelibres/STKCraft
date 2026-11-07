@@ -25,6 +25,129 @@ pub struct CapabilityManifest {
     pub limitations: Vec<String>,
 }
 
+/// A domain the platform does not model, with the phrases that ask for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityLimit {
+    /// Stable id, e.g. `rf-link`.
+    pub id: String,
+    /// Lower-case words or phrases that identify a request for this domain.
+    pub triggers: Vec<String>,
+    /// Why the platform cannot answer it.
+    pub reason: String,
+}
+
+impl CapabilityLimit {
+    /// Build one limit, rejecting an empty id, trigger or reason.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the invalid field.
+    pub fn new(id: &str, triggers: &[&str], reason: &str) -> Result<Self, String> {
+        if id.trim().is_empty() || reason.trim().is_empty() {
+            return Err("a limit needs an id and a reason".to_owned());
+        }
+        let triggers: Vec<String> = triggers
+            .iter()
+            .map(|trigger| trigger.trim().to_lowercase())
+            .filter(|trigger| !trigger.is_empty())
+            .collect();
+        if triggers.is_empty() {
+            return Err(format!("limit `{id}` needs a trigger"));
+        }
+        Ok(Self {
+            id: id.to_owned(),
+            triggers,
+            reason: reason.to_owned(),
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct LimitsFile {
+    limit: Vec<CapabilityLimit>,
+}
+
+/// Load `share/capabilities/limits.toml`, or an empty list when it is absent.
+///
+/// # Errors
+///
+/// Returns every malformed limit, duplicate id or empty trigger/reason.
+pub fn load_limits(root: &Path) -> Result<Vec<CapabilityLimit>, Vec<String>> {
+    let path = root.join("share/capabilities/limits.toml");
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) => return Err(vec![format!("could not read {}: {error}", path.display())]),
+    };
+    let file: LimitsFile = match toml::from_str(&text) {
+        Ok(file) => file,
+        Err(error) => return Err(vec![format!("{}: {error}", path.display())]),
+    };
+    let mut errors = Vec::new();
+    let mut ids = BTreeSet::new();
+    for limit in &file.limit {
+        if limit.id.trim().is_empty() {
+            errors.push(format!("{}: a limit has no id", path.display()));
+        } else if !ids.insert(limit.id.clone()) {
+            errors.push(format!(
+                "{}: duplicate limit id `{}`",
+                path.display(),
+                limit.id
+            ));
+        }
+        if limit.triggers.is_empty()
+            || limit
+                .triggers
+                .iter()
+                .any(|trigger| trigger.trim().is_empty())
+        {
+            errors.push(format!(
+                "{}: limit `{}` needs a non-empty trigger",
+                path.display(),
+                limit.id
+            ));
+        }
+        if limit.reason.trim().is_empty() {
+            errors.push(format!(
+                "{}: limit `{}` needs a reason",
+                path.display(),
+                limit.id
+            ));
+        }
+    }
+    if errors.is_empty() {
+        Ok(file.limit)
+    } else {
+        Err(errors)
+    }
+}
+
+/// The first limit whose trigger appears in the question, if any.
+///
+/// A phrase is matched as a substring; a single word is matched as a whole token, so `RF` does not
+/// match `performance`.
+#[must_use]
+pub fn matched_limit<'a>(
+    limits: &'a [CapabilityLimit],
+    question: &str,
+) -> Option<&'a CapabilityLimit> {
+    let question = question.to_lowercase();
+    limits.iter().find(|limit| {
+        limit.triggers.iter().any(|trigger| {
+            let trigger = trigger.trim().to_lowercase();
+            if trigger.contains(' ') || trigger.contains('-') || trigger.contains('/') {
+                question.contains(&trigger)
+            } else {
+                question
+                    .split(|character: char| !character.is_alphanumeric())
+                    .any(|word| word == trigger)
+            }
+        })
+    })
+}
+
 /// Load every `share/capabilities/*.toml`.
 ///
 /// # Errors
@@ -50,6 +173,10 @@ pub fn load_all(root: &Path) -> Result<Vec<CapabilityManifest>, Vec<String>> {
         .filter(|path| {
             path.extension()
                 .is_some_and(|extension| extension == "toml")
+        })
+        .filter(|path| {
+            path.file_name()
+                .is_none_or(|name| name != std::ffi::OsStr::new("limits.toml"))
         })
         .collect();
     files.sort();
@@ -148,6 +275,24 @@ mod tests {
             ),
         )
         .expect("manifest");
+    }
+
+    #[test]
+    fn a_limit_matches_a_phrase_and_a_whole_word() {
+        let limits = vec![CapabilityLimit {
+            id: "rf-link".to_owned(),
+            triggers: vec!["rf link".to_owned(), "eirp".to_owned()],
+            reason: "no link model".to_owned(),
+        }];
+        assert_eq!(
+            matched_limit(&limits, "Compute the RF link margin").map(|limit| limit.id.as_str()),
+            Some("rf-link")
+        );
+        assert_eq!(
+            matched_limit(&limits, "What EIRP is needed?").map(|limit| limit.id.as_str()),
+            Some("rf-link")
+        );
+        assert!(matched_limit(&limits, "What is the pass performance?").is_none());
     }
 
     #[test]

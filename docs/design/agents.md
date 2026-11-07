@@ -121,9 +121,12 @@ manual, networked check, not a CI step: a case records the expected status, resu
 count and formula citation, and a failure stays visible instead of being relaxed in the fixture.
 The first recorded failure was a capability gap: an RF link-budget question produced access windows
 and a `complete` envelope because "some structured result exists" is not "the question was
-answered". The model now concludes with `agent.report`; the real run reports `unsupported` for that
-case and passes both fixed cases. The status is still model-declared, so a deterministic capability
-preflight remains a milestone; a model that ignores the tool falls back to inference.
+answered". The model now concludes with `agent.report`; the real run reports `unsupported` for that case and
+passes both fixed cases. Known unmodelled domains are also refused **before** the model runs by
+`share/capabilities/limits.toml`: RF link budget, manoeuvre and attitude currently have no command,
+so a request that names one returns `unsupported` with a `capability.guard(<id>)` trace. This is a
+known-domain guard, not a general semantic planner; requests outside its list still rely on the
+model's `agent.report`.
 
 ## Task lifecycle and resource policy
 

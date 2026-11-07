@@ -140,6 +140,8 @@ pub struct Server {
     role: Option<stkcraft_agent_knowledge::expert::ExpertRole>,
     /// The object capability manifests, when the deployment ships them.
     capabilities: Vec<stkcraft_agent_knowledge::capability::CapabilityManifest>,
+    /// Domains this build does not model, checked before the model runs.
+    limits: Vec<stkcraft_agent_knowledge::capability::CapabilityLimit>,
 }
 
 impl Server {
@@ -154,7 +156,36 @@ impl Server {
             knowledge: stkcraft_agent_knowledge::Library::default(),
             role: None,
             capabilities: Vec::new(),
+            limits: Vec::new(),
         }
+    }
+
+    /// Install the domains this build does not model.
+    #[must_use]
+    pub fn with_limits(
+        mut self,
+        limits: Vec<stkcraft_agent_knowledge::capability::CapabilityLimit>,
+    ) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Add one unsupported domain without naming the knowledge type.
+    #[must_use]
+    pub fn with_unsupported_domain(mut self, id: &str, triggers: &[&str], reason: &str) -> Self {
+        if let Ok(limit) =
+            stkcraft_agent_knowledge::capability::CapabilityLimit::new(id, triggers, reason)
+        {
+            self.limits.push(limit);
+        }
+        self
+    }
+
+    /// The unsupported domain a question asks for, if any.
+    #[must_use]
+    pub fn unsupported_reason(&self, question: &str) -> Option<(String, String)> {
+        stkcraft_agent_knowledge::capability::matched_limit(&self.limits, question)
+            .map(|limit| (limit.id.clone(), limit.reason.clone()))
     }
 
     /// Offer the object capability manifests as a resource.
