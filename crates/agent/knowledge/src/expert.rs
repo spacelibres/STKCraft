@@ -33,6 +33,7 @@ pub struct ExpertRole {
     /// The role version.
     pub version: String,
     tools: Vec<String>,
+    objects: Vec<String>,
 }
 
 impl ExpertRole {
@@ -46,6 +47,20 @@ impl ExpertRole {
         version: impl Into<String>,
         tools: Vec<String>,
     ) -> Result<Self, String> {
+        Self::with_objects(id, version, tools, Vec::new())
+    }
+
+    /// Build a role restricted to object types, rejecting empty ids or tools.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the invalid field.
+    pub fn with_objects(
+        id: impl Into<String>,
+        version: impl Into<String>,
+        tools: Vec<String>,
+        objects: Vec<String>,
+    ) -> Result<Self, String> {
         let id = id.into();
         let version = version.into();
         if id.trim().is_empty() || version.trim().is_empty() {
@@ -54,10 +69,21 @@ impl ExpertRole {
         if tools.is_empty() || tools.iter().any(|tool| tool.trim().is_empty()) {
             return Err(format!("role `{id}` needs at least one non-empty tool"));
         }
+        if objects.iter().any(|object| object.trim().is_empty()) {
+            return Err(format!("role `{id}` has an empty object id"));
+        }
         let mut tools = tools;
         tools.sort();
         tools.dedup();
-        Ok(Self { id, version, tools })
+        let mut objects = objects;
+        objects.sort();
+        objects.dedup();
+        Ok(Self {
+            id,
+            version,
+            tools,
+            objects,
+        })
     }
 
     /// Whether this role may call `tool`.
@@ -70,6 +96,12 @@ impl ExpertRole {
     #[must_use]
     pub fn tools(&self) -> &[String] {
         &self.tools
+    }
+
+    /// The object types this role is restricted to; empty means no object restriction.
+    #[must_use]
+    pub fn objects(&self) -> &[String] {
+        &self.objects
     }
 }
 
@@ -101,7 +133,7 @@ pub fn load_role(root: &Path, id: &str) -> Result<ExpertRole, String> {
             path.display()
         ));
     }
-    ExpertRole::new(file.id, file.version, file.tools)
+    ExpertRole::with_objects(file.id, file.version, file.tools, file.objects)
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +141,8 @@ struct RoleFile {
     id: String,
     version: String,
     tools: Vec<String>,
+    #[serde(default)]
+    objects: Vec<String>,
 }
 
 /// What one validation pass found.

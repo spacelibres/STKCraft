@@ -9,6 +9,38 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.110] — A role is restricted to the objects it may touch
+
+### Added
+
+- `ExpertRole::with_objects` and the optional `objects` list in `role.toml`. A role can now say
+  which object types it may act on, not only which tools it may call.
+- `time-frames` is restricted to `scenario`, `sgp4` to `satellite` and `station`, and
+  `access-geometry` to `satellite`, `station`, `target` and `planet`.
+- The MCP dispatch checks the role's object list against the capability manifests. A tool that the
+  role lists but no allowed object declares is refused at `tools/call`, not merely hidden from
+  `tools/list`. `knowledge.*` reads remain available.
+
+### Fixed
+
+- A role with object restrictions and no loaded manifests now fails closed for object commands;
+  it does not silently fall back to the unrestricted list.
+
+### Not built yet
+
+- A computation ledger, formula dimension algebra and the task-graph orchestrator.
+- Object filtering for a session without a role is still the manifests' declaration, not an
+  authorization boundary.
+- Sub-daily EOP; release packaging; macOS CI.
+
+### Verification
+
+- MCP test: a satellite-only role lists `satellite.add`, `access.compute` and `knowledge.search`,
+  omits `station.add`, and `station.add` is refused at dispatch.
+- Existing role tests still pass: a role without objects keeps its full tool list.
+- `cargo xtask experts check` accepts the three role files; `cargo xtask ci` at 0.1.110 passes all
+  twelve steps.
+
 ## [0.1.109] — Object capabilities are declared, checked and readable
 
 ### Added

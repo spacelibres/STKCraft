@@ -9,3 +9,4 @@ tools = [
   "access.targets",
   "planet.access",
 ]
+objects = ["satellite", "station", "target", "planet"]

@@ -39,9 +39,11 @@ manifest is not a second command registry. `cargo xtask capabilities check` requ
 id to exist in the engine registry, and the engine's parameter schema remains the only schema. An
 MCP client reads the manifests at `stkcraft://capabilities`.
 
-The manifest is a declaration, not yet an authorization boundary. Dispatch still uses the role
-allowlist; filtering a tool by object type is the next step, and it must be enforced at dispatch,
-not only in the description a model reads.
+A role may name `objects` in its `role.toml`. The MCP dispatch then requires the tool to be both in
+the role's tool list and declared by one of those object manifests; `knowledge.*` reads remain
+available. A role with objects and no loaded manifests fails closed for object commands. A session
+without a role is still governed by the role/tool allowlist alone, so the manifest remains a
+declaration there, not an authorization boundary.
 
 ## Product execution domain
 
