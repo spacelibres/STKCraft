@@ -1,7 +1,8 @@
 # Credits
 
-`people.toml` is the source a person edits: one `[people.<github-username>]` entry, with the name
-that person chose. **Never add, edit or guess someone else's entry**; ask them once.
+`people.toml` is the source a person edits: one `[people.<github-username>]` entry, keyed by the
+GitHub account the generator links a commit to, with the name that person chose in
+`display_name`. **Never add, edit or guess someone else's entry**; ask them once.
 
 `contributors.json` is generated, and it is not committed. At release time the app calls
 `storytold/craft-common-actions`' `refresh-contributors.yml`, which checks out the full history,

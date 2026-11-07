@@ -9,6 +9,30 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.96] — Contributor credits use the shared generator's fields
+
+### Fixed
+
+- `contributors/people.toml` used `name` under `[people.stone]`. The shared
+  `refresh-contributors` generator keys entries by **GitHub username** and reads `display_name`;
+  `name` is ignored, so the entry would never have been applied. It is now
+  `[people.spacelibres]` with `display_name = "stone"` — the GitHub account that owns the
+  repository, credited with the name used on the office Linux machine.
+- `contributors/README.md` now documents the fields the generator actually reads
+  (`display_name`, `real_name`, `consent_source`, `sync_github_name`) and says the key is the
+  GitHub account.
+
+### Not built yet
+
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- The shared generator's `load_people` accepts the committed file after the change.
+- `cargo xtask ci` at 0.1.96.
+
 ## [0.1.95] — Chinese is complete, and the extractor reads CRLF continuations
 
 ### Fixed
