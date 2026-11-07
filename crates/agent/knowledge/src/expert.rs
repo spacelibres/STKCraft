@@ -4,7 +4,7 @@
 //! this test proves it. The validator is what stops a claim from becoming a citation without its
 //! evidence. It is deliberately offline and deterministic; it reads files and hashes them.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -512,6 +512,8 @@ fn validate_expert(
         })
         .collect();
     formula_files.sort();
+    let mut local_ids = BTreeSet::new();
+    let mut decomposition: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for file in formula_files {
         let text = match fs::read_to_string(&file) {
             Ok(text) => text,
@@ -550,8 +552,77 @@ fn validate_expert(
                     formula.id
                 ));
             }
+            local_ids.insert(formula.id.clone());
+            if !formula.decomposition.is_empty() {
+                decomposition.insert(formula.id.clone(), formula.decomposition.clone());
+            }
             validate_formula(root, &file, formula, &source_ids, report, errors);
         }
+    }
+    for (id, dependencies) in &decomposition {
+        for dependency in dependencies {
+            if !local_ids.contains(dependency) {
+                errors.push(format!(
+                    "{}: formula `{id}` decomposes into `{dependency}`, which is not in this expert",
+                    expert.display()
+                ));
+            }
+        }
+    }
+    if let Some(cycle) = decomposition_cycle(&decomposition) {
+        errors.push(format!(
+            "{}: decomposition cycle among: {}",
+            expert.display(),
+            cycle.join(" -> ")
+        ));
+    }
+}
+
+/// Return the nodes left by a topological pass when the decomposition graph has a cycle.
+fn decomposition_cycle(graph: &BTreeMap<String, Vec<String>>) -> Option<Vec<String>> {
+    let mut indegree: BTreeMap<&str, usize> = graph.keys().map(|id| (id.as_str(), 0)).collect();
+    let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (id, dependencies) in graph {
+        for dependency in dependencies {
+            if !graph.contains_key(dependency) {
+                continue;
+            }
+            *indegree.entry(id.as_str()).or_insert(0) += 1;
+            children
+                .entry(dependency.as_str())
+                .or_default()
+                .push(id.as_str());
+        }
+    }
+    let mut queue: Vec<&str> = indegree
+        .iter()
+        .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
+        .collect();
+    let mut ordered = Vec::new();
+    while let Some(id) = queue.pop() {
+        ordered.push(id.to_owned());
+        if let Some(next) = children.get(id) {
+            for child in next {
+                if let Some(degree) = indegree.get_mut(child) {
+                    *degree = degree.saturating_sub(1);
+                    if *degree == 0 {
+                        queue.push(child);
+                    }
+                }
+            }
+        }
+    }
+    if ordered.len() == graph.len() {
+        None
+    } else {
+        let ordered: BTreeSet<&str> = ordered.iter().map(String::as_str).collect();
+        Some(
+            graph
+                .keys()
+                .filter(|id| !ordered.contains(id.as_str()))
+                .cloned()
+                .collect(),
+        )
     }
 }
 
@@ -690,6 +761,18 @@ fn validate_formula(
     }
     if formula.assumptions.is_empty() {
         errors.push(format!("{where_}: at least one assumption is required"));
+    }
+    let mut seen = BTreeSet::new();
+    for dependency in &formula.decomposition {
+        if dependency.trim().is_empty() {
+            errors.push(format!("{where_}: a decomposition entry is empty"));
+        } else if dependency == &formula.id {
+            errors.push(format!("{where_}: a formula cannot decompose into itself"));
+        } else if !seen.insert(dependency) {
+            errors.push(format!(
+                "{where_}: duplicate decomposition entry `{dependency}`"
+            ));
+        }
     }
     if formula
         .limitations
@@ -834,6 +917,9 @@ struct Formula {
     limitations: Vec<String>,
     #[serde(default)]
     symbols: Vec<Symbol>,
+    /// Sub-formulas this record decomposes into, by formula id.
+    #[serde(default)]
+    decomposition: Vec<String>,
     implementation: Implementation,
     verification: Verification,
 }
@@ -915,6 +1001,10 @@ adopted_by = ["test"]
     }
 
     fn write_formula_units(root: &Path, test: &str, unit: &str, dimension: &str) {
+        write_formula_with(root, test, unit, dimension, "");
+    }
+
+    fn write_formula_with(root: &Path, test: &str, unit: &str, dimension: &str, extra: &str) {
         fs::write(
             root.join("share/experts/test/formulas/test.toml"),
             format!(
@@ -934,6 +1024,7 @@ assumptions = ["none"]
 validity = "always"
 status = "verified"
 limitations = []
+{extra}
 [[formula.symbols]]
 symbol = "x"
 unit = "{unit}"
@@ -964,6 +1055,35 @@ test = "{test}"
             ),
         )
         .expect("evaluation");
+    }
+
+    #[test]
+    fn a_decomposition_reference_must_exist() {
+        let root = fixture("decomposition-missing");
+        write_formula_with(
+            &root,
+            "proves_it",
+            "1",
+            "number",
+            "decomposition = [\"test.missing\"]",
+        );
+        let errors = validate(&root).expect_err("missing decomposition");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("not in this expert")),
+            "{errors:?}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_decomposition_cycle_is_refused() {
+        let mut graph = BTreeMap::new();
+        graph.insert("a".to_owned(), vec!["b".to_owned()]);
+        graph.insert("b".to_owned(), vec!["a".to_owned()]);
+        let cycle = decomposition_cycle(&graph).expect("a cycle");
+        assert_eq!(cycle, ["a", "b"]);
     }
 
     #[test]
