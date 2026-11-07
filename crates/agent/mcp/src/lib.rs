@@ -187,7 +187,19 @@ impl Server {
     }
 
     fn role_allows(&self, tool: &str) -> bool {
-        self.role.as_ref().is_none_or(|role| role.allows(tool))
+        let Some(role) = self.role.as_ref() else {
+            return true;
+        };
+        if !role.allows(tool) {
+            return false;
+        }
+        if role.objects().is_empty() || tool.starts_with("knowledge.") {
+            return true;
+        }
+        self.capabilities
+            .iter()
+            .filter(|manifest| role.objects().iter().any(|object| object == &manifest.id))
+            .any(|manifest| manifest.commands.iter().any(|command| command == tool))
     }
 
     /// Serve a knowledge base as well: the person's own documents, searched before a model answers.
@@ -1267,6 +1279,56 @@ mod tests {
             &mut server,
             "tools/call",
             &json!({"name": "satellite.add", "arguments": {}}),
+        );
+        assert!(refused.get("error").is_some(), "{refused}");
+    }
+
+    #[test]
+    fn an_object_restricted_role_cannot_call_another_objects_command() {
+        let satellite = stkcraft_agent_knowledge::capability::CapabilityManifest {
+            id: "satellite".to_owned(),
+            label: "Satellite".to_owned(),
+            commands: vec!["satellite.add".to_owned(), "access.compute".to_owned()],
+            evidence: vec!["satellite id".to_owned()],
+            limitations: vec!["element epoch".to_owned()],
+        };
+        let station = stkcraft_agent_knowledge::capability::CapabilityManifest {
+            id: "station".to_owned(),
+            label: "Station".to_owned(),
+            commands: vec!["station.add".to_owned()],
+            evidence: vec!["station id".to_owned()],
+            limitations: vec!["horizon mask".to_owned()],
+        };
+        let role = stkcraft_agent_knowledge::expert::ExpertRole::with_objects(
+            "sgp4",
+            "0.1.0",
+            vec![
+                "knowledge.search".to_owned(),
+                "satellite.add".to_owned(),
+                "station.add".to_owned(),
+                "access.compute".to_owned(),
+            ],
+            vec!["satellite".to_owned()],
+        )
+        .expect("valid role");
+        let mut server = server()
+            .with_capabilities(vec![satellite, station])
+            .with_role(role);
+        let listed = ask(&mut server, "tools/list", &json!({}));
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(names.contains(&"satellite.add"), "{names:?}");
+        assert!(names.contains(&"access.compute"), "{names:?}");
+        assert!(names.contains(&"knowledge.search"), "{names:?}");
+        assert!(!names.contains(&"station.add"), "{names:?}");
+        let refused = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "station.add", "arguments": {}}),
         );
         assert!(refused.get("error").is_some(), "{refused}");
     }
