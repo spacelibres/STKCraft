@@ -9,6 +9,30 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.92] — Control tokens come from the operating system's RNG
+
+### Fixed
+
+- `new_token` read `/dev/urandom`, which does not exist on Windows, and fell back there to a digest
+  of the process id and the clock — guessable by anything that could observe the process table. It
+  now calls `getrandom` (`BCryptGenRandom` on Windows, `getrandom(2)` on Linux, the Security
+  framework on macOS) for 32 bytes, and still falls back to the process/clock digest only if that
+  call fails. The 32-hex-character shape and the constant-time comparison are unchanged.
+- The token-file documentation now states the platform difference: `0600` on Unix, and the per-user
+  directory's inherited ACL on Windows, where there is no file mode to set.
+
+### Not built yet
+
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask ci` at 0.1.92 (fmt, clippy, tests, assets, i18n, api-docs, layers, wasm, version,
+  lockfile).
+- The existing token test still proves the 32-hex shape and that two tokens differ.
+
 ## [0.1.91] — The window's error sentences are translatable
 
 ### Changed

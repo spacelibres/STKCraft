@@ -8,6 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+getrandom.workspace = true
 stkcraft-astro-engine.workspace = true
 stkcraft-agent-mcp.workspace = true
 serde_json.workspace = true
