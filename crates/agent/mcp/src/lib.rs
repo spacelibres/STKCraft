@@ -193,7 +193,7 @@ impl Server {
         if !role.allows(tool) {
             return false;
         }
-        if role.objects().is_empty() || tool.starts_with("knowledge.") {
+        if role.objects().is_empty() || tool.starts_with("knowledge.") || tool == "agent.report" {
             return true;
         }
         self.capabilities
@@ -322,6 +322,35 @@ impl Server {
                     ));
                 }
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+                if name == "agent.report" {
+                    let status = arguments
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .ok_or((-32602, "agent.report needs a status".to_owned()))?;
+                    if !matches!(
+                        status,
+                        "complete" | "needs_input" | "unsupported" | "failed"
+                    ) {
+                        return Err((
+                            -32602,
+                            "agent.report status must be complete, needs_input, unsupported or failed"
+                                .to_owned(),
+                        ));
+                    }
+                    let reason = arguments
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    return Ok(json!({
+                        "content": [{"type": "text", "text": format!("status: {status}")}],
+                        "structuredContent": {
+                            "kind": "agent.report",
+                            "status": status,
+                            "reason": reason,
+                        },
+                        "isError": false,
+                    }));
+                }
                 // The knowledge tools are the server's, not the registry's: a search reads the
                 // person's documents and changes nothing.
                 if name.starts_with("knowledge.") {
@@ -457,6 +486,27 @@ impl Server {
             }
             tools.push(tool);
         }
+        // The agent's own conclusion is not an engine command, but it is a tool: the platform
+        // needs a status that is not inferred from prose, and a model needs a place to put
+        // `unsupported` when no registered command implements the request.
+        tools.push(json!({
+            "name": "agent.report",
+            "description": "Conclude the run. Use `complete` only when a structured result \
+                            answers the question; `needs_input` when a required object or \
+                            parameter is missing; `unsupported` when no registered command \
+                            implements it; `failed` when a computation or verification failed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["complete", "needs_input", "unsupported", "failed"]
+                    },
+                    "reason": {"type": "string"}
+                },
+                "required": ["status"]
+            }
+        }));
         tools
     }
 
@@ -1556,6 +1606,37 @@ mod tests {
             .as_str()
             .expect("text");
         assert!(text.contains("Stations on other bodies"), "{text}");
+    }
+
+    #[test]
+    fn the_agent_can_report_a_non_complete_status() {
+        let mut server = server();
+        let listed = ask(&mut server, "tools/list", &json!({}));
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(names.contains(&"agent.report"), "{names:?}");
+        let answer = ask(
+            &mut server,
+            "tools/call",
+            &json!({
+                "name": "agent.report",
+                "arguments": {"status": "unsupported", "reason": "no link model"}
+            }),
+        );
+        assert_eq!(
+            answer["result"]["structuredContent"]["status"],
+            "unsupported"
+        );
+        let refused = ask(
+            &mut server,
+            "tools/call",
+            &json!({"name": "agent.report", "arguments": {"status": "maybe"}}),
+        );
+        assert!(refused.get("error").is_some(), "{refused}");
     }
 
     #[test]

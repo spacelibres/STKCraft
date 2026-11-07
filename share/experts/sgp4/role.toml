@@ -8,5 +8,6 @@ tools = [
   "satellite.add",
   "access.compute",
   "access.targets",
+  "agent.report",
 ]
 objects = ["satellite", "station"]

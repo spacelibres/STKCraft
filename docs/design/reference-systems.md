@@ -99,6 +99,7 @@ structured access and pass results, and `ResultEnvelope` reports `complete`, `un
 |---|---|---|---|
 | A model can describe a number the tool did not return | CosmoAgent's secretary | Deterministic result verifier | Implemented |
 | A failed result has no status | Separate approval/rejection | `ResultEnvelope.errors` and `failed` status | Implemented |
+| A capability gap looks like a complete answer | CosmoAgent's checked action space | `agent.report` status, with `complete` requiring a verified structured result | Model-declared; deterministic preflight remains |
 | No capability manifest per object | Enumerated action space | Satellite/station/target/scenario/planet manifests, validated against the command registry and exposed as an MCP resource | Declared; role-scoped dispatch is enforced, a session without a role is not |
 | No task ledger | "Stick" | `Agent::with_ledger` records command, parameters, scenario digest, engine version, result and verifier errors; the CLI `passes` path stores its structured answer too | Implemented; best-effort when the record opens |
 | Formula records have no dimension algebra | PhyE2E dimensional consistency | Add symbol dimensions and a formula dimension checker | Next |
