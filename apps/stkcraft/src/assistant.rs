@@ -45,8 +45,10 @@ enum State {
     WorkerUnavailable,
     /// The model answered.
     Answered {
-        /// The model's final text.
+        /// The model's final text, shown only as an optional note.
         text: String,
+        /// The structured results the tools returned.
+        results: Vec<serde_json::Value>,
     },
     /// The document changed while the assistant was working.
     Conflict,
@@ -55,7 +57,7 @@ enum State {
 }
 
 /// What one question produces: the answer, and the scenario the model left behind.
-type Reply = Result<(String, Scenario), String>;
+type Reply = Result<(String, Vec<serde_json::Value>, Scenario), String>;
 
 /// What the worker is asked to do.
 enum Command {
@@ -167,7 +169,11 @@ impl Responder for DeepSeekResponder {
             .agent
             .ask_observing_controlled(question, &mut report, control)
             .map_err(|error| error.to_string())?;
-        Ok((answer.text, self.agent.server().scenario().clone()))
+        Ok((
+            answer.text,
+            answer.results,
+            self.agent.server().scenario().clone(),
+        ))
     }
 
     fn forget(&mut self) {
@@ -447,8 +453,8 @@ impl Assistant {
             return;
         }
         match result {
-            Ok(Ok((text, scenario))) => {
-                self.state = State::Answered { text };
+            Ok(Ok((text, results, scenario))) => {
+                self.state = State::Answered { text, results };
                 self.adopt = Some(scenario);
                 self.adoption_token = Some(token);
                 self.run = None;
@@ -490,6 +496,110 @@ impl Assistant {
     /// The scenario is handed back rather than written in place because adoption is the window's
     /// decision: it owns the document, and it is the only place that knows a document change has to
     /// be followed by a frame rebuild.
+    /// Draw one structured tool result as a table, not as prose.
+    fn result_ui(
+        ui: &mut egui::Ui,
+        result: &serde_json::Value,
+        translations: &stkcraft_framework_i18n::Translations,
+        language: &str,
+    ) {
+        let kind = result.get("kind").and_then(serde_json::Value::as_str);
+        let arrays = match kind {
+            Some("access" | "target-access") => result.get("pairs"),
+            Some("planet-passes") => result.get("passes"),
+            _ => None,
+        };
+        let Some(rows) = arrays.and_then(serde_json::Value::as_array) else {
+            egui::CollapsingHeader::new(stkcraft_framework_i18n::tr!(
+                translations,
+                language,
+                "Raw result"
+            ))
+            .show(ui, |ui| {
+                ui.monospace(serde_json::to_string_pretty(result).unwrap_or_default());
+            });
+            return;
+        };
+        for (index, row) in rows.iter().enumerate() {
+            let label = match kind {
+                Some("target-access") => format!(
+                    "{} → {}",
+                    row.get("satellite")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?"),
+                    row.get("target")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?")
+                ),
+                Some("access") => format!(
+                    "{} → {}",
+                    row.get("satellite")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?"),
+                    row.get("station")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?")
+                ),
+                _ => row
+                    .get("start_utc")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("pass")
+                    .to_owned(),
+            };
+            ui.label(label);
+            let windows = if kind == Some("planet-passes") {
+                std::slice::from_ref(row)
+            } else {
+                row.get("windows")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(&[][..], Vec::as_slice)
+            };
+            if windows.is_empty() {
+                continue;
+            }
+            egui::Grid::new(format!("assistant-result-{index}"))
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.strong(stkcraft_framework_i18n::tr!(
+                        translations,
+                        language,
+                        "Start (UTC)"
+                    ));
+                    ui.strong(stkcraft_framework_i18n::tr!(
+                        translations,
+                        language,
+                        "End (UTC)"
+                    ));
+                    ui.strong(stkcraft_framework_i18n::tr!(
+                        translations,
+                        language,
+                        "Duration"
+                    ));
+                    ui.end_row();
+                    for window in windows {
+                        ui.monospace(
+                            window
+                                .get("start_utc")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("?"),
+                        );
+                        ui.monospace(
+                            window
+                                .get("end_utc")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or("?"),
+                        );
+                        let seconds = window
+                            .get("duration_seconds")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0);
+                        ui.monospace(crate::render::format_duration(seconds));
+                        ui.end_row();
+                    }
+                });
+        }
+    }
+
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -606,10 +716,22 @@ impl Assistant {
             State::WorkerUnavailable => {
                 ui.label(tr!("The assistant could not start its worker. Try again."));
             }
-            State::Answered { text } => {
+            State::Answered { text, results } => {
                 ui.separator();
-                ui.label(tr!("Answer"));
-                ui.label(text);
+                if results.is_empty() {
+                    ui.label(tr!("Answer"));
+                    ui.label(text);
+                } else {
+                    ui.label(tr!("Results"));
+                    for result in results {
+                        Self::result_ui(ui, result, translations, language);
+                    }
+                    // The prose is a note, not the answer. It stays available without taking the
+                    // space the numbers need.
+                    egui::CollapsingHeader::new(tr!("Model note"))
+                        .default_open(false)
+                        .show(ui, |ui| ui.label(text));
+                }
             }
             State::Conflict => {
                 ui.separator();
@@ -686,7 +808,7 @@ mod tests {
         assert!(matches!(assistant.state, State::Stopping));
         assert!(
             job.result
-                .send(Ok(("late".into(), Scenario::empty("unwanted"))))
+                .send(Ok(("late".into(), Vec::new(), Scenario::empty("unwanted"))))
                 .is_ok()
         );
         assistant.poll();
@@ -704,7 +826,11 @@ mod tests {
         let (mut assistant, job, base) = pending();
         assert!(
             job.result
-                .send(Ok(("queued".into(), Scenario::empty("changed"))))
+                .send(Ok((
+                    "queued".into(),
+                    Vec::new(),
+                    Scenario::empty("changed")
+                )))
                 .is_ok()
         );
         assistant.poll();
@@ -721,7 +847,11 @@ mod tests {
         let (mut assistant, job, base) = pending();
         assert!(
             job.result
-                .send(Ok(("queued".into(), Scenario::empty("changed"))))
+                .send(Ok((
+                    "queued".into(),
+                    Vec::new(),
+                    Scenario::empty("changed")
+                )))
                 .is_ok()
         );
         assistant.poll();
@@ -806,7 +936,7 @@ mod tests {
         let _ = frame(vec![egui::Event::PointerMoved(position), button(true)]);
         assert!(
             job.result
-                .send(Ok(("ready".into(), Scenario::empty("changed"))))
+                .send(Ok(("ready".into(), Vec::new(), Scenario::empty("changed"))))
                 .is_ok()
         );
         let (candidate, _) = frame(vec![button(false)]);
@@ -838,7 +968,11 @@ mod tests {
             let _ = trace.send("entered controlled responder".to_owned());
             for _ in 0..3_000 {
                 if control.check().is_err() {
-                    return Ok(("late legacy success".to_owned(), scenario.clone()));
+                    return Ok((
+                        "late legacy success".to_owned(),
+                        Vec::new(),
+                        scenario.clone(),
+                    ));
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
@@ -895,7 +1029,7 @@ mod tests {
         assistant.forget();
         assert!(
             job.result
-                .send(Ok(("late".into(), Scenario::empty("unwanted"))))
+                .send(Ok(("late".into(), Vec::new(), Scenario::empty("unwanted"))))
                 .is_ok()
         );
         assistant.poll();
@@ -903,15 +1037,17 @@ mod tests {
         assert_eq!(assistant.answered, 0);
     }
 
+    type ScriptedAnswer = Result<(String, Vec<serde_json::Value>, Scenario), String>;
+
     /// A responder that answers from a script, so the panel's threading, adoption and restart are
     /// exercised without a model, a key or a socket.
     struct Scripted {
-        answers: std::cell::RefCell<Vec<Result<(String, Scenario), String>>>,
+        answers: std::cell::RefCell<Vec<ScriptedAnswer>>,
         questions: std::cell::RefCell<Vec<String>>,
     }
 
     impl Scripted {
-        fn new(answers: Vec<Result<(String, Scenario), String>>) -> Self {
+        fn new(answers: Vec<ScriptedAnswer>) -> Self {
             Self {
                 answers: std::cell::RefCell::new(answers),
                 questions: std::cell::RefCell::new(Vec::new()),
@@ -925,7 +1061,7 @@ mod tests {
             scenario: &Scenario,
             question: &str,
             trace: &Sender<String>,
-        ) -> Result<(String, Scenario), String> {
+        ) -> Result<(String, Vec<serde_json::Value>, Scenario), String> {
             self.questions.borrow_mut().push(question.to_owned());
             let _ = trace.send(format!("access.compute({{}}) → asked `{question}`"));
             let mut answers = self.answers.borrow_mut();
@@ -933,9 +1069,9 @@ mod tests {
                 return Err("the script ran out".to_owned());
             }
             let answer = answers.remove(0);
-            answer.map(|(text, mut produced)| {
+            answer.map(|(text, results, mut produced)| {
                 produced.name = scenario.name.clone();
-                (text, produced)
+                (text, results, produced)
             })
         }
     }
@@ -948,8 +1084,16 @@ mod tests {
         _scenario: &Scenario,
     ) -> Result<Box<dyn Responder>, String> {
         Ok(Box::new(Scripted::new(vec![
-            Ok(("First answer.".to_owned(), Scenario::empty("worker"))),
-            Ok(("Second answer.".to_owned(), Scenario::empty("worker"))),
+            Ok((
+                "First answer.".to_owned(),
+                Vec::new(),
+                Scenario::empty("worker"),
+            )),
+            Ok((
+                "Second answer.".to_owned(),
+                Vec::new(),
+                Scenario::empty("worker"),
+            )),
         ])))
     }
 
@@ -1106,7 +1250,7 @@ mod tests {
         settle(&mut assistant);
 
         match &assistant.state {
-            State::Answered { text } => assert_eq!(text, "Second answer."),
+            State::Answered { text, .. } => assert_eq!(text, "Second answer."),
             other => panic!("expected an answer, got {other:?}"),
         }
         assert_eq!(assistant.answered, 2);
