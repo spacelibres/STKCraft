@@ -46,6 +46,8 @@ pub enum Invocation {
     AgentEval(AgentEvalRequest),
     /// Run a deterministic task graph.
     Workflow(WorkflowRequest),
+    /// Ask the model for a task graph, validate it, and run it.
+    Plan(PlanRequest),
     /// List every command id, its parameters and its menu.
     Commands,
 }
@@ -63,6 +65,12 @@ pub struct RunRequest {
     eop: Option<String>,
     /// The parameters, as the strings the caller typed; `args_from` converts them by kind.
     params: serde_json::Value,
+}
+
+/// One question for the model planner.
+pub struct PlanRequest {
+    /// The question the graph must answer.
+    question: String,
 }
 
 /// One deterministic task graph to run.
@@ -139,6 +147,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Run(request) => run_command(&request),
         Invocation::AgentEval(request) => agent_eval(&request),
         Invocation::Workflow(request) => workflow(&request),
+        Invocation::Plan(request) => plan(&request),
         Invocation::Commands => {
             print!("{}", command_list());
             Ok(())
@@ -169,6 +178,7 @@ COMMANDS
                 (`ask --json <question>` prints the ResultEnvelope, not the model text)
     agent-eval  Run the fixed agent cases against the configured model (needs a key)
     workflow    Run a deterministic task graph (`workflow --file graph.json`)
+    plan        Ask the model for a graph, validate it, and run it
     chat        Ask questions in one conversation, reading them from standard input
                 (`chat --session <id>` resumes one; `chat --sessions` lists them)
     extensions  List the extension packages installed for this person
@@ -276,6 +286,13 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         "run" => parse_run(arguments),
         "agent-eval" => parse_agent_eval(arguments),
         "workflow" => parse_workflow(arguments),
+        "plan" => {
+            let question = arguments.next().ok_or_else(|| {
+                "`plan` needs a question, e.g. `stkcraft plan \"add the ISS ... and compute passes\"`"
+                    .to_owned()
+            })?;
+            Ok(Invocation::Plan(PlanRequest { question }))
+        }
         "commands" => Ok(Invocation::Commands),
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
@@ -1493,6 +1510,53 @@ pub struct KnowledgeRequest {
 /// The scenario an MCP session starts with.
 fn app_demo_scenario() -> Result<stkcraft_astro_engine::Scenario, String> {
     crate::app::demo_scenario()
+}
+
+/// Ask the model for a graph, validate it and execute it against a fresh scenario.
+fn plan(request: &PlanRequest) -> Result<(), String> {
+    let model = crate::prefs::model_provider()?;
+    let server = stkcraft_agent_mcp::Server::new(Scenario::empty("planning"), Vec::new())
+        .with_capabilities(load_capabilities()?)
+        .with_limits(load_limits()?);
+    let tools: Vec<serde_json::Value> = server
+        .tools_json()
+        .into_iter()
+        .filter(|tool| {
+            tool.get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| !name.starts_with("knowledge.") && name != "agent.report")
+        })
+        .collect();
+    let planner = stkcraft_agent_runtime::task::Planner::new(model);
+    let graph = planner.plan(&request.question, &tools)?;
+    let graph_text = serde_json::to_string_pretty(&graph)
+        .map_err(|error| format!("could not print the plan: {error}"))?;
+    eprintln!("plan:\n{graph_text}");
+    let mut scenario = Scenario::empty("planned");
+    let outcomes = graph
+        .execute(&Registry::builtin(), &mut scenario)
+        .map_err(|errors| errors.join("\n"))?;
+    let text = serde_json::to_string_pretty(&outcomes)
+        .map_err(|error| format!("could not print the outcomes: {error}"))?;
+    println!("{text}");
+    let failed: Vec<&str> = outcomes
+        .iter()
+        .filter(|outcome| {
+            !matches!(
+                outcome.status,
+                stkcraft_agent_runtime::task::TaskStatus::Completed
+            )
+        })
+        .map(|outcome| outcome.id.as_str())
+        .collect();
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "plan: task(s) did not complete: {}",
+            failed.join(", ")
+        ))
+    }
 }
 
 /// Parse `workflow --file FILE`.

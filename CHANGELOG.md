@@ -9,6 +9,37 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.116] — The model proposes a graph; Rust validates and executes it
+
+### Added
+
+- `stkcraft-agent-runtime::task::Planner`: one model completion with the command catalogue, a
+  strict "JSON graph only" instruction, and extraction of the first `{…}` object. The planner does
+  not dispatch commands.
+- `stkcraft plan "<question>"`: asks the model for a graph, validates it with `TaskGraph::validate`
+  and executes it against a fresh scenario. The graph is printed to stderr and the task outcomes,
+  including their numeric results, to stdout.
+- A planner unit test: a fenced JSON answer becomes a graph.
+
+### Changed
+
+- A model's plan is data, not authority. An unknown command, missing dependency, cycle, depth
+  overflow or bad JSON is refused before execution.
+
+### Not built yet
+
+- Planner retries/correction when the first graph is invalid; budgets, parallelism, cancellation and
+  durable task state.
+- Formula dimension algebra.
+- The `plan` command is not yet the default `ask` path; `ask` remains the tool loop.
+
+### Verification
+
+- Real DeepSeek planner run at 0.1.116: the question supplied the ISS elements and London
+  coordinates; the model's graph added both objects and computed access, and `stkcraft plan` exited
+  0 with five windows and their start/end/duration seconds.
+- `cargo xtask ci` at 0.1.116 passes all twelve steps.
+
 ## [0.1.115] — A deterministic task graph composes commands
 
 ### Added
