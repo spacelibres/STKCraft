@@ -104,7 +104,7 @@ structured access and pass results, and `ResultEnvelope` reports `complete`, `un
 | No task ledger | "Stick" | `Agent::with_ledger` records command, parameters, scenario digest, engine version, result and verifier errors; the CLI `passes` path stores its structured answer too | Implemented; best-effort when the record opens |
 | Formula records have no dimension algebra | PhyE2E dimensional consistency | Add symbol dimensions and a formula dimension checker | Next |
 | Formula discovery is not a workflow | PhyE2E data-to-law pipeline | Offline candidate pipeline with held-out evaluation | Later |
-| No planner/executor | Proposer/verifier separation | Deterministic `TaskGraph` executor with cycle/depth checks and completed/needs_input/failed/blocked outcomes; `stkcraft workflow` runs one | Executor implemented; model planner, budgets, cancellation and durable state remain |
+| No planner/executor | Proposer/verifier separation | Deterministic `TaskGraph` executor; `Planner` asks a model for a graph, `stkcraft plan` validates and runs it | Executor and one-shot planner implemented; correction, budgets, cancellation and durable state remain |
 | Agent evaluation is ad hoc | Prophecy/counterfactual evaluation | Fixed JSONL cases for complete/needs-input/unsupported/failed | In progress |
 
 ## Delivery order and acceptance

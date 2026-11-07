@@ -304,6 +304,59 @@ fn task_result(outcome: &CommandOutcome, scenario: &Scenario) -> Option<Value> {
     None
 }
 
+/// A model that proposes a graph, with no tool loop.
+///
+/// The planner is deliberately one completion: the model receives the command catalogue and the
+/// question, and returns JSON. Rust validates and executes the result; the model never dispatches a
+/// command itself.
+pub struct Planner<M: crate::ChatModel> {
+    model: M,
+}
+
+impl<M: crate::ChatModel> Planner<M> {
+    /// Build a planner over a model.
+    #[must_use]
+    pub fn new(model: M) -> Self {
+        Self { model }
+    }
+
+    /// Ask the model for a graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when the model fails, when its answer is not a JSON object, or when it is
+    /// not a task graph. Structural validation against the registry happens in
+    /// [`TaskGraph::validate`], not here, so the caller can report both kinds of error together.
+    pub fn plan(&self, question: &str, tools: &[Value]) -> Result<TaskGraph, String> {
+        let system = "You are STKCraft's planner. Return ONE JSON object and nothing else, in the \
+                      shape {\"tasks\":[{\"id\":\"...\",\"command\":\"...\",\"arguments\":{...},\
+                      \"depends-on\":[\"...\"]}]}. Use only the commands in the catalogue. Never \
+                      estimate a number. Do not add prose, markdown fences or explanations.";
+        let catalogue = serde_json::to_string(tools)
+            .map_err(|error| format!("could not encode the command catalogue: {error}"))?;
+        let user = format!("Question: {question}\nCommand catalogue: {catalogue}");
+        let turn = self
+            .model
+            .complete(
+                &[
+                    crate::Message::System(system.to_owned()),
+                    crate::Message::User(user),
+                ],
+                &[],
+            )
+            .map_err(|error| format!("the planner model failed: {error}"))?;
+        let json = json_object(&turn.text)
+            .ok_or_else(|| "the planner did not return a JSON object".to_owned())?;
+        serde_json::from_str(json).map_err(|error| format!("the plan is not a task graph: {error}"))
+    }
+}
+
+fn json_object(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    (end > start).then_some(&text[start..=end])
+}
+
 /// A graph node's argument builder, so tests and callers do not spell JSON by hand.
 #[must_use]
 pub fn task(id: &str, command: &str, arguments: Value, depends_on: &[&str]) -> TaskSpec {
@@ -365,6 +418,33 @@ mod tests {
                 ),
             ],
         }
+    }
+
+    struct PlanModel(String);
+
+    impl crate::ChatModel for PlanModel {
+        fn complete(
+            &self,
+            _messages: &[crate::Message],
+            _tools: &[Value],
+        ) -> Result<crate::Turn, String> {
+            Ok(crate::Turn {
+                text: self.0.clone(),
+                ..crate::Turn::default()
+            })
+        }
+    }
+
+    #[test]
+    fn the_planner_extracts_a_graph_from_a_json_answer() {
+        let model = PlanModel(
+            "```json\n{\"tasks\":[{\"id\":\"rename\",\"command\":\"scenario.rename\",\
+             \"arguments\":{\"name\":\"Planned\"}}]}\n```"
+                .to_owned(),
+        );
+        let graph = Planner::new(model).plan("rename", &[]).expect("a graph");
+        assert_eq!(graph.tasks.len(), 1);
+        assert_eq!(graph.tasks[0].id, "rename");
     }
 
     #[test]

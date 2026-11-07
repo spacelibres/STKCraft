@@ -15,9 +15,11 @@ The model remains outside the numerical kernel, and the viewport displays engine
 
 The runtime currently runs one model/tool loop. Its ability to issue several tool calls is not a
 multi-agent scheduler. A deterministic `TaskGraph` executor now validates dependencies, cycles and
-depth and runs commands in topological order (`stkcraft workflow`); a planner that proposes such a
-graph, budgets, parallelism, cancellation and durable task state remain separate milestones. Do not
-infer their availability from the existence of the MCP server.
+depth and runs commands in topological order (`stkcraft workflow`). `Planner` adds one model
+completion that proposes a graph from the command catalogue; `stkcraft plan` validates and executes
+it. Planner correction after an invalid graph, budgets, parallelism, cancellation and durable task
+state remain separate milestones, and `ask` still uses the tool loop. Do not infer their
+availability from the existence of the MCP server.
 
 ## One role, one contract
 
