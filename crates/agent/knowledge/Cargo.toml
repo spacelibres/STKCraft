@@ -15,6 +15,11 @@ stkcraft-framework-storage.workspace = true
 craft-pdf.workspace = true
 # The interpreter's `Device` trait takes `kurbo` geometry, so the device has to name those types.
 kurbo.workspace = true
+# Expert packages and their formula records are authored TOML; the validator reads them before any
+# expert can cite one.
+serde.workspace = true
+sha2.workspace = true
+toml = "0.8"
 
 [lints]
 workspace = true

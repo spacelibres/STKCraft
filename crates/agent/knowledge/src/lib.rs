@@ -65,6 +65,7 @@
 
 pub mod cache;
 pub mod chunk;
+pub mod expert;
 pub mod html;
 pub mod index;
 pub mod library;

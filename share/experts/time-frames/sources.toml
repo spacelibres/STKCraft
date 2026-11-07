@@ -1,0 +1,40 @@
+schema = 1
+expert = "time-frames"
+
+# A source with path = "" is external: the repository does not carry the PDF. The citation is still
+# mandatory. A source stored under data/ or docs/ records its path and SHA-256.
+[[source]]
+id = "iers-2010"
+title = "IERS Conventions (2010)"
+edition = "IERS Technical Note 36"
+url = "https://www.iers.org/IERS/EN/Publications/TechnicalNotes/tn36.html"
+path = ""
+sha256 = ""
+adopted_by = ["IERS"]
+
+[[source]]
+id = "iers-bulletin-c"
+title = "IERS Bulletin C"
+edition = "latest published bulletin"
+url = "https://datacenter.iers.org/data/latestVersion/bulletinC.txt"
+path = ""
+sha256 = ""
+adopted_by = ["IERS"]
+
+[[source]]
+id = "sofa-erfa"
+title = "IAU SOFA / ERFA reference implementations"
+edition = "SOFA-derived ERFA release used by the kernel tests"
+url = "https://github.com/liberfa/erfa"
+path = ""
+sha256 = ""
+adopted_by = ["IAU"]
+
+[[source]]
+id = "vallado-2013"
+title = "Fundamentals of Astrodynamics and Applications"
+edition = "4th edition, 2013"
+url = "https://celestrak.org/books/"
+path = ""
+sha256 = ""
+adopted_by = ["Vallado", "CelesTrak"]

@@ -1,0 +1,10 @@
+{"id":"tf-001","question":"What is TAI minus UTC on 2017-01-01?","expect":{"formula":"time.tai-utc.leap","value":"37 s","citation":"IERS Bulletin C"}}
+{"id":"tf-002","question":"What is TT when TAI is 0?","expect":{"formula":"time.tt-from-tai","value":"32.184 s","citation":"IAU 1991 / SOFA iauTttai"}}
+{"id":"tf-003","question":"How large is TDB minus TT at J2000?","expect":{"formula":"time.tdb-minus-tt","value":"within 20 microseconds of ERFA eraDtdb","citation":"ERFA eraDtdb"}}
+{"id":"tf-004","question":"What is GMST at JDUT1 2453101.827406783?","expect":{"formula":"frames.gmst.iau82","value":"5.459562587690 rad","citation":"Vallado eq. 3-45 / AstroLib gstime"}}
+{"id":"tf-005","question":"Is the IAU-77 precession matrix at J2000 the identity?","expect":{"formula":"frames.precession.iau77","value":"yes","citation":"Vallado eq. 3-56 through 3-58"}}
+{"id":"tf-006","question":"Which nutation series does the kernel use?","expect":{"formula":"frames.nutation.iau80","value":"IAU-80, 106 terms","citation":"ERFA eraNut80 / Explanatory Supplement 1992"}}
+{"id":"tf-007","question":"What does TEME to ITRF need besides the TEME state?","expect":{"formula":"frames.teme-to-itrf","value":"UT1 - UTC and polar motion","citation":"Vallado Algorithms 23 and 26"}}
+{"id":"tf-008","question":"Convert UTC to UT1 without DUT1.","expect":{"refusal":"DUT1 is required; it cannot be derived. No EOP loader exists yet.","citation":"IERS Conventions (2010) chapter 8"}}
+{"id":"tf-009","question":"What leap second applies on 2035-01-01?","expect":{"refusal":"The date is after the published leap-second table; no offset is guessed.","citation":"IERS Bulletin C"}}
+{"id":"tf-010","question":"Is this IAU 2006/2000A precession-nutation?","expect":{"refusal":"No. The kernel implements IAU-77/80, the series SGP4/TEME is defined against.","citation":"Vallado (2013); ERFA eraPrec76/eraNut80"}}
