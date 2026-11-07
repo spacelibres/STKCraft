@@ -1,7 +1,7 @@
 # Expert and formula foundation — implementation plan
 
-**Status:** Phase 0–2 implemented on the working tree, not yet committed. Phase 3 (answer contract)
-is next. The durable contract is `docs/design/experts.md`; this file is the execution plan.
+**Status:** Phase 0–3 implemented on the working tree, not yet committed. Phase 4 (SGP4 and Access
+packages) is next. The durable contract is `docs/design/experts.md`; this file is the execution plan.
 
 ## Context
 

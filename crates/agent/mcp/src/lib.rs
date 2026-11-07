@@ -637,6 +637,7 @@ impl Server {
             .registry
             .run(&target, &mut self.scenario, &args)
             .map_err(|error| format!("{name}: {error}"))?;
+        let limitations = outcome.limitations.clone();
         let mut text = outcome.summary;
         let mut structured = None;
         if let Some(access) = outcome.access {
@@ -647,7 +648,11 @@ impl Server {
                 access.len()
             );
             let pairs = self.pairs_json(&access, &mut text);
-            structured = Some(json!({"kind": "access", "pairs": pairs}));
+            structured = Some(json!({
+                "kind": "access",
+                "pairs": pairs,
+                "limitations": limitations.clone(),
+            }));
         }
         if let Some(passes) = outcome.passes {
             let epoch = self.scenario.epoch;
@@ -657,6 +662,7 @@ impl Server {
                 "kind": "planet-passes",
                 "epoch": self.scenario.epoch,
                 "passes": listed,
+                "limitations": limitations.clone(),
             }));
         }
         if let Some(targets) = outcome.targets {
@@ -667,7 +673,14 @@ impl Server {
                 "kind": "target-access",
                 "epoch": self.scenario.epoch,
                 "pairs": listed,
+                "limitations": limitations.clone(),
             }));
+        }
+        if !limitations.is_empty() {
+            let _ = write!(text, "\n\nLimitations:");
+            for limitation in &limitations {
+                let _ = write!(text, "\n- {limitation}");
+            }
         }
         Ok((text, structured))
     }
@@ -1184,6 +1197,15 @@ mod tests {
             .expect("text");
         let first = windows[0]["start_utc"].as_str().expect("a start time");
         assert!(text.contains(first), "{text}");
+        assert!(
+            structured["limitations"]
+                .as_array()
+                .is_some_and(|lines| lines.iter().any(|line| line
+                    .as_str()
+                    .is_some_and(|line| line.contains("union of its vertices")))),
+            "{structured}"
+        );
+        assert!(text.contains("Limitations:"), "{text}");
     }
 
     #[test]
@@ -1206,6 +1228,14 @@ mod tests {
             .expect("text");
         let first = passes[0]["start_utc"].as_str().expect("a start time");
         assert!(text.contains(first), "{text}");
+        assert!(
+            structured["limitations"]
+                .as_array()
+                .is_some_and(|lines| lines.iter().any(|line| line
+                    .as_str()
+                    .is_some_and(|line| line.contains("circular Keplerian orbit")))),
+            "{structured}"
+        );
         // The passes are in time order and do not overlap, which is what makes the list usable.
         assert!(
             passes[0]["start_seconds"].as_f64().expect("a number")
