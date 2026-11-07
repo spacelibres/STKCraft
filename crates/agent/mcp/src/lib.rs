@@ -430,6 +430,18 @@ impl Server {
                     "description": description,
                     "x-unit": "degrees",
                 }),
+                ParameterKind::DegreesPair => json!({
+                    "type": "array",
+                    "description": description,
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "number", "x-unit": "degrees"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                    },
+                    "minItems": 1,
+                    "maxItems": stkcraft_astro_engine::scenario::MAX_TARGET_VERTICES,
+                }),
             };
             properties.insert((*name).to_owned(), schema);
             if *needed {
@@ -1061,6 +1073,19 @@ mod tests {
             .find(|tool| tool["name"] == "access.compute")
             .expect("access.compute is a tool");
         assert_eq!(access["x-enabled"], false);
+        // Target corners are an array of degree pairs, not a text mini-language.
+        let target = tools
+            .iter()
+            .find(|tool| tool["name"] == "target.add")
+            .expect("target.add is a tool");
+        assert_eq!(
+            target["inputSchema"]["properties"]["points"]["type"],
+            "array"
+        );
+        assert_eq!(
+            target["inputSchema"]["properties"]["points"]["items"]["items"]["x-unit"],
+            "degrees"
+        );
     }
 
     #[test]
