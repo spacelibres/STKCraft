@@ -9,6 +9,51 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.99] — Expert packages and formula records are validated
+
+### Added
+
+- `share/experts/time-frames/`: the first authored expert package. It holds four source records,
+  eight formula records, ten evaluation cases and the limitations every answer must carry. The
+  records cover the leap-second offset, TT from TAI, TDB minus TT, UT1 with DUT1, IAU-82 GMST,
+  IAU-77 precession, IAU-80 nutation and TEME to ITRF.
+- `stkcraft-agent-knowledge::expert`: reads `sources.toml` and `formulas/*.toml` and checks source
+  references, implementation paths, test names, status rules and local SHA-256 digests.
+- `cargo xtask experts check`, the tenth step of `cargo xtask ci`. It reports
+  `1 package(s), 4 source(s), 8 formula(s), 7 verified, 1 implemented`.
+
+### Changed
+
+- The agent quality-gate description in `AGENTS.md` and the gate table in `README.md` list the
+  expert check.
+- `docs/design/experts.md` records the validator's exact failure conditions.
+- The expert plan is at Phase 2; Phase 3 (limitations in every answer) is next.
+
+### Fixed
+
+- A formula can no longer become a citation without its source, implementation and test. The
+  validator fails on a duplicate id, a missing source, a missing implementation, a missing
+  reference/tolerance, a missing test name, an empty symbol/assumption/limitation, or a digest
+  mismatch.
+- `time.ut1-from-utc` is deliberately `implemented`, not `verified`: the contract that missing
+  DUT1 is refused is tested, but there is no IERS EOP loader yet.
+
+### Not built yet
+
+- The Phase 3 answer contract (`CommandOutcome.limitations`, formula ids in answers).
+- The SGP4 and Access expert packages.
+- An IERS `finals2000A` loader, so `Propagator::new` still uses zero Earth-orientation parameters.
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask experts check`: `1 package(s), 4 source(s), 8 formula(s), 7 verified, 1 implemented`.
+- Three validator tests pass: a complete package validates; a missing test is refused; a missing
+  source is refused.
+- `cargo xtask ci` at 0.1.99 passes all ten steps.
+
 ## [0.1.98] — The release contract is written down
 
 ### Added

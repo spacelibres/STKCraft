@@ -1,0 +1,269 @@
+schema = 1
+expert = "time-frames"
+
+# One record per formula. The source is a citation, not a file the repository necessarily carries.
+# A `verified` record must name a reference value, a tolerance and an existing test.
+
+[[formula]]
+id = "time.tai-utc.leap"
+name = "TAI minus UTC from the leap-second table"
+domain = "time-frames"
+expression_latex = '(TAI - UTC)(t) = \mathrm{leap\ table}(t)'
+expression_unicode = "TAI − UTC = leap-second table offset at t"
+source = "iers-bulletin-c"
+source_locator = "Bulletin C; last announced leap second 2017-01-01 (37 s)"
+mathlib = "none"
+assumptions = [
+  "the UTC date is inside the published table",
+  "the offset changes at 00:00:00 UTC on the announced date",
+]
+validity = "1972-01-01 through the table's last announced leap second"
+status = "verified"
+limitations = [
+  "a date after the table is flagged, not given a guessed offset",
+]
+[[formula.symbols]]
+symbol = "TAI - UTC"
+unit = "s"
+dimension = "time offset"
+meaning = "the integer leap-second offset in force at UTC instant t"
+[formula.implementation]
+crate = "stkcraft-framework-time"
+path = "crates/framework/time/src/leaps.rs"
+function = "tai_minus_utc"
+[formula.verification]
+reference = "IERS Bulletin C / SOFA iauDat"
+case = "1999-01-01 = 32 s; 2017-01-01 = 37 s"
+tolerance = "exact integer seconds"
+test = "leaps::tests::modern_dates_use_the_published_offset"
+
+[[formula]]
+id = "time.tt-from-tai"
+name = "Terrestrial Time from TAI"
+domain = "time-frames"
+expression_latex = 'TT = TAI + 32.184\ \mathrm{s}'
+expression_unicode = "TT = TAI + 32.184 s"
+source = "sofa-erfa"
+source_locator = "IAU 1991 defining constant; implemented by TimeScale::to_scale"
+mathlib = "none"
+assumptions = ["the input instant is in TAI"]
+validity = "all instants the kernel's two-part Julian Date can represent"
+status = "verified"
+limitations = []
+[[formula.symbols]]
+symbol = "TT"
+unit = "s"
+dimension = "time"
+meaning = "Terrestrial Time"
+[[formula.symbols]]
+symbol = "TAI"
+unit = "s"
+dimension = "time"
+meaning = "International Atomic Time"
+[formula.implementation]
+crate = "stkcraft-framework-time"
+path = "crates/framework/time/src/epoch.rs"
+function = "to_scale"
+[formula.verification]
+reference = "SOFA iauTttai / IAU 1991"
+case = "TT - TAI = 32.184 s"
+tolerance = "exact defining constant"
+test = "epoch::tests::a_utc_epoch_round_trips_through_tai_and_back"
+
+[[formula]]
+id = "time.tdb-minus-tt"
+name = "TDB minus TT"
+domain = "time-frames"
+expression_latex = 'TDB - TT = 0.001657\ \sin g + \ldots'
+expression_unicode = "TDB − TT = 0.001657 sin g + …  seconds"
+source = "sofa-erfa"
+source_locator = "ERFA eraDtdb; IAU 2006 TDB definition"
+mathlib = "none"
+assumptions = ["TT is the argument; the periodic term is the Fairhead & Bretagnon series"]
+validity = "the range of the truncated ERFA series used by the kernel"
+status = "verified"
+limitations = ["the series is truncated; agreement with the full ERFA series is about 20 microseconds"]
+[[formula.symbols]]
+symbol = "TDB - TT"
+unit = "s"
+dimension = "time offset"
+meaning = "the periodic difference between Barycentric Dynamical Time and TT"
+[[formula.symbols]]
+symbol = "g"
+unit = "rad"
+dimension = "angle"
+meaning = "the Earth's mean anomaly in the TDB series"
+[formula.implementation]
+crate = "stkcraft-framework-time"
+path = "crates/framework/time/src/tdb.rs"
+function = "tdb_minus_tt"
+[formula.verification]
+reference = "ERFA eraDtdb"
+case = "eight epochs from 1985 to 2025"
+tolerance = "20 microseconds"
+test = "tdb::tests::the_truncated_series_matches_the_full_erfa_series_to_twenty_microseconds"
+
+[[formula]]
+id = "time.ut1-from-utc"
+name = "UT1 from UTC with DUT1"
+domain = "time-frames"
+expression_latex = 'UT1 = UTC + DUT1'
+expression_unicode = "UT1 = UTC + DUT1"
+source = "iers-2010"
+source_locator = "IERS Conventions (2010), chapter 8: UT1 - UTC is an IERS-published input"
+mathlib = "none"
+assumptions = ["DUT1 is supplied by the caller; it cannot be derived from UTC or TAI"]
+validity = "|DUT1| < 0.9 s, the range the leap-second system maintains"
+status = "implemented"
+limitations = [
+  "no IERS finals2000A loader exists, so the kernel cannot supply DUT1 itself",
+  "a UT1 request without DUT1 is refused, not defaulted to zero",
+]
+[[formula.symbols]]
+symbol = "DUT1"
+unit = "s"
+dimension = "time offset"
+meaning = "UT1 - UTC, published by IERS"
+[formula.implementation]
+crate = "stkcraft-framework-time"
+path = "crates/framework/time/src/epoch.rs"
+function = "to_scale"
+[formula.verification]
+reference = "IERS Conventions (2010), chapter 8"
+case = "UT1 without DUT1 must return an error"
+tolerance = "exact error contract, not a numeric tolerance"
+test = "epoch::tests::ut1_conversion_without_dut1_is_an_error_not_a_default"
+
+[[formula]]
+id = "frames.gmst.iau82"
+name = "Greenwich mean sidereal time"
+domain = "time-frames"
+expression_latex = '\theta = 67310.54841 + (876600\cdot 3600 + 8640184.812866)T + 0.093104T^2 - 6.2\times10^{-6}T^3'
+expression_unicode = "GMST polynomial in UT1 Julian centuries (IAU-82)"
+source = "vallado-2013"
+source_locator = "Vallado (2013), eq. 3-45; ERFA eraGmst82"
+mathlib = "none"
+assumptions = ["the argument is a UT1 Julian Date", "the result is the IAU-82 expression"]
+validity = "within the leap-second and UT1 range of the kernel"
+status = "verified"
+limitations = ["IAU-82 GMST, not the IAU 2006 Earth rotation angle"]
+[[formula.symbols]]
+symbol = "theta"
+unit = "rad"
+dimension = "angle"
+meaning = "Greenwich mean sidereal time, in [0, 2π)"
+[[formula.symbols]]
+symbol = "T"
+unit = "century"
+dimension = "time"
+meaning = "UT1 Julian centuries since J2000"
+[formula.implementation]
+crate = "stkcraft-astro-frames"
+path = "crates/astro/frames/src/sidereal.rs"
+function = "greenwich_mean"
+[formula.verification]
+reference = "Vallado AstroLib::gstime, Example 3-15"
+case = "JDUT1 = 2453101.827406783"
+tolerance = "1e-12 rad"
+test = "sidereal::tests::gmst_matches_the_published_reference"
+
+[[formula]]
+id = "frames.precession.iau77"
+name = "IAU-77 precession angles and matrix"
+domain = "time-frames"
+expression_latex = '\zeta, \theta, z = \mathrm{IAU\ 1977\ polynomials}'
+expression_unicode = "ζ, θ, z = IAU-77 precession polynomials"
+source = "vallado-2013"
+source_locator = "Vallado (2013), eq. 3-56 through 3-58; ERFA eraPrec76"
+mathlib = "none"
+assumptions = ["the argument is Julian centuries of TT since J2000", "the matrix is a proper rotation"]
+validity = "the range over which the IAU-77 polynomials are used by the kernel"
+status = "verified"
+limitations = ["IAU-77 precession, not IAU 2006"]
+[[formula.symbols]]
+symbol = "zeta, theta, z"
+unit = "rad"
+dimension = "angle"
+meaning = "the three IAU-77 precession angles"
+[formula.implementation]
+crate = "stkcraft-astro-frames"
+path = "crates/astro/frames/src/precession.rs"
+function = "iau_1977_angles"
+[formula.verification]
+reference = "Vallado AstroLib::precess with the 1980 option"
+case = "ttt = 0.0426236319, matrix printed at full precision"
+tolerance = "the test's 15-digit reference matrix"
+test = "precession::tests::the_matrix_matches_the_reference_to_fifteen_digits"
+
+[[formula]]
+id = "frames.nutation.iau80"
+name = "IAU-80 nutation"
+domain = "time-frames"
+expression_latex = '\Delta\psi, \Delta\epsilon = \sum_{i=1}^{106} (A_i \sin\phi_i + B_i \cos\phi_i)'
+expression_unicode = "Δψ, Δε = 106-term IAU-80 series"
+source = "sofa-erfa"
+source_locator = "ERFA eraNut80; the 106-term IAU-80 series"
+mathlib = "none"
+assumptions = ["the argument is Julian centuries of TT since J2000", "the 106 published terms are complete"]
+validity = "the IAU-80 series, the one SGP4/TEME is defined against"
+status = "verified"
+limitations = ["IAU-80 nutation, not IAU 2000A"]
+[[formula.symbols]]
+symbol = "Delta psi"
+unit = "rad"
+dimension = "angle"
+meaning = "nutation in longitude"
+[[formula.symbols]]
+symbol = "Delta epsilon"
+unit = "rad"
+dimension = "angle"
+meaning = "nutation in obliquity"
+[formula.implementation]
+crate = "stkcraft-astro-frames"
+path = "crates/astro/frames/src/nutation.rs"
+function = "iau_1980"
+[formula.verification]
+reference = "Vallado AstroLib::nutation and ERFA eraNut80"
+case = "TTT = 0.0426236319"
+tolerance = "1e-14 rad"
+test = "nutation::tests::the_series_reproduces_two_independent_implementations"
+
+[[formula]]
+id = "frames.teme-to-itrf"
+name = "TEME to ITRF"
+domain = "time-frames"
+expression_latex = 'r_{ITRF} = W R_3(\theta_G + \Delta\theta_{kin}) r_{TEME}'
+expression_unicode = "r_ITRF = W · R3(θ_GMST + Δθ_kin) · r_TEME"
+source = "vallado-2013"
+source_locator = "Vallado (2013), Algorithms 23 and 26, eq. 3-83 and 3-84"
+mathlib = "none"
+assumptions = [
+  "the TEME state is the SGP4 output",
+  "the caller supplies Earth orientation (UT1 - UTC and polar motion)",
+  "the velocity is transformed with -omega x r before polar motion",
+  "the kinematic equinox terms apply only after 1997-01-01 UT1",
+]
+validity = "the range of the EOP supplied by the caller; the kernel defaults them to zero"
+status = "verified"
+limitations = [
+  "the formula is verified with the worked example's EOP; Propagator::new supplies zero EOP until a loader exists",
+]
+[[formula.symbols]]
+symbol = "r_TEME"
+unit = "km"
+dimension = "length"
+meaning = "position in True Equator, Mean Equinox"
+[[formula.symbols]]
+symbol = "r_ITRF"
+unit = "km"
+dimension = "length"
+meaning = "position in the International Terrestrial Reference Frame"
+[formula.implementation]
+crate = "stkcraft-astro-frames"
+path = "crates/astro/frames/src/teme.rs"
+function = "teme_to_itrf"
+[formula.verification]
+reference = "Vallado AstroLib::teme_ecef, eqeterms = 1"
+case = "worked example at JDUT1 = 2453101.827406783"
+tolerance = "1e-6 km / km·s⁻¹"
+test = "teme::tests::teme_to_itrf_with_kinematic_terms_reproduces_the_worked_example"
