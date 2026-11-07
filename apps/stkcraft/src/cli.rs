@@ -1048,6 +1048,7 @@ fn planned_envelope(
                         stkcraft_agent_runtime::task::TaskStatus::NeedsInput => "needs_input",
                         stkcraft_agent_runtime::task::TaskStatus::Failed => "failed",
                         stkcraft_agent_runtime::task::TaskStatus::Blocked => "blocked",
+                        stkcraft_agent_runtime::task::TaskStatus::Cancelled => "cancelled",
                     },
                     outcome.summary
                 )

@@ -18,8 +18,9 @@ multi-agent scheduler. A deterministic `TaskGraph` executor now validates depend
 depth and runs commands in topological order (`stkcraft workflow`). `Planner` adds one model
 completion that proposes a graph from the command catalogue; `stkcraft plan` validates and executes
 it. `plan_corrected` allows exactly one correction after a validation failure; budgets, parallelism,
-cancellation and durable task state remain separate milestones. `ask` is planner-first and falls
-back to the tool loop only when the plan cannot produce a complete/unsupported envelope;
+cancellation and durable task state remain separate milestones; the executor does check
+`RequestControl` at task boundaries and marks the next task `cancelled`. `ask` is planner-first and
+falls back to the tool loop only when the plan cannot produce a complete/unsupported envelope;
 `ask --plan` refuses instead of falling back. Do not infer the availability of a scheduler from the
 existence of the MCP server.
 
