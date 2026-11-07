@@ -7,13 +7,16 @@
 # One entry per person. Only add an entry for yourself. Never add, edit or guess an entry for
 # anyone else -- if someone's username is missing, they can add their own.
 #
-# Fields:
-#   name  The display name to credit. Optional; without it the username is shown.
+# Fields: the key is the GitHub username the generator links a commit to.
+#   display_name     The public name to credit. Optional; without it GitHub's name is used.
+#   real_name        A private real name, for provenance only; never shown.
+#   consent_source   Where the person gave consent; optional and never shown.
+#   sync_github_name Follow the GitHub display name later; optional boolean.
 #
 # Example:
 #
 #   [people.octocat]
-#   name = "The Octocat"
+#   display_name = "The Octocat"
 
-[people.stone]
-name = "stone"
+[people.spacelibres]
+display_name = "stone"
