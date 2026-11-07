@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.123] — The fixed cases now include a real failure
+
+### Added
+
+- An `invalid-tle` case: the question gives deliberately malformed element lines, forbids correcting
+  them, and expects `status: failed`.
+- All four agent statuses now have a real case: `complete`, `unsupported`, `needs_input` and
+  `failed`.
+
+### Real result
+
+```text
+satellite.add("not a tle", "also not a tle")
+  → error: invalid TLE: line 1 must begin with `1`
+agent.report({"status":"failed","reason":"..."})
+PASS invalid-tle (failed)
+agent-eval: 5 case(s), all passed
+```
+
+The failure is a checked command error and an explicit `failed` report, not a model protocol error
+and not an invented result.
+
+### Not built yet
+
+- Expression-level dimension algebra and the offline formula-discovery pipeline.
+- Planner budgets, parallel execution, cancellation and durable state.
+- A product path that surfaces a failed tool result as a dedicated UI state.
+
+### Verification
+
+- Real DeepSeek run at 0.1.123: five of five cases passed, including the malformed-TLE failure.
+- `cargo xtask ci` at 0.1.123 passes all twelve steps.
+
 ## [0.1.122] — `ask` is planner-first, with the tool loop as fallback
 
 ### Changed
