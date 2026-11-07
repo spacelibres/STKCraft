@@ -141,7 +141,11 @@ Rules enforced by the validator, not by trust:
 - a local source whose SHA-256 does not match its path;
 - an empty symbol, assumption or limitation.
 
-The check is the tenth step of `cargo xtask ci`. It reads files only; it does not run the kernels.
+The check is a step of `cargo xtask ci`. It reads files only; it does not run the kernels.
+
+`cargo xtask experts eval` parses every `evaluations/*.jsonl` case, checks that the named formula
+exists in the same package with status `verified` or `implemented`, and fails when a formula has no
+case at all. A record no evaluation exercises is a claim nobody checks.
 
 ## Answer contract
 

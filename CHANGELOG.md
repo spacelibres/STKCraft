@@ -9,6 +9,36 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.104] — Expert evaluation cases are checked
+
+### Added
+
+- `stkcraft-agent-knowledge::expert::evaluate`: parses every `evaluations/*.jsonl`, checks that a
+  named formula exists in the same package with status `verified` or `implemented`, and fails when a
+  formula has no case at all.
+- `cargo xtask experts eval`, the eleventh step of `cargo xtask ci`.
+- Two cases were added so every formula is exercised: `time.ut1-from-utc` and
+  `access.window-sampling`.
+
+### Changed
+
+- `docs/design/experts.md`, `README.md` and `AGENTS.md` describe the evaluation step.
+
+### Not built yet
+
+- The evaluation runner checks structure and coverage, not a live model answer; the case's
+  `question` is data for a later role evaluation.
+- Runtime expert roles and tool allowlists.
+- Sub-daily EOP; the release workflow and platform packaging; command parameter descriptions;
+  `ui.json` as the app's configuration file; coverage, a browser shell, the extension store and
+  DOCX/XLSX; macOS is still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask experts eval`: `3 package(s), 27 case(s), 18 formula(s), 18 covered`.
+- Five validator/evaluator tests pass, including unknown-formula and missing-coverage refusals.
+- `cargo xtask ci` at 0.1.104 passes all eleven steps.
+
 ## [0.1.103] — Answers cite the formulas they used
 
 ### Added

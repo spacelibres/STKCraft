@@ -18,6 +18,7 @@ kurbo.workspace = true
 # Expert packages and their formula records are authored TOML; the validator reads them before any
 # expert can cite one.
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 toml = "0.8"
 

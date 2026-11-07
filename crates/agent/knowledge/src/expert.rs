@@ -12,6 +12,19 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+/// What one evaluation pass found.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct EvaluationReport {
+    /// Expert directories evaluated.
+    pub experts: usize,
+    /// Evaluation cases parsed.
+    pub cases: usize,
+    /// Formula records in those packages.
+    pub formulas: usize,
+    /// Formula records referenced by at least one case.
+    pub covered: usize,
+}
+
 /// What one validation pass found.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Validation {
@@ -63,6 +76,225 @@ pub fn validate(root: &Path) -> Result<Validation, Vec<String>> {
     } else {
         Err(errors)
     }
+}
+
+/// Validate every package and its evaluation cases.
+///
+/// A case names a formula id and a value, or a refusal and a citation. Every formula in a package
+/// must be named by at least one case: a record no evaluation exercises is a claim nobody checks.
+///
+/// # Errors
+///
+/// Returns the validation errors first, then the evaluation errors, each naming the file and case.
+pub fn evaluate(root: &Path) -> Result<EvaluationReport, Vec<String>> {
+    validate(root)?;
+    let directory = root.join("share/experts");
+    let mut errors = Vec::new();
+    let mut report = EvaluationReport::default();
+    let mut case_ids = BTreeSet::new();
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
+        Err(error) => {
+            return Err(vec![format!(
+                "could not read {}: {error}",
+                directory.display()
+            )]);
+        }
+    };
+    let mut expert_directories: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    expert_directories.sort();
+    for expert in &expert_directories {
+        report.experts += 1;
+        let Some(name) = expert.file_name().and_then(std::ffi::OsStr::to_str) else {
+            errors.push(format!(
+                "{}: expert directory has no UTF-8 name",
+                expert.display()
+            ));
+            continue;
+        };
+        let formulas = match load_formula_statuses(expert) {
+            Ok(formulas) => formulas,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+        report.formulas += formulas.len();
+        let evaluations = expert.join("evaluations");
+        let entries = match fs::read_dir(&evaluations) {
+            Ok(entries) => entries,
+            Err(error) => {
+                errors.push(format!("could not read {}: {error}", evaluations.display()));
+                continue;
+            }
+        };
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "jsonl")
+            })
+            .collect();
+        files.sort();
+        let mut referenced = BTreeSet::new();
+        for file in files {
+            let text = match fs::read_to_string(&file) {
+                Ok(text) => text,
+                Err(error) => {
+                    errors.push(format!("could not read {}: {error}", file.display()));
+                    continue;
+                }
+            };
+            for (line_number, line) in text.lines().enumerate() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let case: serde_json::Value = match serde_json::from_str(line) {
+                    Ok(case) => case,
+                    Err(error) => {
+                        errors.push(format!(
+                            "{}:{}: not a JSON object: {error}",
+                            file.display(),
+                            line_number + 1
+                        ));
+                        continue;
+                    }
+                };
+                let id = case.get("id").and_then(serde_json::Value::as_str);
+                let Some(id) = id.filter(|id| !id.trim().is_empty()) else {
+                    errors.push(format!(
+                        "{}:{}: case has no id",
+                        file.display(),
+                        line_number + 1
+                    ));
+                    continue;
+                };
+                if !case_ids.insert(id.to_owned()) {
+                    errors.push(format!("duplicate evaluation id `{id}`"));
+                }
+                let question = case
+                    .get("question")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if question.trim().is_empty() {
+                    errors.push(format!("{}: case `{id}` has no question", file.display()));
+                }
+                let expect = case.get("expect").and_then(serde_json::Value::as_object);
+                let Some(expect) = expect else {
+                    errors.push(format!(
+                        "{}: case `{id}` has no expect object",
+                        file.display()
+                    ));
+                    continue;
+                };
+                let citation = expect
+                    .get("citation")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                if citation.trim().is_empty() {
+                    errors.push(format!("{}: case `{id}` has no citation", file.display()));
+                }
+                let formula = expect
+                    .get("formula")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|formula| !formula.trim().is_empty());
+                let refusal = expect
+                    .get("refusal")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|refusal| !refusal.trim().is_empty());
+                match (formula, refusal) {
+                    (Some(formula), None) => {
+                        let Some(status) = formulas.get(formula) else {
+                            errors.push(format!(
+                                "{}: case `{id}` names formula `{formula}`, which is not in `{name}`",
+                                file.display()
+                            ));
+                            report.cases += 1;
+                            continue;
+                        };
+                        if !matches!(status.as_str(), "verified" | "implemented") {
+                            errors.push(format!(
+                                "{}: case `{id}` names formula `{formula}` with status `{status}`; \
+                                 only verified or implemented formulas may be cited",
+                                file.display()
+                            ));
+                        }
+                        let value = expect
+                            .get("value")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default();
+                        if value.trim().is_empty() {
+                            errors.push(format!(
+                                "{}: case `{id}` names a formula but has no value",
+                                file.display()
+                            ));
+                        }
+                        referenced.insert(formula.to_owned());
+                    }
+                    (None, Some(refusal)) => {
+                        if refusal.trim().is_empty() {
+                            errors.push(format!(
+                                "{}: case `{id}` has an empty refusal",
+                                file.display()
+                            ));
+                        }
+                    }
+                    (Some(_), Some(_)) => errors.push(format!(
+                        "{}: case `{id}` names both a formula and a refusal",
+                        file.display()
+                    )),
+                    (None, None) => errors.push(format!(
+                        "{}: case `{id}` names neither a formula nor a refusal",
+                        file.display()
+                    )),
+                }
+                report.cases += 1;
+            }
+        }
+        for formula in formulas.keys() {
+            if !referenced.contains(formula) {
+                errors.push(format!(
+                    "{}: formula `{formula}` has no evaluation case",
+                    expert.display()
+                ));
+            }
+        }
+        report.covered += referenced.len();
+    }
+    if errors.is_empty() {
+        Ok(report)
+    } else {
+        Err(errors)
+    }
+}
+
+fn load_formula_statuses(
+    expert: &Path,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let formulas_dir = expert.join("formulas");
+    let entries = fs::read_dir(&formulas_dir)
+        .map_err(|error| format!("could not read {}: {error}", formulas_dir.display()))?;
+    let mut statuses = std::collections::BTreeMap::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|extension| extension != "toml") {
+            continue;
+        }
+        let text = fs::read_to_string(&path)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        let file: FormulaFile =
+            toml::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+        for formula in file.formula {
+            statuses.insert(formula.id, formula.status);
+        }
+    }
+    Ok(statuses)
 }
 
 fn validate_expert(
@@ -544,6 +776,18 @@ test = "{test}"
         .expect("formula");
     }
 
+    fn write_evaluation(root: &Path, formula: &str) {
+        let directory = root.join("share/experts/test/evaluations");
+        fs::create_dir_all(&directory).expect("evaluation directory");
+        fs::write(
+            directory.join("test.jsonl"),
+            format!(
+                "{{\"id\":\"e1\",\"question\":\"q\",\"expect\":{{\"formula\":\"{formula}\",\"value\":\"v\",\"citation\":\"c\"}}}}\n"
+            ),
+        )
+        .expect("evaluation");
+    }
+
     #[test]
     fn a_complete_package_validates() {
         let root = fixture("ok");
@@ -553,6 +797,47 @@ test = "{test}"
         assert_eq!(report.sources, 1);
         assert_eq!(report.formulas, 1);
         assert_eq!(report.verified, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_complete_package_evaluates() {
+        let root = fixture("eval-ok");
+        write_formula(&root, "proves_it");
+        write_evaluation(&root, "test.a");
+        let report = evaluate(&root).expect("valid evaluation");
+        assert_eq!(report.experts, 1);
+        assert_eq!(report.cases, 1);
+        assert_eq!(report.formulas, 1);
+        assert_eq!(report.covered, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_formula_without_an_evaluation_is_refused() {
+        let root = fixture("eval-missing");
+        write_formula(&root, "proves_it");
+        fs::create_dir_all(root.join("share/experts/test/evaluations")).expect("directory");
+        let errors = evaluate(&root).expect_err("missing evaluation must fail");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("no evaluation case")),
+            "{errors:?}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_evaluation_naming_an_unknown_formula_is_refused() {
+        let root = fixture("eval-unknown");
+        write_formula(&root, "proves_it");
+        write_evaluation(&root, "test.missing");
+        let errors = evaluate(&root).expect_err("unknown formula must fail");
+        assert!(
+            errors.iter().any(|error| error.contains("which is not in")),
+            "{errors:?}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 

@@ -5,3 +5,4 @@
 {"id":"access-005","question":"A 20 s pass falls entirely between two 60 s samples. Is it found?","expect":{"refusal":"No. The sampler can miss a window that opens and closes between samples; the step must be stated.","citation":"access window sampling"}}
 {"id":"access-006","question":"What is the link margin for this pass?","expect":{"refusal":"Out of scope. Visibility is geometric, not a link budget.","citation":"access-geometry non-goals"}}
 {"id":"access-007","question":"What is the percentage of the polygon covered?","expect":{"refusal":"Out of scope. Target windows are the union of vertex windows, not polygon-interior coverage.","citation":"access target model"}}
+{"id":"access-008","question":"How is a visibility boundary located between samples?","expect":{"formula":"access.window-sampling","value":"sample the step, then bisect the sign change","citation":"access window sampling"}}
