@@ -17,8 +17,9 @@ The runtime currently runs one model/tool loop. Its ability to issue several too
 multi-agent scheduler. A deterministic `TaskGraph` executor now validates dependencies, cycles and
 depth and runs commands in topological order (`stkcraft workflow`). `Planner` adds one model
 completion that proposes a graph from the command catalogue; `stkcraft plan` validates and executes
-it. Planner correction after an invalid graph, budgets, parallelism, cancellation and durable task
-state remain separate milestones, and `ask` still uses the tool loop. Do not infer their
+it. `plan_corrected` allows exactly one correction after a validation failure; budgets, parallelism,
+cancellation and durable task state remain separate milestones, and `ask` still uses the tool
+loop. Do not infer their
 availability from the existence of the MCP server.
 
 ## One role, one contract

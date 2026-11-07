@@ -349,6 +349,72 @@ impl<M: crate::ChatModel> Planner<M> {
             .ok_or_else(|| "the planner did not return a JSON object".to_owned())?;
         serde_json::from_str(json).map_err(|error| format!("the plan is not a task graph: {error}"))
     }
+
+    /// Ask for a graph, validate it, and allow exactly one correction.
+    ///
+    /// The second request carries the model's first answer and the validation errors. A second
+    /// failure is returned; this method never loops beyond two model requests.
+    ///
+    /// # Errors
+    ///
+    /// Returns the model failure, or both validation errors when the corrected graph is still
+    /// invalid.
+    pub fn plan_corrected(
+        &self,
+        question: &str,
+        tools: &[Value],
+        registry: &Registry,
+    ) -> Result<TaskGraph, String> {
+        let system = "You are STKCraft's planner. Return ONE JSON object and nothing else, in the \
+                      shape {\"tasks\":[{\"id\":\"...\",\"command\":\"...\",\"arguments\":{...},\
+                      \"depends-on\":[\"...\"]}]}. Use only the commands in the catalogue. Never \
+                      estimate a number. Do not add prose, markdown fences or explanations.";
+        let catalogue = serde_json::to_string(tools)
+            .map_err(|error| format!("could not encode the command catalogue: {error}"))?;
+        let mut messages = vec![
+            crate::Message::System(system.to_owned()),
+            crate::Message::User(format!(
+                "Question: {question}\nCommand catalogue: {catalogue}"
+            )),
+        ];
+        let mut last_errors = Vec::new();
+        for attempt in 0..2 {
+            let turn = self
+                .model
+                .complete(&messages, &[])
+                .map_err(|error| format!("the planner model failed: {error}"))?;
+            let parsed = json_object(&turn.text)
+                .ok_or_else(|| "the planner did not return a JSON object".to_owned())
+                .and_then(|json| {
+                    serde_json::from_str::<TaskGraph>(json)
+                        .map_err(|error| format!("the plan is not a task graph: {error}"))
+                });
+            match parsed {
+                Ok(graph) => match graph.validate(registry) {
+                    Ok(_) => return Ok(graph),
+                    Err(errors) => last_errors = errors,
+                },
+                Err(error) => last_errors = vec![error],
+            }
+            if attempt == 0 {
+                messages.push(crate::Message::Assistant {
+                    text: turn.text,
+                    calls: Vec::new(),
+                    reasoning_content: None,
+                    usage: None,
+                    finish_reason: None,
+                });
+                messages.push(crate::Message::User(format!(
+                    "The plan was rejected: {}. Return one corrected JSON graph.",
+                    last_errors.join("; ")
+                )));
+            }
+        }
+        Err(format!(
+            "the planner did not produce a valid graph: {}",
+            last_errors.join("; ")
+        ))
+    }
 }
 
 fn json_object(text: &str) -> Option<&str> {
@@ -420,7 +486,19 @@ mod tests {
         }
     }
 
-    struct PlanModel(String);
+    struct PlanModel(std::cell::RefCell<Vec<String>>);
+
+    impl PlanModel {
+        fn once(text: &str) -> Self {
+            Self(std::cell::RefCell::new(vec![text.to_owned()]))
+        }
+
+        fn queue(texts: &[&str]) -> Self {
+            Self(std::cell::RefCell::new(
+                texts.iter().map(|text| (*text).to_owned()).collect(),
+            ))
+        }
+    }
 
     impl crate::ChatModel for PlanModel {
         fn complete(
@@ -428,8 +506,12 @@ mod tests {
             _messages: &[crate::Message],
             _tools: &[Value],
         ) -> Result<crate::Turn, String> {
+            let mut turns = self.0.borrow_mut();
+            if turns.is_empty() {
+                return Err("the plan script ran out".to_owned());
+            }
             Ok(crate::Turn {
-                text: self.0.clone(),
+                text: turns.remove(0),
                 ..crate::Turn::default()
             })
         }
@@ -437,14 +519,38 @@ mod tests {
 
     #[test]
     fn the_planner_extracts_a_graph_from_a_json_answer() {
-        let model = PlanModel(
+        let model = PlanModel::once(
             "```json\n{\"tasks\":[{\"id\":\"rename\",\"command\":\"scenario.rename\",\
-             \"arguments\":{\"name\":\"Planned\"}}]}\n```"
-                .to_owned(),
+             \"arguments\":{\"name\":\"Planned\"}}]}\n```",
         );
         let graph = Planner::new(model).plan("rename", &[]).expect("a graph");
         assert_eq!(graph.tasks.len(), 1);
         assert_eq!(graph.tasks[0].id, "rename");
+    }
+
+    #[test]
+    fn the_planner_corrects_one_invalid_graph() {
+        let model = PlanModel::queue(&[
+            "{\"tasks\":[{\"id\":\"bad\",\"command\":\"not.a.command\"}]}",
+            "{\"tasks\":[{\"id\":\"rename\",\"command\":\"scenario.rename\",\
+             \"arguments\":{\"name\":\"Fixed\"}}]}",
+        ]);
+        let graph = Planner::new(model)
+            .plan_corrected("rename", &[], &registry())
+            .expect("a corrected graph");
+        assert_eq!(graph.tasks[0].id, "rename");
+    }
+
+    #[test]
+    fn a_second_invalid_graph_is_refused() {
+        let model = PlanModel::queue(&[
+            "{\"tasks\":[{\"id\":\"bad\",\"command\":\"not.a.command\"}]}",
+            "{\"tasks\":[{\"id\":\"bad\",\"command\":\"not.a.command\"}]}",
+        ]);
+        let error = Planner::new(model)
+            .plan_corrected("rename", &[], &registry())
+            .expect_err("still invalid");
+        assert!(error.contains("did not produce a valid graph"), "{error}");
     }
 
     #[test]
