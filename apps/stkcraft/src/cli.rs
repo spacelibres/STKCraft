@@ -1528,7 +1528,7 @@ fn plan(request: &PlanRequest) -> Result<(), String> {
         })
         .collect();
     let planner = stkcraft_agent_runtime::task::Planner::new(model);
-    let graph = planner.plan(&request.question, &tools)?;
+    let graph = planner.plan_corrected(&request.question, &tools, &Registry::builtin())?;
     let graph_text = serde_json::to_string_pretty(&graph)
         .map_err(|error| format!("could not print the plan: {error}"))?;
     eprintln!("plan:\n{graph_text}");

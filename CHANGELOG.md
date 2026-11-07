@@ -9,6 +9,35 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.118] — The planner gets exactly one correction
+
+### Added
+
+- `Planner::plan_corrected`: validate the first graph; if it is invalid, send the model its own
+  answer and the validation errors once, then validate the second graph. Never more than two model
+  requests.
+- `stkcraft plan` uses the corrected path, so an unknown command or a dependency mistake in the
+  first graph gets one chance to be fixed.
+
+### Changed
+
+- The correction is bounded and explicit. A second invalid graph is an error that lists both sets of
+  validation errors; the planner does not loop, retry on transport failures, or execute a partially
+  valid graph.
+
+### Not built yet
+
+- Budgeted multi-correction planning, parallel task execution, cancellation propagation and durable
+  task state.
+- Expression-level dimension algebra and formula decomposition.
+- `ask` still uses the tool loop; `plan` is a separate command.
+
+### Verification
+
+- Planner tests: a fenced JSON answer becomes a graph; an invalid first graph is corrected once; a
+  second invalid graph is refused.
+- `cargo xtask ci` at 0.1.118 passes all twelve steps.
+
 ## [0.1.117] — A formula's unit and dimension must agree
 
 ### Added
