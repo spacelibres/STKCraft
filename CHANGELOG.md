@@ -9,6 +9,30 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.98] — The release contract is written down
+
+### Added
+
+- [`docs/guides/release.md`](docs/guides/release.md) records the tag policy, the shared
+  `release.yml` contract, every path the app's packaging must provide, the signing secrets, and the
+  honest current state: CI and house rules are wired, packaging and the release workflow are not.
+  A reader can see what a real release needs without reverse-engineering a sibling repository.
+
+### Changed
+
+- The documentation index links the guide.
+
+### Not built yet
+
+- The release workflow and platform packaging (the guide is the contract they must satisfy);
+  command parameter descriptions; `ui.json` as the app's configuration file; coverage, a browser
+  shell, the extension store and DOCX/XLSX; macOS is still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask ci` at 0.1.98 (fmt, clippy, tests, assets, i18n, api-docs, layers, wasm, version,
+  lockfile).
+
 ## [0.1.97] — The gate keeps its temporary files inside `target/`
 
 ### Changed
