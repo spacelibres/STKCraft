@@ -9,6 +9,32 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.125] — A task graph has a task and failure budget
+
+### Added
+
+- `TaskBudget { max_tasks, max_failures }`, defaulting to 64 tasks and 3 non-completed outcomes.
+  `TaskBudget::new` rejects zero or out-of-range values.
+- `TaskGraph::execute_with_budget`. Before each task, the executor checks the task count and the
+  non-completed count; the next task becomes `budget_exceeded` and nothing else runs.
+- `TaskStatus::BudgetExceeded` and its CLI trace label.
+- Tests: a failure budget stops an independent second task and preserves the scenario; zero budgets
+  are refused.
+
+### Changed
+
+- `execute` and `execute_controlled` use the default budget, so existing callers are unchanged.
+
+### Not built yet
+
+- Time and token/cost budgets; parallel branches; durable task state.
+- Expression-level dimension algebra and offline formula discovery.
+
+### Verification
+
+- Two budget tests: failure budget stops the next independent task; zero budget is refused.
+- `cargo xtask ci` at 0.1.125 passes all twelve steps.
+
 ## [0.1.124] — A task graph stops at the next task boundary when cancelled
 
 ### Added
