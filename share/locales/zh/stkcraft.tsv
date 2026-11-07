@@ -48,3 +48,28 @@
 @plural	{n} answer in this conversation|{n} answers in this conversation	此对话中有 {n} 个回答
 @plural	{n} satellite|{n} satellites	{n} 颗卫星
 @plural	{n} station|{n} stations	{n} 个地面站
+	Access failed: {error}	访问失败：{error}
+	Add Ground Station	添加地面站
+	Add Satellite	添加卫星
+	Add Target	添加目标
+	Compute Access	计算访问
+	Compute Target Access	计算目标访问
+	Planet-Centred Access	行星中心访问
+	Remove Ground Station	移除地面站
+	Remove Satellite	移除卫星
+	Rename Scenario	重命名场景
+	Run	运行
+	Set Station Sensor	设置地面站传感器
+	Set Timeline Duration	设置时间线时长
+	The assistant could not start.	助手无法启动。
+	The assistant request was cancelled.	助手请求已取消。
+	The assistant stopped without an answer.	助手已停止，未给出回答。
+	The assistant stopped; ask again to restart it.	助手已停止；请再次提问以重新启动。
+	The scenario changed while the assistant was working. Its result was not applied. Ask again using the current scenario.	助手工作期间场景已更改，其结果未应用。请使用当前场景重新提问。
+	Type a question first.	请先输入问题。
+	satellite "{name}" at {instant}: {error}	卫星“{name}”在 {instant}：{error}
+	satellite "{name}": {error}	卫星“{name}”：{error}
+	station "{name}": {error}	地面站“{name}”：{error}
+	{satellites} satellite marker(s), {stations} station(s), {tracks} track(s)	{satellites} 个卫星标记，{stations} 个地面站，{tracks} 条轨迹
+	{satellite} over {station}: {passes}, {total}	卫星 {satellite} 过境 {station}：{passes}，{total}
+@plural	{n} pass over {pairs} pair|{n} passes over {pairs} pairs	{n} 次过境，覆盖 {pairs} 对

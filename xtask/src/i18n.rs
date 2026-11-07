@@ -257,8 +257,6 @@ fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), 
 
 /// One line per language: how many source strings it lacks, and the first few of them.
 fn coverage(sources: &BTreeMap<Source, usize>, catalogs: &[Loaded]) -> String {
-    /// How many missing strings to name before summarising the rest.
-    const LISTED: usize = 12;
     let reference: BTreeSet<(String, String)> = sources.keys().map(Source::key).collect();
     let translated: BTreeSet<(String, String)> = catalogs
         .iter()
@@ -304,7 +302,7 @@ fn coverage(sources: &BTreeMap<Source, usize>, catalogs: &[Loaded]) -> String {
             sources.len(),
             missing = missing.len()
         );
-        for source in missing.iter().take(LISTED) {
+        for source in &missing {
             let _ = writeln!(
                 out,
                 "     {}{}",
@@ -315,9 +313,6 @@ fn coverage(sources: &BTreeMap<Source, usize>, catalogs: &[Loaded]) -> String {
                 },
                 source.text
             );
-        }
-        if missing.len() > LISTED {
-            let _ = writeln!(out, "     … and {} more", missing.len() - LISTED);
         }
     }
     let _ = translated;
