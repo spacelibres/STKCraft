@@ -4,10 +4,10 @@ The rule book. `AGENTS.md` says how to work in this repository; this document sa
 must be, in the areas where a decision made once is expensive to unmake. Every rule here is either
 enforced by a task in `cargo xtask ci` or marked as unbuilt, and a rule that is neither is a wish.
 
-STKCraft is one of the ArtCraft Craft apps. Where the family has a standard, this project follows it
-rather than inventing a local variant, and the section says which family repository owns the
-standard. The family's own documents are the authority; this one records what conformance means
-here.
+STKCraft is an independent project applying to join the ArtCraft Craft family. While the
+application is pending, it follows the family's standards where they apply rather than inventing a
+local variant, and each section says which family repository owns the standard. The family's own
+documents are the authority; this one records what conformance means here.
 
 | Area | Standard | Enforced by | State |
 |---|---|---|---|
@@ -182,14 +182,14 @@ a shared on-disk store, themes carrying no code, and plug-ins whose v1 permissio
 
 ## 6. Family interop and licensing
 
-**To be one of the Craft apps is to be interchangeable with them**, so the interchange points are
-fixed from the start rather than retrofitted.
+**Joining the Craft family means being interchangeable with its apps**, so the interchange points
+are fixed from the start rather than retrofitted.
 
 - **Licence: `MIT OR Apache-2.0`**, the family's choice, with **both licence texts in the repository**
   (`LICENSE-MIT`, `LICENSE-APACHE`) and `NOTICE` naming them. The MIT text is the standard one, the
-  copyright holder is the ArtCraft Team and the contributors, and a dependency whose licence is not
-  compatible with that pair does not enter the build. Brand assets are not covered by it — the ArtCraft
-  name and marks belong to the family.
+  copyright holder is the STKCraft contributors, and a dependency whose licence is not
+  compatible with that pair does not enter the build. Brand assets are not covered by it; the
+  ArtCraft name and marks belong to the ArtCraft Team.
 - **Translations interchange with `storytold/craft-i18n`**: the catalog format is theirs (§1), so a
   translation written here can be contributed there and a catalog from there works here.
 - **Extensions interchange with `storytold/craft-extensions`**: the package contract is theirs (§3),

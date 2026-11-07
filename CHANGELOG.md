@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.94] — The project no longer claims ArtCraft membership
+
+### Changed
+
+- The README tagline no longer says "By the ArtCraft team." It now says the project is an
+  independent Craft-style project applying to join the ArtCraft family.
+- Copyright holders in `README.md`, `NOTICE`, `LICENSE-MIT` and `docs/standards.md` are the
+  STKCraft contributors, not the ArtCraft Team. `ATTRIBUTION.md` credits the albatross artwork to
+  the STKCraft project.
+- `AGENTS.md` and `docs/standards.md` describe the relationship as an application to join the
+  family, not as existing membership. The family's standards are still followed, which is what the
+  application is for; the ArtCraft name and marks remain the ArtCraft Team's.
+- The README logo alt text no longer names an "ArtCraft-blue" tile.
+
+### Fixed
+
+- The metadata and legal notices claimed a relationship the project does not yet have. An applicant
+  must not present itself as an accepted member, and a copyright line is not the place to anticipate
+  acceptance.
+
+### Not built yet
+
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask ci` at 0.1.94 (fmt, clippy, tests, assets, i18n, api-docs, layers, wasm, version,
+  lockfile).
+- A text search confirms no remaining "By the ArtCraft team", "ArtCraft Team and the STKCraft
+  contributors", or "one of the ArtCraft Craft apps" claim.
+
 ## [0.1.93] — Parameter kinds are named consistently
 
 ### Changed

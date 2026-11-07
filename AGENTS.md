@@ -60,9 +60,10 @@ timeline, and answering "when can this see that, and for how long" — and aims 
 more open and fully agent-drivable. It runs natively on macOS, Windows, Linux and FreeBSD, and its
 analysis core compiles to WebAssembly; a browser shell is not shipped yet.
 
-It is one of the ArtCraft Craft apps and follows the same conventions as its siblings:
-`../gridcraft` (spreadsheet), `../cadcraft` (CAD), `../texturecraft` (3D texture painting),
-`../designcraft` (page layout), `../photocraft` (image editing).
+It is an independent project applying to join the ArtCraft Craft family, and follows the same
+conventions as the family's apps: `../gridcraft` (spreadsheet), `../cadcraft` (CAD),
+`../texturecraft` (3D texture painting), `../designcraft` (page layout), `../photocraft` (image
+editing).
 
 ## Start every session here
 
