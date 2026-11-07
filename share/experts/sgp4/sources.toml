@@ -1,0 +1,29 @@
+schema = 1
+expert = "sgp4"
+
+[[source]]
+id = "aiaa-2006-6753"
+title = "Revisiting Spacetrack Report #3"
+edition = "AIAA 2006-6753"
+url = "https://celestrak.org/publications/AIAA/2006-6753/"
+path = ""
+sha256 = ""
+adopted_by = ["AIAA", "CelesTrak"]
+
+[[source]]
+id = "vallado-2013"
+title = "Fundamentals of Astrodynamics and Applications"
+edition = "4th edition, 2013"
+url = "https://celestrak.org/books/"
+path = ""
+sha256 = ""
+adopted_by = ["Vallado", "CelesTrak"]
+
+[[source]]
+id = "celestrak-tle"
+title = "CelesTrak two-line element set format"
+edition = "current format description"
+url = "https://celestrak.org/NORAD/documentation/tle-fmt.php"
+path = ""
+sha256 = ""
+adopted_by = ["CelesTrak"]

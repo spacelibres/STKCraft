@@ -1,0 +1,29 @@
+schema = 1
+expert = "access-geometry"
+
+[[source]]
+id = "wgs84"
+title = "Department of Defense World Geodetic System 1984"
+edition = "NIMA TR8350.2, 3rd edition, 2000"
+url = "https://earth-info.nga.mil/"
+path = ""
+sha256 = ""
+adopted_by = ["NGA", "US Department of Defense"]
+
+[[source]]
+id = "vallado-2013"
+title = "Fundamentals of Astrodynamics and Applications"
+edition = "4th edition, 2013"
+url = "https://celestrak.org/books/"
+path = ""
+sha256 = ""
+adopted_by = ["Vallado", "CelesTrak"]
+
+[[source]]
+id = "iers-2010"
+title = "IERS Conventions (2010)"
+edition = "IERS Technical Note 36"
+url = "https://www.iers.org/IERS/EN/Publications/TechnicalNotes/tn36.html"
+path = ""
+sha256 = ""
+adopted_by = ["IERS"]

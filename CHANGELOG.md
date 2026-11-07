@@ -9,6 +9,39 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.101] — SGP4 and Access experts join the foundation
+
+### Added
+
+- `share/experts/sgp4/`: three sources, five formula records and eight evaluation cases. The
+  records cover the TLE checksum and epoch window, the un-Kozai mean motion, the SGP4 Kepler
+  iteration and the deep-space lunar-solar/resonance branch. They point at the AIAA 2006-6753
+  verification vectors.
+- `share/experts/access-geometry/`: three sources, five formula records and seven evaluation cases
+  for WGS84 geodetic positions, topocentric look angles, occultation, the sensor cone and sampled
+  windows.
+- The formula validator accepts an optional `verification.test_path` for a test that lives in a
+  separate test file, which is how the SGP4 vector tests are organised.
+
+### Changed
+
+- `cargo xtask experts check` now reports three packages, ten sources, eighteen formulas,
+  sixteen verified and two implemented.
+- Phase 4 of the expert plan is complete.
+
+### Not built yet
+
+- An IERS `finals2000A` loader; `Propagator::new` still uses zero Earth-orientation parameters.
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask experts check`: `3 package(s), 10 source(s), 18 formula(s), 16 verified, 2
+  implemented`.
+- `cargo xtask ci` at 0.1.101 passes all ten steps.
+
 ## [0.1.100] — Access answers carry their limitations
 
 ### Added

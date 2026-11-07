@@ -1,0 +1,157 @@
+schema = 1
+expert = "sgp4"
+
+# The SGP4 records point at the implementation and at the published verification vector that
+# proves it. The expressions are the equations the code follows; the tests are the evidence.
+
+[[formula]]
+id = "sgp4.tle.checksum"
+name = "Two-line element checksum"
+domain = "sgp4"
+expression_latex = '\mathrm{checksum} = \left(\sum \mathrm{digits} + \#(-)\right) \bmod 10'
+expression_unicode = "checksum = (sum of digits + count of '-') mod 10"
+source = "celestrak-tle"
+source_locator = "line 1 and line 2, column 69"
+mathlib = "none"
+assumptions = ["the line is exactly 69 characters before the checksum", "a '-' contributes one, a '.' contributes zero"]
+validity = "the TLE format described by CelesTrak"
+status = "verified"
+limitations = ["a wrong checksum is a refusal, not something to repair"]
+[[formula.symbols]]
+symbol = "checksum"
+unit = "1"
+dimension = "integer"
+meaning = "the final digit of a TLE line"
+[formula.implementation]
+crate = "stkcraft-astro-sgp4"
+path = "crates/astro/sgp4/src/tle.rs"
+function = "checksum"
+[formula.verification]
+reference = "CelesTrak TLE format"
+case = "the published verification element set"
+tolerance = "exact digit"
+test = "tle::tests::the_checksum_matches_the_line"
+
+[[formula]]
+id = "sgp4.tle.epoch-window"
+name = "Two-digit TLE epoch year window"
+domain = "sgp4"
+expression_latex = 'year = \begin{cases}1900 + yy & yy \ge 57\\ 2000 + yy & yy < 57\end{cases}'
+expression_unicode = "year = 1900 + yy if yy >= 57, else 2000 + yy"
+source = "celestrak-tle"
+source_locator = "TLE epoch field, two-digit year convention"
+mathlib = "none"
+assumptions = ["the element set uses the published two-digit year window"]
+validity = "the window the TLE format defines"
+status = "verified"
+limitations = ["a date outside the window needs the full epoch, not a reinterpreted TLE"]
+[[formula.symbols]]
+symbol = "yy"
+unit = "1"
+dimension = "year"
+meaning = "the two-digit year field"
+[formula.implementation]
+crate = "stkcraft-astro-sgp4"
+path = "crates/astro/sgp4/src/tle.rs"
+function = "resolve_epoch_year"
+[formula.verification]
+reference = "CelesTrak TLE format"
+case = "57 -> 1957; 56 -> 2056"
+tolerance = "exact year"
+test = "tle::tests::epoch_year_uses_the_published_window"
+
+[[formula]]
+id = "sgp4.unkozai"
+name = "Un-Kozai mean motion"
+domain = "sgp4"
+expression_latex = 'n = n_0 / (1 + \delta),\quad \delta = d_1/a_{del}^2'
+expression_unicode = "n = n0 / (1 + δ), δ = d1 / adel²"
+source = "aiaa-2006-6753"
+source_locator = "AIAA 2006-6753, initl"
+mathlib = "none"
+assumptions = ["0 <= e < 1", "the WGS-72 gravity constants the SGP4 reference uses"]
+validity = "the SGP4 initialisation, before propagation"
+status = "verified"
+limitations = ["the one-step iteration is the published initl form, not an exact conversion"]
+[[formula.symbols]]
+symbol = "n0"
+unit = "rad/min"
+dimension = "angular rate"
+meaning = "the Kozai mean motion from the TLE"
+[[formula.symbols]]
+symbol = "n"
+unit = "rad/min"
+dimension = "angular rate"
+meaning = "the un-Kozai mean motion used by SGP4"
+[formula.implementation]
+crate = "stkcraft-astro-sgp4"
+path = "crates/astro/sgp4/src/elements.rs"
+function = "unkozai_mean_motion"
+[formula.verification]
+reference = "AIAA 2006-6753 initl"
+case = "the published verification elements"
+tolerance = "relative 1e-3 from the stated Kozai mean motion"
+test = "elements::tests::the_unkozai_mean_motion_differs_from_the_stated_one"
+
+[[formula]]
+id = "sgp4.kepler"
+name = "Kepler iteration in SGP4"
+domain = "sgp4"
+expression_latex = 'E_{k+1} = E_k + \frac{u - a_{ynl}\cos E_k + a_{xnl}\sin E_k - E_k}{1 - a_{xnl}\cos E_k - a_{ynl}\sin E_k}'
+expression_unicode = "E_{k+1} = E_k + (u − aynl cos E_k + axnl sin E_k − E_k) / (1 − axnl cos E_k − aynl sin E_k)"
+source = "aiaa-2006-6753"
+source_locator = "AIAA 2006-6753, sgp4 Kepler iteration"
+mathlib = "none"
+assumptions = ["the long-period terms axnl/aynl have been formed", "the iteration is capped at ten steps"]
+validity = "the near-Earth and deep-space SGP4 propagation"
+status = "verified"
+limitations = ["the iteration tolerance is 1e-12 with a ten-step cap, as published"]
+[[formula.symbols]]
+symbol = "E"
+unit = "rad"
+dimension = "angle"
+meaning = "eccentric anomaly"
+[[formula.symbols]]
+symbol = "u"
+unit = "rad"
+dimension = "angle"
+meaning = "the reduced longitude"
+[formula.implementation]
+crate = "stkcraft-astro-sgp4"
+path = "crates/astro/sgp4/src/model.rs"
+function = "propagate_minutes"
+[formula.verification]
+reference = "AIAA 2006-6753 published output"
+case = "the 33 verification element sets"
+tolerance = "4e-9 km in position"
+test = "tests::near_earth_cases_reproduce_the_published_output"
+test_path = "crates/astro/sgp4/src/tests.rs"
+
+[[formula]]
+id = "sgp4.deep-space"
+name = "Deep-space lunar-solar and resonance terms"
+domain = "sgp4"
+expression_latex = 'a_{dpper} = \mathrm{dscom} + \mathrm{dspace}'
+expression_unicode = "deep-space periodics and resonance from dscom/dspace/dpper"
+source = "aiaa-2006-6753"
+source_locator = "AIAA 2006-6753, dscom, dspace and dpper"
+mathlib = "none"
+assumptions = ["the orbital period is at least 225 minutes", "the deep-space branch is selected at initialisation"]
+validity = "deep-space SDP4 branch of the published model"
+status = "verified"
+limitations = ["the lunar-solar series and resonance integration are the published approximation"]
+[[formula.symbols]]
+symbol = "a_dpper"
+unit = "rad"
+dimension = "angle"
+meaning = "the periodic correction applied to the deep-space elements"
+[formula.implementation]
+crate = "stkcraft-astro-sgp4"
+path = "crates/astro/sgp4/src/model.rs"
+function = "dscom"
+[formula.verification]
+reference = "AIAA 2006-6753 published output"
+case = "the deep-space verification element sets"
+tolerance = "4e-9 km in position"
+test = "tests::deep_space_cases_reproduce_the_published_output"
+test_path = "crates/astro/sgp4/src/tests.rs"

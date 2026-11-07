@@ -1,0 +1,170 @@
+schema = 1
+expert = "access-geometry"
+
+# The access records point at the geometric implementation and the hand-computable or published
+# case that proves it. A visibility result is not a link-budget result.
+
+[[formula]]
+id = "access.geodetic-to-itrf"
+name = "WGS84 geodetic position to Earth-fixed Cartesian"
+domain = "access-geometry"
+expression_latex = '\begin{aligned}x &= (N+h)\cos\phi\cos\lambda\\ y &= (N+h)\cos\phi\sin\lambda\\ z &= (N(1-e^2)+h)\sin\phi\end{aligned}'
+expression_unicode = "x=(N+h)cosφcosλ, y=(N+h)cosφsinλ, z=(N(1−e²)+h)sinφ"
+source = "wgs84"
+source_locator = "NIMA TR8350.2, geodetic-to-ECEF conversion"
+mathlib = "none"
+assumptions = ["phi is geodetic latitude", "h is height above the ellipsoid", "lambda is longitude positive east"]
+validity = "the WGS84 ellipsoid and the kernel's latitude/height ranges"
+status = "verified"
+limitations = ["the station is a point; no terrain or local horizon"]
+[[formula.symbols]]
+symbol = "N"
+unit = "km"
+dimension = "length"
+meaning = "prime vertical radius of curvature"
+[[formula.symbols]]
+symbol = "e"
+unit = "1"
+dimension = "ratio"
+meaning = "WGS84 first eccentricity"
+[formula.implementation]
+crate = "stkcraft-astro-access"
+path = "crates/astro/access/src/site.rs"
+function = "to_itrf"
+[formula.verification]
+reference = "WGS84 TR8350.2 and an independent inverse"
+case = "a known station's geodetic coordinates"
+tolerance = "metre-level agreement with the inverse"
+test = "site::tests::a_known_station_matches_an_independent_inverse"
+
+[[formula]]
+id = "access.look-angles"
+name = "Topocentric azimuth, elevation and range"
+domain = "access-geometry"
+expression_latex = '\begin{aligned}\rho &= r_{target} - r_{site}\\ e &= \arcsin(\hat{\rho}\cdot\hat{u})\\ a &= \operatorname{atan2}(\hat{\rho}\cdot\hat{e},\hat{\rho}\cdot\hat{n})\end{aligned}'
+expression_unicode = "ρ = target − site; el = asin(ρ̂·û); az = atan2(ρ̂·ê, ρ̂·n̂)"
+source = "vallado-2013"
+source_locator = "Vallado (2013), topocentric look angles"
+mathlib = "none"
+assumptions = ["the site frame is east-north-up", "the target is in the same Earth-fixed frame"]
+validity = "the geometric line of sight; no refraction or light time"
+status = "verified"
+limitations = ["no atmospheric refraction, light time or aberration"]
+[[formula.symbols]]
+symbol = "e"
+unit = "rad"
+dimension = "angle"
+meaning = "elevation above the local horizon"
+[[formula.symbols]]
+symbol = "a"
+unit = "rad"
+dimension = "angle"
+meaning = "azimuth clockwise from north"
+[formula.implementation]
+crate = "stkcraft-astro-access"
+path = "crates/astro/access/src/geometry.rs"
+function = "look_angle"
+[formula.verification]
+reference = "hand-computable cardinal and overhead cases"
+case = "target directly overhead"
+tolerance = "1e-12 rad in elevation"
+test = "geometry::tests::a_target_directly_overhead_is_at_ninety_degrees_elevation"
+
+[[formula]]
+id = "access.occultation"
+name = "Earth occultation of a straight segment"
+domain = "access-geometry"
+expression_latex = 'd_{segment} < R_{mean} \Rightarrow \mathrm{occluded}'
+expression_unicode = "closest approach of the segment < mean radius → occulted"
+source = "wgs84"
+source_locator = "NIMA TR8350.2; the mean-radius sphere is the kernel's occultation approximation"
+mathlib = "none"
+assumptions = ["the Earth is a sphere of the ellipsoid's volume for this test", "the segment, not the infinite line, is tested"]
+validity = "the gross visibility question, not a grazing-elevation prediction"
+status = "verified"
+limitations = ["the sphere differs from the ellipsoid by about 7 km at the limb, roughly 0.06 degrees of grazing elevation"]
+[[formula.symbols]]
+symbol = "d_segment"
+unit = "km"
+dimension = "length"
+meaning = "closest distance from the Earth centre to the site-target segment"
+[[formula.symbols]]
+symbol = "R_mean"
+unit = "km"
+dimension = "length"
+meaning = "sphere of the ellipsoid's volume"
+[formula.implementation]
+crate = "stkcraft-astro-access"
+path = "crates/astro/access/src/occultation.rs"
+function = "is_occulted"
+[formula.verification]
+reference = "a satellite on the far side of the Earth"
+case = "the segment passes through the mean sphere"
+tolerance = "boolean, with a millimetre grazing epsilon"
+test = "occultation::tests::a_satellite_on_the_far_side_of_the_earth_is_occulted"
+
+[[formula]]
+id = "access.sensor-cone"
+name = "Horizon mask and sensor half-angle"
+domain = "access-geometry"
+expression_latex = '\mathrm{visible} \iff e \ge e_{min} \land \arccos(\hat{b}\cdot\hat{\rho}) \le \theta_{1/2}'
+expression_unicode = "visible iff elevation >= mask and angle(boresight, line of sight) <= half-angle"
+source = "vallado-2013"
+source_locator = "Vallado (2013), topocentric look angles and sensor geometry"
+mathlib = "none"
+assumptions = ["the mask and half-angle are angles in radians", "the boresight is unit length and clockwise azimuth"]
+validity = "the sensor's geometric field of view"
+status = "verified"
+limitations = ["a scalar mask and cone; no terrain, occlusion pattern or gain pattern"]
+[[formula.symbols]]
+symbol = "e_min"
+unit = "rad"
+dimension = "angle"
+meaning = "minimum elevation mask"
+[[formula.symbols]]
+symbol = "theta_half"
+unit = "rad"
+dimension = "angle"
+meaning = "sensor half-angle"
+[formula.implementation]
+crate = "stkcraft-astro-access"
+path = "crates/astro/access/src/sensor.rs"
+function = "accepts"
+[formula.verification]
+reference = "hand-computable cone cases"
+case = "inside, outside and round-cone cases"
+tolerance = "exact boundary comparison"
+test = "sensor::tests::a_cone_sensor_accepts_only_inside_the_cone"
+
+[[formula]]
+id = "access.window-sampling"
+name = "Sampled windows with root bisection"
+domain = "access-geometry"
+expression_latex = 't_i = t_0 + i\Delta t,\quad \mathrm{bisect}(t_i,t_{i+1}) \to t^{*}'
+expression_unicode = "sample t_i = t0 + iΔt; bisect the sign change to the root t*"
+source = "vallado-2013"
+source_locator = "standard bracketing and bisection over a visibility predicate; project algorithm"
+mathlib = "none"
+assumptions = ["the visibility predicate changes sign at most once between two samples", "a sample is at most the stated step"]
+validity = "the sampling step the caller supplies"
+status = "implemented"
+limitations = ["a window that opens and closes entirely between samples is invisible", "the boundary is a root to the bisection tolerance, not a sample instant"]
+[[formula.symbols]]
+symbol = "Delta t"
+unit = "s"
+dimension = "time"
+meaning = "the search step"
+[[formula.symbols]]
+symbol = "t*"
+unit = "s"
+dimension = "time"
+meaning = "the bracketed visibility boundary"
+[formula.implementation]
+crate = "stkcraft-astro-access"
+path = "crates/astro/access/src/window.rs"
+function = "find_windows"
+[formula.verification]
+reference = "a hand-computed visibility step"
+case = "a boundary that falls between two samples"
+tolerance = "the bisection tolerance"
+test = "window::tests::the_boundary_is_a_root_not_a_sample"

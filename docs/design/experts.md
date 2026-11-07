@@ -55,6 +55,9 @@ share/experts/<expert-id>/
 - the formulas it may cite;
 - the limitations every answer must carry.
 
+The first three packages are `time-frames` (8 formulas), `sgp4` (5) and `access-geometry` (5).
+`cargo xtask experts check` is the authority on the current counts.
+
 ## Formula record
 
 A source is registered once, in `sources.toml`:
