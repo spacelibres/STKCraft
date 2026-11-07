@@ -9,6 +9,41 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.108] — A deterministic verifier checks the numbers before display
+
+### Added
+
+- `stkcraft-agent-runtime::verify::verify_results`: checks structured access and planet-pass results
+  before the envelope is returned. A window's `duration_seconds` must match the span of its UTC
+  instants within two seconds, every instant must parse, and an access result must carry formula
+  citations and limitations.
+- `ResultEnvelope.errors` and the `failed` status. A result that breaks an invariant is reported
+  with the reasons instead of being shown as `complete`.
+- `docs/design/reference-systems.md`: what STKCraft takes from PhyE2E (formula decomposition,
+  dimensional consistency, held-out verification) and CosmoAgent (proposer/verifier separation,
+  enumerated actions, bounded rejection, blackboard state), and what it deliberately does not copy.
+
+### Changed
+
+- The assistant panel and `ask --json` now consume a result with an explicit status and errors. The
+  model's text remains a note; it is never the evidence for a number.
+
+### Not built yet
+
+- Object capability manifests and the task-graph orchestrator.
+- A computation ledger (the CosmoAgent "stick" equivalent).
+- Formula dimension algebra and the offline PhyE2E-style discovery pipeline.
+- The 2026 `CosmoAgent` theoretical-cosmology project is a different system from the multi-agent
+  paper studied here; it has not been reviewed.
+
+### Verification
+
+- Five verifier tests: a consistent result passes; a mismatched duration, a missing formula, a
+  missing limitation, an unparseable instant and an unknown kind are handled.
+- A real DeepSeek run returned `status: complete` for the five ISS/London windows through the
+  verifier.
+- `cargo xtask ci` at 0.1.108 passes all eleven steps.
+
 ## [0.1.107] — The assistant panel renders the numbers, not the article
 
 ### Added

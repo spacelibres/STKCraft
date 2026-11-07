@@ -48,6 +48,8 @@ pub mod control;
 pub use control::{CancellationToken, ModelError, RequestControl};
 pub mod session;
 pub mod translate;
+pub mod verify;
+pub use verify::verify_results;
 #[cfg(not(target_arch = "wasm32"))]
 mod transport;
 pub mod usage;
@@ -757,21 +759,28 @@ pub struct ResultEnvelope {
     pub results: Vec<serde_json::Value>,
     /// The tool trace.
     pub trace: Vec<String>,
+    /// The invariants a result failed; empty when every result passed.
+    pub errors: Vec<String>,
 }
 
 impl Answer {
     /// Build the result envelope for this answer.
     #[must_use]
     pub fn envelope(&self, question: &str) -> ResultEnvelope {
+        let errors = verify_results(&self.results);
+        let status = if self.results.is_empty() {
+            "unsupported"
+        } else if errors.is_empty() {
+            "complete"
+        } else {
+            "failed"
+        };
         ResultEnvelope {
-            status: if self.results.is_empty() {
-                "unsupported".to_owned()
-            } else {
-                "complete".to_owned()
-            },
+            status: status.to_owned(),
             question: question.to_owned(),
             results: self.results.clone(),
             trace: self.trace.clone(),
+            errors,
         }
     }
 }
