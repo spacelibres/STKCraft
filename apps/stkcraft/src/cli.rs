@@ -27,7 +27,7 @@ pub enum Invocation {
     /// Serve the command registry to an agent over standard input and output.
     Mcp(Option<String>),
     /// Ask a model a question; it answers by running the engine's commands.
-    Ask(String),
+    Ask(AskRequest),
     /// Ask questions one after another, in one conversation, on standard input.
     Chat(ChatRequest),
     /// List the extension packages installed for this person.
@@ -59,6 +59,14 @@ pub struct RunRequest {
     eop: Option<String>,
     /// The parameters, as the strings the caller typed; `args_from` converts them by kind.
     params: serde_json::Value,
+}
+
+/// One question for the model-backed agent.
+pub struct AskRequest {
+    /// The question.
+    question: String,
+    /// Print the machine-readable `ResultEnvelope` instead of the model text.
+    json: bool,
 }
 
 /// The parameters of the `passes` subcommand.
@@ -105,7 +113,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Passes(request) => passes(&request),
         Invocation::Planet(request) => planet(&request),
         Invocation::Mcp(expert) => mcp(expert.as_deref()),
-        Invocation::Ask(question) => ask(&question),
+        Invocation::Ask(request) => ask(&request),
         Invocation::Chat(request) => chat(&request),
         Invocation::Extensions => crate::extensions::list(),
         Invocation::History => history(),
@@ -140,6 +148,7 @@ COMMANDS
     mcp         Serve the engine's commands to an agent over stdio (Model Context Protocol)
                 (`mcp --expert time-frames` restricts it to that expert's allowlist)
     ask         Ask DeepSeek a question; it answers by running the engine's commands
+                (`ask --json <question>` prints the ResultEnvelope, not the model text)
     chat        Ask questions in one conversation, reading them from standard input
                 (`chat --session <id>` resumes one; `chat --sessions` lists them)
     extensions  List the extension packages installed for this person
@@ -225,11 +234,24 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
             query: arguments.next(),
         })),
         "ask" => {
-            let question = arguments.next().ok_or_else(|| {
-                "`ask` needs a question, e.g. `stkcraft ask \"when does the ISS pass over London?\"`"
+            let mut json = false;
+            let mut question = None;
+            for argument in arguments {
+                if argument == "--json" {
+                    json = true;
+                } else if question.is_none() {
+                    question = Some(argument);
+                } else {
+                    return Err(
+                        "`ask` takes one question; quote a question containing spaces".to_owned(),
+                    );
+                }
+            }
+            let question = question.ok_or_else(|| {
+                "`ask` needs a question, e.g. `stkcraft ask --json \"when does the ISS pass over London?\"`"
                     .to_owned()
             })?;
-            Ok(Invocation::Ask(question))
+            Ok(Invocation::Ask(AskRequest { question, json }))
         }
         "run" => parse_run(arguments),
         "commands" => Ok(Invocation::Commands),
@@ -841,7 +863,7 @@ fn load_expert_role(id: &str) -> Result<stkcraft_agent_knowledge::expert::Expert
 /// The model needs `DEEPSEEK_API_KEY`; without one the message says so instead of failing inside a
 /// request. Every tool call it makes is printed as it happens, because an analysis whose steps a
 /// person cannot see is an analysis nobody can check.
-fn ask(question: &str) -> Result<(), String> {
+fn ask(request: &AskRequest) -> Result<(), String> {
     let model = crate::prefs::model_provider()?;
     let server = stkcraft_agent_mcp::Server::new(
         app_demo_scenario()?,
@@ -852,7 +874,14 @@ fn ask(question: &str) -> Result<(), String> {
     // Printed as they happen rather than collected and printed at the end: a question can take a
     // minute, and a step nobody can see while it runs is a step nobody can interrupt.
     let mut print = |line: &str| println!("  · {line}");
-    match agent.ask_observing(question, &mut print) {
+    match agent.ask_observing(&request.question, &mut print) {
+        Ok(answer) if request.json => {
+            let envelope = answer.envelope(&request.question);
+            let text = serde_json::to_string_pretty(&envelope)
+                .map_err(|error| format!("could not print the result envelope: {error}"))?;
+            println!("{text}");
+            Ok(())
+        }
         Ok(answer) => {
             println!("{}", answer.text);
             Ok(())

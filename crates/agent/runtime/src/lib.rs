@@ -737,8 +737,43 @@ pub struct Answer {
     pub text: String,
     /// Every tool call it made, in order, as `name(args) → summary` for a person reading the log.
     pub trace: Vec<String>,
+    /// The structured results the tools returned, in call order.
+    pub results: Vec<serde_json::Value>,
     /// Reported usage and gaps for this answer and its compaction requests.
     pub usage: AnswerUsage,
+}
+
+/// The machine-readable answer the platform renders.
+///
+/// The model's prose is not the result. A computation's structured content is; the answer's status
+/// says whether the platform has one, and the trace names the tools that produced it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ResultEnvelope {
+    /// `complete` when at least one structured result exists, `unsupported` otherwise.
+    pub status: String,
+    /// The question as the caller asked it.
+    pub question: String,
+    /// The structured results, in call order.
+    pub results: Vec<serde_json::Value>,
+    /// The tool trace.
+    pub trace: Vec<String>,
+}
+
+impl Answer {
+    /// Build the result envelope for this answer.
+    #[must_use]
+    pub fn envelope(&self, question: &str) -> ResultEnvelope {
+        ResultEnvelope {
+            status: if self.results.is_empty() {
+                "unsupported".to_owned()
+            } else {
+                "complete".to_owned()
+            },
+            question: question.to_owned(),
+            results: self.results.clone(),
+            trace: self.trace.clone(),
+        }
+    }
 }
 
 /// The agent: a model, the engine's tools and the skills.
@@ -1000,10 +1035,13 @@ impl<M: ChatModel> Agent<M> {
             });
             for call in turn.calls {
                 control.check()?;
-                let (content, summary) = self.run_tool(&call);
+                let (content, summary, structured) = self.run_tool(&call);
                 control.check()?;
                 observer(&summary);
                 control.check()?;
+                if let Some(structured) = structured {
+                    answer.results.push(structured);
+                }
                 answer.trace.push(summary);
                 self.push(Message::Tool {
                     call_id: call.id,
@@ -1228,7 +1266,7 @@ impl<M: ChatModel> Agent<M> {
     }
 
     /// Execute one tool call, returning the content for the model and a line for the trace.
-    fn run_tool(&mut self, call: &ToolCall) -> (String, String) {
+    fn run_tool(&mut self, call: &ToolCall) -> (String, String, Option<serde_json::Value>) {
         let id = command_id(&call.name);
         if id == SCENARIO_TOOL {
             let request = json!({
@@ -1251,7 +1289,7 @@ impl<M: ChatModel> Agent<M> {
                 })
                 .unwrap_or_else(|| "the scenario could not be read".to_owned());
             // The summary is one line: the trace is a log, and a document is not a log line.
-            return (content, format!("{SCENARIO_TOOL}()"));
+            return (content, format!("{SCENARIO_TOOL}()"), None);
         }
         if id == SKILL_TOOL {
             let name = call
@@ -1278,7 +1316,7 @@ impl<M: ChatModel> Agent<M> {
                         .map(str::to_owned)
                 })
                 .unwrap_or_else(|| format!("no skill named `{name}`"));
-            return (content, format!("{SKILL_TOOL}({name})"));
+            return (content, format!("{SKILL_TOOL}({name})"), None);
         }
         let request = json!({
             "jsonrpc": "2.0",
@@ -1302,7 +1340,11 @@ impl<M: ChatModel> Agent<M> {
                     call.arguments,
                     text.lines().next().unwrap_or_default()
                 );
-                (text, summary)
+                let structured = answer
+                    .get("result")
+                    .and_then(|result| result.get("structuredContent"))
+                    .cloned();
+                (text, summary, structured)
             }
             Some(answer) => {
                 let message = answer
@@ -1314,11 +1356,13 @@ impl<M: ChatModel> Agent<M> {
                 (
                     format!("error: {message}"),
                     format!("{}({}) → error: {message}", call.name, call.arguments),
+                    None,
                 )
             }
             None => (
                 "error: no answer from the tool".to_owned(),
                 format!("{}({}) → no answer", call.name, call.arguments),
+                None,
             ),
         }
     }
