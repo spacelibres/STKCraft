@@ -123,8 +123,8 @@ completely:
   command's id, its description and the schema of its parameters come from the same
   descriptor the menu and the CLI use. There is no second list to keep in step; a command
   that lands with tests is an agent capability the same day. Each parameter declares its kind —
-  a number, text, or degrees — so the schema and the conversion of what a caller actually sent
-  are one decision rather than two.
+  a number, text, degrees, or target corners — so the schema and the conversion of what a caller
+  actually sent are one decision rather than two.
 - **A tool returns the answer.** A command that computes pass times returns the times: as lines
   in the text a model reads, and as the same list in `structuredContent` for a program to trust.
   A count is a summary of an analysis, not the analysis.

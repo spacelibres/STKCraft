@@ -61,8 +61,8 @@ here.
   the protocol does not expose, which keeps "an agent can do anything a user can" a property of the
   design rather than a promise.
 - **Every command is a tool**, generated from the registry: one descriptor with a label, a menu path,
-  documented parameters and a declared `ParameterKind`. A capability is added by adding a command,
-  never by teaching a model a number.
+  documented parameters and a declared `ParameterKind` (`Number`, `Text`, `Degrees`,
+  `DegreesPair`). A capability is added by adding a command, never by teaching a model a number.
 - **A tool returns the answer, not a count.** Computed times come back as text a model reads and as
   `structuredContent` a program can trust.
 - **Skills are documents, not code**: `share/skills/<name>/SKILL.md`, one `#` heading whose text is the
