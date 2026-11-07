@@ -9,6 +9,38 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.103] — Answers cite the formulas they used
+
+### Added
+
+- `CommandOutcome::formulas` with `FormulaCitation { id, source }`. The access commands cite
+  `sgp4.kepler`, `frames.teme-to-itrf`, `access.geodetic-to-itrf`, `access.look-angles`,
+  `access.occultation`, `access.sensor-cone` and `access.window-sampling`, each with the source a
+  reader can follow.
+- The text answer ends with a `Formulas:` list, the JSON answer has a `formulas` array, and MCP's
+  `structuredContent` carries the same array. `passes` and `planet` print the list as `formula:`
+  lines.
+
+### Fixed
+
+- An access answer can no longer show numbers whose formula records are invisible. A reader sees
+  which formula records were used and where they come from.
+
+### Not built yet
+
+- The formula citation is a static list on the command, not read from the expert package at run
+  time; the validator and the package remain the authority on whether the records are current.
+- An expert evaluation runner; sub-daily EOP; the SGP4/Access runtime roles.
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- Engine tests assert the formula ids on `access.compute` and `access.targets`.
+- The answer-formatter test proves the list appears in text and JSON.
+- `cargo xtask ci` at 0.1.103 passes all ten steps.
+
 ## [0.1.102] — The IERS Earth-orientation series is in the kernel path
 
 ### Added

@@ -177,6 +177,15 @@ impl Args {
     }
 }
 
+/// One formula an answer used, with the source a reader can check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormulaCitation {
+    /// The formula id in `share/experts/*/formulas`.
+    pub id: &'static str,
+    /// The source locator a reader can follow.
+    pub source: &'static str,
+}
+
 /// What a command did, for a status line or an automated caller.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandOutcome {
@@ -201,6 +210,8 @@ pub struct CommandOutcome {
     /// A summary that hides the sampling step, the vertex-union target model or the zero Earth
     /// orientation is a more confident answer than the computation supports.
     pub limitations: Vec<String>,
+    /// The formula records this answer used.
+    pub formulas: Vec<FormulaCitation>,
 }
 
 impl CommandOutcome {
@@ -213,6 +224,7 @@ impl CommandOutcome {
             passes: None,
             targets: None,
             limitations: Vec::new(),
+            formulas: Vec::new(),
         }
     }
 
@@ -220,6 +232,13 @@ impl CommandOutcome {
     #[must_use]
     pub fn with_limitations(mut self, limitations: Vec<String>) -> Self {
         self.limitations = limitations;
+        self
+    }
+
+    /// The same outcome with the formula records the answer used.
+    #[must_use]
+    pub fn with_formulas(mut self, formulas: Vec<FormulaCitation>) -> Self {
+        self.formulas = formulas;
         self
     }
 
@@ -468,6 +487,40 @@ type Builtin = (
     fn(&Scenario) -> bool,
     fn(&mut Scenario, &Args) -> Result<CommandOutcome>,
 );
+
+/// The formula records an Earth access answer used.
+fn access_formulas() -> Vec<FormulaCitation> {
+    vec![
+        FormulaCitation {
+            id: "sgp4.kepler",
+            source: "AIAA 2006-6753",
+        },
+        FormulaCitation {
+            id: "frames.teme-to-itrf",
+            source: "Vallado (2013), Algorithms 23 and 26",
+        },
+        FormulaCitation {
+            id: "access.geodetic-to-itrf",
+            source: "WGS84, NIMA TR8350.2",
+        },
+        FormulaCitation {
+            id: "access.look-angles",
+            source: "Vallado (2013), topocentric look angles",
+        },
+        FormulaCitation {
+            id: "access.occultation",
+            source: "WGS84, NIMA TR8350.2",
+        },
+        FormulaCitation {
+            id: "access.sensor-cone",
+            source: "Vallado (2013), sensor geometry",
+        },
+        FormulaCitation {
+            id: "access.window-sampling",
+            source: "Vallado (2013), bracketing and bisection",
+        },
+    ]
+}
 
 /// What an Earth access answer does not model, in the sentences the answer carries.
 fn access_limitations(step_seconds: f64, targets: bool, has_eop: bool) -> Vec<String> {
@@ -903,7 +956,8 @@ const BUILTIN: [Builtin; 11] = [
                     step.as_seconds(),
                     true,
                     scenario.eop_model.is_some(),
-                )))
+                ))
+                .with_formulas(access_formulas()))
         },
     ),
     (
@@ -944,6 +998,7 @@ const BUILTIN: [Builtin; 11] = [
                 passes: None,
                 targets: None,
                 limitations: access_limitations(step, false, scenario.eop_model.is_some()),
+                formulas: access_formulas(),
             })
         },
     ),
@@ -1326,6 +1381,14 @@ mod tests {
             "{:?}",
             outcome.limitations
         );
+        assert!(
+            outcome
+                .formulas
+                .iter()
+                .any(|formula| formula.id == "access.look-angles"),
+            "{:?}",
+            outcome.formulas
+        );
         let access = outcome.access.expect("access results");
         assert_eq!(access.len(), 1);
     }
@@ -1565,6 +1628,14 @@ mod tests {
                 .any(|line| line.contains("union of its vertices")),
             "{:?}",
             outcome.limitations
+        );
+        assert!(
+            outcome
+                .formulas
+                .iter()
+                .any(|formula| formula.id == "access.window-sampling"),
+            "{:?}",
+            outcome.formulas
         );
         let targets = outcome.targets.expect("target access");
         assert_eq!(targets.len(), 3, "one per satellite/target pair");
