@@ -21,10 +21,11 @@
 //! # Why a token file
 //!
 //! A loopback port is not a permission: any process on the machine can connect to it. The token is
-//! written to a file only the user can read (`0600`, in `$XDG_RUNTIME_DIR` when there is one), so
-//! "can drive this app" means "can read that file", which is the same set of processes that could
-//! edit the user's documents. The first request on a connection must be `auth`; everything else is
-//! refused until it is.
+//! written to a file only the user can read — `0600` in `$XDG_RUNTIME_DIR` on Unix; on Windows the
+//! per-user runtime directory's inherited ACL is the protection, because there is no file mode to
+//! set — so "can drive this app" means "can read that file", which is the same set of processes that
+//! could edit the user's documents. The first request on a connection must be `auth`; everything else
+//! is refused until it is.
 //!
 //! # What it is not
 //!
@@ -246,22 +247,23 @@ pub fn token_path(port: u16) -> PathBuf {
         .join(format!("control-{port}.token"))
 }
 
-/// A fresh token: 32 hexadecimal characters from the system's entropy, or a digest of the process
-/// and the clock when no entropy device can be read.
+/// A fresh token: 32 hexadecimal characters from the operating system's cryptographic RNG, or a
+/// digest of the process and the clock when that call fails.
 ///
-/// **The read is bounded.** `/dev/urandom` never reaches end of file, so reading it *to the end* — the
-/// obvious `std::fs::read` — grows a buffer until the machine dies: that is exactly what happened on
-/// 2026-11-06, when this function took a machine's memory to 130 GB and the kernel OOM-killed the
-/// process, and the desktop with it. A device file is read for a stated number of bytes or not at all.
+/// `getrandom` is the platform API — `BCryptGenRandom` on Windows, `getrandom(2)` on Linux, the
+/// Security framework on macOS — so the token no longer depends on a `/dev/urandom` path that does
+/// not exist on Windows and used to fall back to a pid and the clock. The fallback here is still
+/// honest about being one, and the OS call reads a bounded buffer, so the 2026-11-06 failure (a
+/// device file read to the end, 130 GB and an OOM kill) has no path back in.
 #[must_use]
 pub fn new_token() -> String {
     use sha2::Digest as _;
     let mut hasher = sha2::Sha256::new();
-    if let Some(bytes) = entropy(32) {
-        hasher.update(&bytes);
+    let mut bytes = [0_u8; 32];
+    if getrandom::fill(&mut bytes).is_ok() {
+        hasher.update(bytes);
     } else {
-        // A fallback that is honest about being one: process id and the clock are not entropy, but
-        // they are unpredictable enough that the token is not guessable by a pipeline.
+        // Not entropy, but unpredictable enough that a pipeline cannot guess the token.
         hasher.update(std::process::id().to_le_bytes());
         hasher.update(
             std::time::SystemTime::now()
@@ -276,17 +278,6 @@ pub fn new_token() -> String {
         let _ = std::fmt::Write::write_fmt(&mut token, format_args!("{byte:02x}"));
     }
     token
-}
-
-/// Exactly `count` bytes from the system's entropy device, or `None` when there is none.
-///
-/// `read_exact` on a bounded buffer, never `read_to_end`: see [`new_token`].
-fn entropy(count: usize) -> Option<Vec<u8>> {
-    use std::io::Read as _;
-    let mut device = std::fs::File::open("/dev/urandom").ok()?;
-    let mut buffer = vec![0_u8; count];
-    device.read_exact(&mut buffer).ok()?;
-    Some(buffer)
 }
 
 /// Write the token where a client can read it, and nowhere else.
@@ -675,21 +666,6 @@ mod tests {
         assert!(
             message.contains("latitude") || message.contains("required"),
             "{message}"
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn the_entropy_device_is_read_for_a_stated_length() {
-        // The regression: reading `/dev/urandom` to the end allocates until the machine dies. This
-        // test cannot prove the absence of a runaway on its own — a hang is a hang — but it pins the
-        // contract: exactly the bytes asked for, and nothing when there is no device.
-        let bytes = entropy(32).expect("the entropy device on this platform");
-        assert_eq!(bytes.len(), 32);
-        assert_ne!(
-            entropy(32).expect("again"),
-            bytes,
-            "the device repeated itself"
         );
     }
 
