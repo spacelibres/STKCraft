@@ -9,6 +9,34 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.105] — Expert roles restrict the runtime tool surface
+
+### Added
+
+- `share/experts/*/role.toml`: each package declares its id, version and allowed tools.
+- `stkcraft-agent-knowledge::expert::{ExpertRole, load_role}`; the validator requires a valid role
+  for every package.
+- `stkcraft mcp --expert <id>` opens an MCP session as that role. `tools/list` is filtered to the
+  allowlist and `tools/call` rejects any tool outside it at dispatch, not only in the description.
+- The time-frames, SGP4 and access-geometry roles are the first three runtime roles.
+
+### Not built yet
+
+- The role is an allowlist over the existing MCP transport; task graphs, budgets, durable recovery
+  and multi-agent scheduling are still not built.
+- The `ask`/`chat` model loop does not yet take a role; only the MCP session does.
+- Sub-daily EOP; the release workflow and platform packaging; command parameter descriptions;
+  `ui.json` as the app's configuration file; coverage, a browser shell, the extension store and
+  DOCX/XLSX; macOS is still outside the CI matrix.
+
+### Verification
+
+- Knowledge tests: a role loads and allows only its tools; an id mismatch is refused.
+- MCP test: a role lists only `knowledge.search` and `access.compute`, and `satellite.add` is
+  refused at dispatch.
+- `cargo xtask experts check` and `experts eval` pass; `cargo xtask ci` at 0.1.105 passes all
+  eleven steps.
+
 ## [0.1.104] — Expert evaluation cases are checked
 
 ### Added
