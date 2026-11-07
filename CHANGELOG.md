@@ -9,6 +9,47 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.100] — Access answers carry their limitations
+
+### Added
+
+- `CommandOutcome::limitations`: sentences that must travel with a computed answer. The text
+  answer ends with a `Limitations:` list, the JSON answer has a `limitations` array, and MCP's
+  `structuredContent` carries the same array.
+- Earth access answers now say that windows are sampled at the requested step (a short window
+  between samples can be missed), that the line of sight is geometric (no refraction, light time or
+  aberration), and that Earth orientation is zero, so ground positions carry that approximation.
+- Target access adds that its windows are the union of the vertex windows, not polygon-interior
+  coverage.
+- Planet-centred access says the orbit is a circular Keplerian orbit with no perturbations, and that
+  its passes are sampled.
+
+### Changed
+
+- The `passes` and `planet` command-line paths print the same notes after their tables, so a
+  person does not get a more confident answer than a program.
+
+### Fixed
+
+- The access layer's real limits no longer live only in comments and design documents. An answer
+  that lists windows now states what was and was not modelled.
+
+### Not built yet
+
+- The SGP4 and Access expert packages (the Time & Frames package is the first).
+- An IERS `finals2000A` loader; `Propagator::new` still uses zero Earth-orientation parameters.
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- Engine tests assert the sampling and zero-EOP notes on `access.compute`, the vertex-union note on
+  `access.targets`, and the Keplerian note on `planet.access`.
+- The answer-formatter test proves the limitations appear in both text and JSON.
+- MCP tests assert the `limitations` array in `target-access` and `planet-passes`.
+- `cargo xtask ci` at 0.1.100 passes all ten steps.
+
 ## [0.1.99] — Expert packages and formula records are validated
 
 ### Added

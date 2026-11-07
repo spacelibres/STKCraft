@@ -625,6 +625,9 @@ fn passes(request: &PassRequest) -> Result<(), String> {
             &results,
         )
     );
+    for limitation in &outcome.limitations {
+        println!("note: {limitation}");
+    }
     Ok(())
 }
 
@@ -721,6 +724,9 @@ fn planet(request: &PlanetRequest) -> Result<(), String> {
             crate::render::format_epoch(end),
             crate::render::format_duration(pass.duration_seconds())
         );
+    }
+    for limitation in &outcome.limitations {
+        println!("note: {limitation}");
     }
     Ok(())
 }

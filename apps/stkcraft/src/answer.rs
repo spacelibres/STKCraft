@@ -61,6 +61,12 @@ pub fn text(outcome: &CommandOutcome, scenario: &Scenario) -> String {
             append_windows(&mut text, epoch, &entry.windows);
         }
     }
+    if !outcome.limitations.is_empty() {
+        text.push_str("\n\nLimitations:");
+        for limitation in &outcome.limitations {
+            let _ = write!(text, "\n- {limitation}");
+        }
+    }
     text
 }
 
@@ -73,6 +79,7 @@ pub fn json(outcome: &CommandOutcome, scenario: &Scenario) -> Value {
         "access": outcome.access.as_ref().map(|access| access_json(access, scenario, epoch)),
         "passes": outcome.passes.as_ref().map(|passes| passes_json(passes, epoch)),
         "targets": outcome.targets.as_ref().map(|targets| targets_json(targets, scenario, epoch)),
+        "limitations": outcome.limitations.clone(),
     })
 }
 
@@ -190,5 +197,30 @@ mod tests {
             Some("Scenario renamed")
         );
         assert!(value.get("access").is_some_and(Value::is_null));
+        assert!(
+            value
+                .get("limitations")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        );
+    }
+
+    #[test]
+    fn limitations_survive_the_text_and_json_answers() {
+        let scenario = Scenario::empty("answer test");
+        let outcome = CommandOutcome::new("Computed access")
+            .with_limitations(vec!["sampled every 60 s".to_owned()]);
+        let text = text(&outcome, &scenario);
+        assert!(text.contains("Limitations:"), "{text}");
+        assert!(text.contains("sampled every 60 s"), "{text}");
+        let value = json(&outcome, &scenario);
+        assert_eq!(
+            value
+                .get("limitations")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(Value::as_str),
+            Some("sampled every 60 s")
+        );
     }
 }

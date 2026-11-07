@@ -196,6 +196,11 @@ pub struct CommandOutcome {
     /// A target is a region, so its windows are the union of its vertices' — separate from [`Self::access`]
     /// because a pair of an orbit and a region is a different question from a pair of an orbit and a station.
     pub targets: Option<Vec<crate::analysis::TargetAccess>>,
+    /// What the answer does not model, in sentences a caller must keep with the result.
+    ///
+    /// A summary that hides the sampling step, the vertex-union target model or the zero Earth
+    /// orientation is a more confident answer than the computation supports.
+    pub limitations: Vec<String>,
 }
 
 impl CommandOutcome {
@@ -207,7 +212,15 @@ impl CommandOutcome {
             access: None,
             passes: None,
             targets: None,
+            limitations: Vec::new(),
         }
+    }
+
+    /// The same outcome with the limitations the answer must carry.
+    #[must_use]
+    pub fn with_limitations(mut self, limitations: Vec<String>) -> Self {
+        self.limitations = limitations;
+        self
     }
 
     /// The same outcome with target access attached.
@@ -455,6 +468,43 @@ type Builtin = (
     fn(&Scenario) -> bool,
     fn(&mut Scenario, &Args) -> Result<CommandOutcome>,
 );
+
+/// What an Earth access answer does not model, in the sentences the answer carries.
+fn access_limitations(step_seconds: f64, targets: bool) -> Vec<String> {
+    let mut limitations = vec![
+        format!(
+            "Windows are sampled every {step_seconds} s; a window that opens and closes between \
+             samples can be missed."
+        ),
+        "The line of sight is geometric: no atmospheric refraction, light time or aberration."
+            .to_owned(),
+        "Earth orientation is zero: UT1 - UTC and polar motion are not modelled, so ground \
+         positions can be off by hundreds of metres."
+            .to_owned(),
+    ];
+    if targets {
+        limitations.push(
+            "Target access is the union of its vertices' windows, not coverage of the polygon \
+             interior."
+                .to_owned(),
+        );
+    }
+    limitations
+}
+
+/// What a planet-centred pass answer does not model.
+fn planet_access_limitations(step_seconds: f64) -> Vec<String> {
+    vec![
+        format!(
+            "Passes are sampled every {step_seconds} s; a pass that opens and closes between \
+             samples can be missed."
+        ),
+        "The orbit is a circular Keplerian orbit about the body; no perturbations are modelled."
+            .to_owned(),
+        "The line of sight is geometric: no atmospheric refraction, light time or aberration."
+            .to_owned(),
+    ]
+}
 
 const ALWAYS: fn(&Scenario) -> bool = |_| true;
 
@@ -843,7 +893,9 @@ const BUILTIN: [Builtin; 11] = [
                 "Computed target access: {} pair(s), {windows} window(s)",
                 results.len()
             );
-            Ok(CommandOutcome::new(summary).with_targets(results))
+            Ok(CommandOutcome::new(summary)
+                .with_targets(results)
+                .with_limitations(access_limitations(step.as_seconds(), true)))
         },
     ),
     (
@@ -883,6 +935,7 @@ const BUILTIN: [Builtin; 11] = [
                 access: Some(results),
                 passes: None,
                 targets: None,
+                limitations: access_limitations(step, false),
             })
         },
     ),
@@ -1005,7 +1058,8 @@ const BUILTIN: [Builtin; 11] = [
                 passes.len(),
                 (total / 60.0).round() as i64
             ))
-            .with_passes(passes))
+            .with_passes(passes)
+            .with_limitations(planet_access_limitations(step_seconds)))
         },
     ),
 ];
@@ -1248,6 +1302,22 @@ mod tests {
                 &Args::none().with("step-seconds", Arg::Number(30.0)),
             )
             .expect("computes");
+        assert!(
+            outcome
+                .limitations
+                .iter()
+                .any(|line| line.contains("sampled every 30 s")),
+            "{:?}",
+            outcome.limitations
+        );
+        assert!(
+            outcome
+                .limitations
+                .iter()
+                .any(|line| line.contains("Earth orientation is zero")),
+            "{:?}",
+            outcome.limitations
+        );
         let access = outcome.access.expect("access results");
         assert_eq!(access.len(), 1);
     }
@@ -1294,6 +1364,14 @@ mod tests {
             outcome.summary
         );
         assert!(outcome.summary.starts_with("Mars:"), "{}", outcome.summary);
+        assert!(
+            outcome
+                .limitations
+                .iter()
+                .any(|line| line.contains("circular Keplerian orbit")),
+            "{:?}",
+            outcome.limitations
+        );
     }
 
     #[test]
@@ -1472,6 +1550,14 @@ mod tests {
                 &Args::none().with("step-seconds", Arg::Number(30.0)),
             )
             .expect("computes");
+        assert!(
+            outcome
+                .limitations
+                .iter()
+                .any(|line| line.contains("union of its vertices")),
+            "{:?}",
+            outcome.limitations
+        );
         let targets = outcome.targets.expect("target access");
         assert_eq!(targets.len(), 3, "one per satellite/target pair");
         let find = |name: &str| {
