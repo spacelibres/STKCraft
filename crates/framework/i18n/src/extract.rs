@@ -296,7 +296,20 @@ fn string_literals(text: &str) -> Vec<String> {
                     Some((_, 't')) => literal.push('\t'),
                     // A backslash at the end of a line is Rust's line continuation: it removes the
                     // newline and the next line's leading whitespace, so a long literal split across
-                    // two lines is one string and not one string with a hole in it.
+                    // two lines is one string and not one string with a hole in it. A source file
+                    // checked out with CRLF ends the line with `\r\n`; treating that `\r` as text
+                    // made every continued literal a different key from its catalog row.
+                    Some((_, '\r'))
+                        if characters
+                            .clone()
+                            .next()
+                            .is_some_and(|(_, next)| next == '\n') =>
+                    {
+                        characters.next();
+                        while matches!(characters.clone().next(), Some((_, ' ' | '\t'))) {
+                            characters.next();
+                        }
+                    }
                     Some((_, '\n')) => {
                         while matches!(characters.clone().next(), Some((_, ' ' | '\t'))) {
                             characters.next();
@@ -317,6 +330,18 @@ fn string_literals(text: &str) -> Vec<String> {
 #[allow(clippy::indexing_slicing, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_crlf_line_continuation_is_one_string() {
+        // A Windows checkout has `\r\n`; the `\r` is not part of the string Rust builds, so it must
+        // not become part of the catalog key either.
+        let text = "let a = tr!(translations, locale, \"model \\\r\n  to choose\");";
+        let sources = sources(text);
+        assert_eq!(
+            sources.first().map(|source| source.text.as_str()),
+            Some("model to choose")
+        );
+    }
 
     #[test]
     fn a_lifetime_does_not_hide_the_calls_after_it() {

@@ -9,6 +9,36 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.95] — Chinese is complete, and the extractor reads CRLF continuations
+
+### Fixed
+
+- The i18n extractor treated the `\r` of a CRLF line ending as text when a translated literal
+  continued with a trailing backslash. A Windows checkout therefore produced a catalog key with
+  `\r\n` in it, which no catalog row could match: those strings stayed English and their catalog
+  rows were reported as unused. The extractor now consumes `\r\n` as the line continuation Rust
+  does, and a test covers it.
+- `cargo xtask i18n report` names every missing string instead of stopping after twelve. A report
+  that says "… and 15 more" is not a work list.
+
+### Changed
+
+- The `zh` catalog is complete: **63/63 strings, 0 missing, 0 unused**. The 25 new rows cover the
+  command labels, the assistant's fixed failures, the frame-problem sentences, the marker summary
+  and the pass-over-station line. The plural row uses the single CLDR form Chinese has.
+
+### Not built yet
+
+- The release workflow and platform packaging; command parameter descriptions; `ui.json` as the
+  app's configuration file; coverage, a browser shell, the extension store and DOCX/XLSX; macOS is
+  still outside the CI matrix.
+
+### Verification
+
+- `cargo xtask i18n` reports 63 source strings and every catalog well-formed.
+- `cargo xtask i18n report` reports `zh (中文): 63/63, 0 missing, 0 unused`.
+- `cargo xtask ci` at 0.1.95.
+
 ## [0.1.94] — The project no longer claims ArtCraft membership
 
 ### Changed
