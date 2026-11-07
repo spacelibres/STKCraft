@@ -44,6 +44,8 @@ pub enum Invocation {
     Run(RunRequest),
     /// Run the fixed agent evaluation cases against the configured model.
     AgentEval(AgentEvalRequest),
+    /// Run a deterministic task graph.
+    Workflow(WorkflowRequest),
     /// List every command id, its parameters and its menu.
     Commands,
 }
@@ -61,6 +63,12 @@ pub struct RunRequest {
     eop: Option<String>,
     /// The parameters, as the strings the caller typed; `args_from` converts them by kind.
     params: serde_json::Value,
+}
+
+/// One deterministic task graph to run.
+pub struct WorkflowRequest {
+    /// The JSON graph file.
+    path: String,
 }
 
 /// The fixed agent evaluation cases to run.
@@ -130,6 +138,7 @@ pub fn run<I: Iterator<Item = String>>(arguments: I) -> Result<(), String> {
         Invocation::Knowledge(request) => knowledge(&request),
         Invocation::Run(request) => run_command(&request),
         Invocation::AgentEval(request) => agent_eval(&request),
+        Invocation::Workflow(request) => workflow(&request),
         Invocation::Commands => {
             print!("{}", command_list());
             Ok(())
@@ -159,6 +168,7 @@ COMMANDS
     ask         Ask DeepSeek a question; it answers by running the engine's commands
                 (`ask --json <question>` prints the ResultEnvelope, not the model text)
     agent-eval  Run the fixed agent cases against the configured model (needs a key)
+    workflow    Run a deterministic task graph (`workflow --file graph.json`)
     chat        Ask questions in one conversation, reading them from standard input
                 (`chat --session <id>` resumes one; `chat --sessions` lists them)
     extensions  List the extension packages installed for this person
@@ -265,6 +275,7 @@ fn parse<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, Str
         }
         "run" => parse_run(arguments),
         "agent-eval" => parse_agent_eval(arguments),
+        "workflow" => parse_workflow(arguments),
         "commands" => Ok(Invocation::Commands),
         other => Err(format!("unknown command `{other}`; try `stkcraft help`")),
     }
@@ -1482,6 +1493,57 @@ pub struct KnowledgeRequest {
 /// The scenario an MCP session starts with.
 fn app_demo_scenario() -> Result<stkcraft_astro_engine::Scenario, String> {
     crate::app::demo_scenario()
+}
+
+/// Parse `workflow --file FILE`.
+fn parse_workflow<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation, String> {
+    let mut path = None;
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--file" => {
+                path = Some(arguments.next().ok_or(
+                    "`--file` needs a JSON graph, e.g. `--file share/workflows/iss-london.json`",
+                )?);
+            }
+            other => return Err(format!("unknown option `{other}` for `workflow`")),
+        }
+    }
+    Ok(Invocation::Workflow(WorkflowRequest {
+        path: path.ok_or("`workflow` needs `--file <graph.json>`")?,
+    }))
+}
+
+/// Run a deterministic task graph against a fresh scenario.
+fn workflow(request: &WorkflowRequest) -> Result<(), String> {
+    let text = std::fs::read_to_string(&request.path)
+        .map_err(|error| format!("could not read `{}`: {error}", request.path))?;
+    let graph: stkcraft_agent_runtime::task::TaskGraph = serde_json::from_str(&text)
+        .map_err(|error| format!("`{}` is not a task graph: {error}", request.path))?;
+    let mut scenario = Scenario::empty("workflow");
+    let outcomes = graph
+        .execute(&Registry::builtin(), &mut scenario)
+        .map_err(|errors| errors.join("\n"))?;
+    let text = serde_json::to_string_pretty(&outcomes)
+        .map_err(|error| format!("could not print the workflow: {error}"))?;
+    println!("{text}");
+    let failed: Vec<&str> = outcomes
+        .iter()
+        .filter(|outcome| {
+            !matches!(
+                outcome.status,
+                stkcraft_agent_runtime::task::TaskStatus::Completed
+            )
+        })
+        .map(|outcome| outcome.id.as_str())
+        .collect();
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "workflow: task(s) did not complete: {}",
+            failed.join(", ")
+        ))
+    }
 }
 
 /// Parse `agent-eval [--file FILE]`.

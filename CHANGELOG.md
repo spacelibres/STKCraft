@@ -9,6 +9,38 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.115] — A deterministic task graph composes commands
+
+### Added
+
+- `stkcraft-agent-runtime::task`: `TaskGraph`, `TaskSpec`, `TaskOutcome` and `TaskStatus`.
+  A graph validates ids, commands, dependencies and cycles before running; it bounds the graph at
+  64 tasks and a chain at 16, then executes in a deterministic topological order.
+- Outcomes are `completed`, `needs_input`, `failed` and `blocked`. A blocked task names the
+  dependency that did not complete.
+- `stkcraft workflow --file <graph.json>` runs a graph against a fresh scenario and prints the
+  outcomes and their structured results.
+- `share/workflows/iss-london.json`: add ISS, add London, compute access; the sample returns five
+  windows with start/end/duration seconds.
+
+### Changed
+
+- The executor is deterministic and does not call a model. It is the composition substrate a planner
+  will target, not a planner itself.
+
+### Not built yet
+
+- A model planner that proposes a graph, budgets, parallelism, cancellation and durable task state.
+- Formula dimension algebra.
+- A real-provider run of a planned graph (the CLI workflow is model-free).
+
+### Verification
+
+- Five task tests: dependency order and numeric windows, cycle refusal, unknown command/missing
+  dependency, failed dependency blocks its child, disabled command is `needs_input`.
+- `stkcraft workflow --file share/workflows/iss-london.json` exits 0 and prints five windows.
+- `cargo xtask ci` at 0.1.115 passes all twelve steps.
+
 ## [0.1.114] — Known gaps are refused before the model runs
 
 ### Added

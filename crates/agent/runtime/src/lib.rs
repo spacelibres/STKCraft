@@ -47,6 +47,7 @@ use stkcraft_agent_mcp::Server;
 pub mod control;
 pub use control::{CancellationToken, ModelError, RequestControl};
 pub mod session;
+pub mod task;
 pub mod translate;
 pub mod verify;
 pub use verify::verify_results;
