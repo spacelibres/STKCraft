@@ -9,6 +9,41 @@ Versions in the `0.0.x` series are early alpha. Each one states what it can and 
 so a reader is never left guessing whether a missing capability is a bug or simply not built
 yet.
 
+## [0.1.122] — `ask` is planner-first, with the tool loop as fallback
+
+### Changed
+
+- `stkcraft ask "<question>"` now tries the planner and executor first. A `complete` or
+  `unsupported` envelope is printed as the answer; a planner failure or a non-complete result falls
+  back to the existing tool loop with a stderr note.
+- `ask --plan` remains the strict path: it refuses instead of falling back.
+- The capability guard runs before the model credential is read, so an RF/manoeuvre/attitude
+  request returns `unsupported` even with no key.
+
+### Added
+
+- A CLI test that a guarded question returns `unsupported` without a key.
+- The planner prompt still carries the existing satellite and station names, so a pass request does
+  not add a duplicate object.
+
+### Real result
+
+With a real DeepSeek key, the default `ask` path planned `scenario.set-duration` and
+`access.compute`, executed them and printed a `complete` envelope with one pair and five windows.
+No model prose was printed.
+
+### Not built yet
+
+- Planner budgets, parallel execution, cancellation and durable state.
+- Expression-level dimension algebra and offline formula discovery.
+- A real `failed` case in the fixed evaluation set.
+
+### Verification
+
+- Real DeepSeek run at 0.1.122: default `ask` returned five windows, `status: complete`, exit 0.
+- Guard test without a key: `unsupported`, `capability.guard(rf-link)`.
+- `cargo xtask ci` at 0.1.122 passes all twelve steps.
+
 ## [0.1.121] — `ask --plan` runs the planner and executor on the demo scenario
 
 ### Added
