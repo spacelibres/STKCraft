@@ -602,6 +602,41 @@ fn validate_source_path(root: &Path, file: &Path, source: &Source, errors: &mut 
     }
 }
 
+/// A base dimension for the unit/dimension pair check.
+///
+/// This is not full dimensional analysis. It checks that a symbol's unit and its declared dimension
+/// label describe the same base quantity; expression-level balance is a later step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dimension {
+    One,
+    Length,
+    Time,
+    Angle,
+    AngularRate,
+}
+
+fn unit_dimension(unit: &str) -> Option<Dimension> {
+    match unit.trim().to_lowercase().as_str() {
+        "1" | "" => Some(Dimension::One),
+        "km" | "m" | "cm" | "mm" => Some(Dimension::Length),
+        "s" | "min" | "h" | "hour" | "day" | "century" => Some(Dimension::Time),
+        "rad" | "deg" | "degree" => Some(Dimension::Angle),
+        "rad/min" | "rad/s" => Some(Dimension::AngularRate),
+        _ => None,
+    }
+}
+
+fn label_dimension(label: &str) -> Option<Dimension> {
+    match label.trim().to_lowercase().as_str() {
+        "ratio" | "integer" | "number" | "dimensionless" => Some(Dimension::One),
+        "length" => Some(Dimension::Length),
+        "time" | "time offset" => Some(Dimension::Time),
+        "angle" => Some(Dimension::Angle),
+        "angular rate" | "frequency" => Some(Dimension::AngularRate),
+        _ => None,
+    }
+}
+
 fn validate_formula(
     root: &Path,
     file: &Path,
@@ -639,6 +674,17 @@ fn validate_formula(
         {
             errors.push(format!(
                 "{where_}: every symbol needs symbol, unit, dimension and meaning"
+            ));
+            continue;
+        }
+        if let (Some(unit), Some(label)) = (
+            unit_dimension(&symbol.unit),
+            label_dimension(&symbol.dimension),
+        ) && unit != label
+        {
+            errors.push(format!(
+                "{where_}: symbol `{}` has unit `{}` and dimension `{}` that do not agree",
+                symbol.name, symbol.unit, symbol.dimension
             ));
         }
     }
@@ -865,6 +911,10 @@ adopted_by = ["test"]
     }
 
     fn write_formula(root: &Path, test: &str) {
+        write_formula_units(root, test, "1", "number");
+    }
+
+    fn write_formula_units(root: &Path, test: &str, unit: &str, dimension: &str) {
         fs::write(
             root.join("share/experts/test/formulas/test.toml"),
             format!(
@@ -886,8 +936,8 @@ status = "verified"
 limitations = []
 [[formula.symbols]]
 symbol = "x"
-unit = "1"
-dimension = "number"
+unit = "{unit}"
+dimension = "{dimension}"
 meaning = "a value"
 [formula.implementation]
 crate = "test"
@@ -914,6 +964,18 @@ test = "{test}"
             ),
         )
         .expect("evaluation");
+    }
+
+    #[test]
+    fn a_unit_and_dimension_that_disagree_are_refused() {
+        let root = fixture("unit-dimension");
+        write_formula_units(&root, "proves_it", "km", "time");
+        let errors = validate(&root).expect_err("a mismatch");
+        assert!(
+            errors.iter().any(|error| error.contains("do not agree")),
+            "{errors:?}"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
