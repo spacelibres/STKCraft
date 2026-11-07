@@ -1035,6 +1035,17 @@ impl<M: ChatModel> Agent<M> {
         control: &RequestControl,
     ) -> Result<Answer, ModelError> {
         control.check()?;
+        if let Some((id, reason)) = self.server.unsupported_reason(question) {
+            let summary = format!("capability.guard({id})");
+            observer(&summary);
+            return Ok(Answer {
+                text: reason.clone(),
+                trace: vec![summary],
+                reported_status: Some("unsupported".to_owned()),
+                reported_reason: Some(reason),
+                ..Answer::default()
+            });
+        }
         self.usage = AnswerUsage::default();
         if self.messages.is_empty() {
             let system = self.system_prompt();
@@ -1505,6 +1516,27 @@ mod tests {
             total_tokens: tokens,
             ..Usage::default()
         }
+    }
+
+    #[test]
+    fn a_known_unmodelled_domain_is_refused_before_the_model() {
+        let server = Server::new(Scenario::empty("guard test"), Vec::new())
+            .with_unsupported_domain("rf-link", &["rf link"], "no link model");
+        let mut agent = Agent::new(
+            Script {
+                turns: RefCell::new(Vec::new()),
+            },
+            server,
+        );
+        let answer = agent
+            .ask("Compute the RF link margin")
+            .expect("guarded answer");
+        assert_eq!(answer.reported_status.as_deref(), Some("unsupported"));
+        assert_eq!(answer.trace, ["capability.guard(rf-link)"]);
+        assert_eq!(
+            answer.envelope("Compute the RF link margin").status,
+            "unsupported"
+        );
     }
 
     #[test]

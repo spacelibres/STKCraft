@@ -1,0 +1,17 @@
+# Domains with no command in this build. The guard runs before the model, so a request for one of
+# these returns `unsupported` deterministically instead of producing unrelated geometry.
+
+[[limit]]
+id = "rf-link"
+triggers = ["rf link", "link budget", "link margin", "eirp", "g/t", "carrier-to-noise", "eb/n0"]
+reason = "No registered command computes RF link budgets or link margins; STKCraft currently computes geometric access only."
+
+[[limit]]
+id = "maneuver"
+triggers = ["maneuver", "manoeuvre", "delta-v", "delta v", "thrust"]
+reason = "No registered command propagates a maneuver or a thrust arc; the element set is a snapshot."
+
+[[limit]]
+id = "attitude"
+triggers = ["attitude", "pointing mode", "slew"]
+reason = "No registered command models attitude, pointing modes or slew schedules."
