@@ -14,6 +14,8 @@
 //! would be to reimplement the finder as a forward-only sweep, which would trade that cost for
 //! a weaker guarantee. The guarantee is worth more.
 
+use std::sync::Arc;
+
 use stkcraft_astro_access::{AccessProblem, AccessWindow};
 use stkcraft_framework_core::{Duration, EpochOffset, Error, Result};
 use stkcraft_framework_time::Epoch;
@@ -69,7 +71,11 @@ pub fn compute_access(
             what: format!("satellite {satellite:?}"),
         })?;
     let problem = problem_for(scenario, station)?;
-    let propagator = std::cell::RefCell::new(Propagator::new(&satellite_entry.element_set)?);
+    let mut propagator = Propagator::new(&satellite_entry.element_set)?;
+    if let Some(model) = &scenario.eop_model {
+        propagator = propagator.with_eop_model(Arc::clone(model));
+    }
+    let propagator = std::cell::RefCell::new(propagator);
     let cache: std::cell::RefCell<std::collections::BTreeMap<i64, Option<[f64; 3]>>> =
         std::cell::RefCell::new(std::collections::BTreeMap::new());
 
@@ -157,7 +163,11 @@ pub fn compute_target_access(
         })?;
     let start = EpochOffset::from_seconds(0.0);
     let end = EpochOffset::from_seconds(scenario.duration_seconds);
-    let propagator = std::cell::RefCell::new(Propagator::new(&satellite_entry.element_set)?);
+    let mut propagator = Propagator::new(&satellite_entry.element_set)?;
+    if let Some(model) = &scenario.eop_model {
+        propagator = propagator.with_eop_model(Arc::clone(model));
+    }
+    let propagator = std::cell::RefCell::new(propagator);
     let cache: std::cell::RefCell<std::collections::BTreeMap<i64, Option<[f64; 3]>>> =
         std::cell::RefCell::new(std::collections::BTreeMap::new());
 

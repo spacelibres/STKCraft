@@ -116,7 +116,7 @@ assumptions = ["DUT1 is supplied by the caller; it cannot be derived from UTC or
 validity = "|DUT1| < 0.9 s, the range the leap-second system maintains"
 status = "implemented"
 limitations = [
-  "no IERS finals2000A loader exists, so the kernel cannot supply DUT1 itself",
+  "an IERS finals2000A file must be loaded with --eop; without it the kernel has no DUT1",
   "a UT1 request without DUT1 is refused, not defaulted to zero",
 ]
 [[formula.symbols]]

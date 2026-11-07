@@ -470,7 +470,7 @@ type Builtin = (
 );
 
 /// What an Earth access answer does not model, in the sentences the answer carries.
-fn access_limitations(step_seconds: f64, targets: bool) -> Vec<String> {
+fn access_limitations(step_seconds: f64, targets: bool, has_eop: bool) -> Vec<String> {
     let mut limitations = vec![
         format!(
             "Windows are sampled every {step_seconds} s; a window that opens and closes between \
@@ -478,10 +478,14 @@ fn access_limitations(step_seconds: f64, targets: bool) -> Vec<String> {
         ),
         "The line of sight is geometric: no atmospheric refraction, light time or aberration."
             .to_owned(),
-        "Earth orientation is zero: UT1 - UTC and polar motion are not modelled, so ground \
-         positions can be off by hundreds of metres."
-            .to_owned(),
     ];
+    if !has_eop {
+        limitations.push(
+            "Earth orientation is zero: UT1 - UTC and polar motion are not modelled, so ground \
+             positions can be off by hundreds of metres."
+                .to_owned(),
+        );
+    }
     if targets {
         limitations.push(
             "Target access is the union of its vertices' windows, not coverage of the polygon \
@@ -895,7 +899,11 @@ const BUILTIN: [Builtin; 11] = [
             );
             Ok(CommandOutcome::new(summary)
                 .with_targets(results)
-                .with_limitations(access_limitations(step.as_seconds(), true)))
+                .with_limitations(access_limitations(
+                    step.as_seconds(),
+                    true,
+                    scenario.eop_model.is_some(),
+                )))
         },
     ),
     (
@@ -935,7 +943,7 @@ const BUILTIN: [Builtin; 11] = [
                 access: Some(results),
                 passes: None,
                 targets: None,
-                limitations: access_limitations(step, false),
+                limitations: access_limitations(step, false, scenario.eop_model.is_some()),
             })
         },
     ),

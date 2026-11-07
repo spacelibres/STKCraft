@@ -19,9 +19,11 @@
 //! It is correct, and for a near-Earth orbit the restart is cheap because there is no
 //! resonance to integrate.
 
+use std::sync::Arc;
+
 use stkcraft_astro_access::Ellipsoid;
 use stkcraft_astro_frames::{
-    CartesianState, EarthOrientation, EquinoxTerms, teme_to_gcrf, teme_to_itrf,
+    CartesianState, EarthOrientation, EquinoxTerms, Finals2000A, teme_to_gcrf, teme_to_itrf,
 };
 use stkcraft_astro_sgp4::{Elements, Satellite, StateVector, TwoLineElement};
 use stkcraft_framework_core::{Error, Result};
@@ -35,8 +37,11 @@ pub struct Propagator {
     satellite: Satellite,
     /// The element set's epoch, for converting absolute instants to offsets.
     epoch: Epoch,
-    /// The Earth orientation used for the Earth-fixed conversion.
+    /// The Earth orientation used when no model is loaded.
     eop: EarthOrientation,
+    /// The IERS series, when the caller loaded one. It is queried at each instant, because EOP
+    /// changes over a multi-day scenario; a single value at the epoch is not enough.
+    eop_model: Option<Arc<Finals2000A>>,
 }
 
 impl Propagator {
@@ -51,10 +56,22 @@ impl Propagator {
         Ok(Self {
             satellite: Satellite::new(elements)?,
             epoch: tle.epoch,
-            // Polar motion and UT1 - UTC are not modelled yet; the effect is up to about a
-            // kilometre of ground position, which is stated rather than hidden.
+            // Polar motion and UT1 - UTC are zero unless the caller supplies a model; the answer
+            // carries that limitation rather than hiding it.
             eop: EarthOrientation::negligible(),
+            eop_model: None,
         })
+    }
+
+    /// Use an IERS `finals2000A` series for the Earth-fixed conversion.
+    ///
+    /// The series is queried at each instant; it takes precedence over a static
+    /// [`Self::with_earth_orientation`] value. A date outside the series is an error, not a
+    /// silent fallback to zero.
+    #[must_use]
+    pub fn with_eop_model(mut self, model: Arc<Finals2000A>) -> Self {
+        self.eop_model = Some(model);
+        self
     }
 
     /// The element set's epoch.
@@ -142,18 +159,20 @@ impl Propagator {
             .to_scale(stkcraft_framework_time::TimeScale::Tt, None)?
             .julian()
             .centuries_since_j2000();
+        // The IERS series is indexed by UTC. Converting first matters: a TDB epoch used directly
+        // would shift the EOP lookup by the periodic term.
+        let utc = at.to_utc()?;
+        let eop = if let Some(model) = &self.eop_model {
+            model.at(utc.julian().to_mjd())?
+        } else {
+            self.eop
+        };
         // The Earth orientation parameters carry their own UT1 offset, so the UT1 Julian Date
         // is the UTC one plus `dut1`. Passing the UTC date here would silently ignore the
         // offset the caller supplied.
-        let utc_jd = at.julian().sum();
-        let jdut1 = utc_jd + self.eop.dut1_seconds / 86_400.0;
-        teme_to_itrf(
-            jdut1,
-            ttt,
-            &self.eop,
-            EquinoxTerms::Kinematic,
-            &cartesian(&teme),
-        )
+        let utc_jd = utc.julian().sum();
+        let jdut1 = utc_jd + eop.dut1_seconds / 86_400.0;
+        teme_to_itrf(jdut1, ttt, &eop, EquinoxTerms::Kinematic, &cartesian(&teme))
     }
 
     /// The element set this propagator was built from.
@@ -238,6 +257,32 @@ mod tests {
 
         let itrf = p.itrf_state(epoch_plus).expect("converts");
         assert!((itrf.radius() - teme_radius).abs() < 1e-7);
+    }
+
+    #[test]
+    fn an_iers_series_supplies_earth_orientation_per_instant() {
+        let text = "\
+00 6 27 51722.00 I  0.0 0.0  0.0 0.0  I 0.9000000 0.0  0.0 0.0  P
+00 6 28 51723.00 I  0.0 0.0  0.0 0.0  I 0.0000000 0.0  0.0 0.0  P
+";
+        let model = Arc::new(Finals2000A::parse(text).expect("two EOP rows"));
+        let tle = TwoLineElement::parse(L1, L2).expect("valid TLE");
+        let mut zero = Propagator::new(&tle).expect("initialises");
+        let mut with_eop = Propagator::new(&tle)
+            .expect("initialises")
+            .with_eop_model(model);
+        let at = tle.epoch;
+        let a = zero.itrf_state(at).expect("zero-EOP conversion");
+        let b = with_eop.itrf_state(at).expect("IERS conversion");
+        let mut delta = 0.0;
+        for (left, right) in a.position.iter().zip(b.position.iter()) {
+            delta += (left.as_km() - right.as_km()).powi(2);
+        }
+        assert!(
+            delta.sqrt() > 0.01,
+            "the EOP series made no difference: {} km",
+            delta.sqrt()
+        );
     }
 
     #[test]

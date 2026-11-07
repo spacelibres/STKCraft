@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod arguments;
+pub mod eop;
 pub mod nutation;
 pub mod precession;
 pub mod rotation;
@@ -27,6 +28,7 @@ pub mod sidereal;
 pub mod teme;
 
 pub use arguments::{FundamentalArguments, iau_1980};
+pub use eop::Finals2000A;
 pub use nutation::Nutation;
 pub use precession::{PrecessionAngles, iau_1976_matrix, iau_1977_angles};
 pub use rotation::Rotation3;

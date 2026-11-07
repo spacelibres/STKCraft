@@ -6,6 +6,8 @@
 //! channel will. Nothing here reimplements engine behaviour.
 
 use std::fmt::Write as _;
+use std::path::Path;
+use std::sync::Arc;
 
 use stkcraft_astro_engine::{Arg, Args, Registry, Scenario};
 use stkcraft_astro_sgp4::TwoLineElement;
@@ -53,6 +55,8 @@ pub struct RunRequest {
     write: Option<String>,
     /// Print the structured answer instead of the readable one.
     json: bool,
+    /// An IERS finals2000A file, when the command needs Earth orientation.
+    eop: Option<String>,
     /// The parameters, as the strings the caller typed; `args_from` converts them by kind.
     params: serde_json::Value,
 }
@@ -67,6 +71,8 @@ pub struct PassRequest {
     hours: f64,
     step_seconds: f64,
     name: String,
+    /// An IERS `finals2000A.all` file, when the caller supplied one.
+    eop: Option<String>,
 }
 
 /// What a planet-centred request carries, in the units the command line used.
@@ -145,7 +151,7 @@ COMMANDS
     knowledge   List the documents in your knowledge base, or search them:
                 `stkcraft knowledge [<query>]`
     run         Run any registry command by id, against a scenario document:
-                `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--<param> VALUE]`
+                `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--eop FILE] [--<param> VALUE]`
     commands    List every command id, its parameters and the menu it belongs to
     version     Print the version
     help        Print this text
@@ -165,6 +171,8 @@ PASSES OPTIONS
     --step <SECONDS>               Search step. Shorter is slower and more thorough.
                                    Default 30.
     --name <TEXT>                  Station name, for the output. Default \"Station\".
+    --eop <FILE>                   IERS finals2000A file. Without it, Earth orientation is zero
+                                   and the answer says so.
 
 PLANET OPTIONS
     --body <NAME>                  The body, by IAU name (Mars, Titan, ...). Required.
@@ -241,6 +249,7 @@ fn parse_run<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation,
     let mut scenario = None;
     let mut write = None;
     let mut json = false;
+    let mut eop = None;
     let mut params = serde_json::Map::new();
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -254,6 +263,13 @@ fn parse_run<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation,
                 write = Some(arguments.next().ok_or_else(|| {
                     "`--write` needs a file, e.g. `--write mission.json`".to_owned()
                 })?);
+            }
+            "--eop" => {
+                eop = Some(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "`--eop` needs an IERS finals2000A file".to_owned())?,
+                );
             }
             other => {
                 let Some(name) = other.strip_prefix("--") else {
@@ -295,6 +311,7 @@ fn parse_run<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocation,
         scenario,
         write,
         json,
+        eop,
         params: serde_json::Value::Object(params),
     }))
 }
@@ -319,6 +336,9 @@ fn run_command(request: &RunRequest) -> Result<(), String> {
     scenario
         .validate()
         .map_err(|error| format!("scenario: {error}"))?;
+    if let Some(path) = &request.eop {
+        scenario.eop_model = Some(load_eop(path)?);
+    }
     let args = stkcraft_astro_engine::args_from(&command.descriptor, &request.params);
     let enabled = registry
         .enabled(&request.id, &scenario)
@@ -347,6 +367,12 @@ fn run_command(request: &RunRequest) -> Result<(), String> {
     Ok(())
 }
 
+fn load_eop(path: &str) -> Result<Arc<stkcraft_astro_frames::Finals2000A>, String> {
+    stkcraft_astro_frames::Finals2000A::from_path(Path::new(path))
+        .map(Arc::new)
+        .map_err(|error| format!("could not read the EOP file `{path}`: {error}"))
+}
+
 fn load_scenario(path: &str) -> Result<Scenario, String> {
     let metadata =
         std::fs::metadata(path).map_err(|error| format!("could not read `{path}`: {error}"))?;
@@ -371,7 +397,7 @@ fn save_scenario(path: &str, scenario: &Scenario) -> Result<(), String> {
 /// Every command id, its parameters and its menu, for a caller that has no other catalogue.
 fn command_list() -> String {
     let mut text = String::from(
-        "COMMAND REGISTRY\nRun one with `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--<param> VALUE]`.\n\n",
+        "COMMAND REGISTRY\nRun one with `stkcraft run <id> [--scenario FILE] [--write FILE] [--json] [--eop FILE] [--<param> VALUE]`.\n\n",
     );
     for command in Registry::builtin().iter() {
         let _ = writeln!(
@@ -408,6 +434,7 @@ fn parse_passes<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocati
     let mut hours = 24.0;
     let mut step_seconds = 30.0;
     let mut name = String::from("Station");
+    let mut eop = None;
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -425,6 +452,7 @@ fn parse_passes<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocati
             "--hours" => hours = next_number(&mut arguments, "--hours")?,
             "--step" => step_seconds = next_number(&mut arguments, "--step")?,
             "--name" => name = arguments.next().ok_or("--name needs a value")?,
+            "--eop" => eop = Some(arguments.next().ok_or("--eop needs a file path")?),
             other => return Err(format!("unknown option `{other}`; try `stkcraft help`")),
         }
     }
@@ -447,6 +475,7 @@ fn parse_passes<I: Iterator<Item = String>>(mut arguments: I) -> Result<Invocati
         hours,
         step_seconds,
         name,
+        eop,
     }))
 }
 
@@ -541,6 +570,9 @@ fn passes(request: &PassRequest) -> Result<(), String> {
     // clock cannot move the analysis.
     let mut scenario = Scenario::empty_at("CLI", epoch);
     scenario.duration_seconds = request.hours * 3_600.0;
+    if let Some(path) = &request.eop {
+        scenario.eop_model = Some(load_eop(path)?);
+    }
 
     registry
         .run(
