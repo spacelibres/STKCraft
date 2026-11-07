@@ -51,6 +51,46 @@ pub enum TaskStatus {
     Blocked,
     /// The caller cancelled before this task ran.
     Cancelled,
+    /// The task or failure budget stopped the graph before this task ran.
+    BudgetExceeded,
+}
+
+/// Limits for one graph execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskBudget {
+    /// The most tasks that may run.
+    pub max_tasks: usize,
+    /// The most non-completed outcomes allowed before the graph stops.
+    pub max_failures: usize,
+}
+
+impl TaskBudget {
+    /// Build a budget, rejecting zero or out-of-range values.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when `max_tasks` is zero, above the graph limit, or `max_failures` is zero.
+    pub fn new(max_tasks: usize, max_failures: usize) -> Result<Self, String> {
+        if max_tasks == 0 || max_tasks > MAX_TASKS {
+            return Err(format!("max_tasks must be between 1 and {MAX_TASKS}"));
+        }
+        if max_failures == 0 {
+            return Err("max_failures must be at least 1".to_owned());
+        }
+        Ok(Self {
+            max_tasks,
+            max_failures,
+        })
+    }
+}
+
+impl Default for TaskBudget {
+    fn default() -> Self {
+        Self {
+            max_tasks: MAX_TASKS,
+            max_failures: 3,
+        }
+    }
 }
 
 /// One task's result.
@@ -185,9 +225,24 @@ impl TaskGraph {
         registry: &Registry,
         scenario: &mut Scenario,
     ) -> Result<Vec<TaskOutcome>, Vec<String>> {
-        self.execute_controlled(
+        self.execute_with_budget(registry, scenario, &TaskBudget::default())
+    }
+
+    /// Run the graph with an explicit task and failure budget.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::execute`], before any command runs.
+    pub fn execute_with_budget(
+        &self,
+        registry: &Registry,
+        scenario: &mut Scenario,
+        budget: &TaskBudget,
+    ) -> Result<Vec<TaskOutcome>, Vec<String>> {
+        self.run(
             registry,
             scenario,
+            budget,
             &crate::RequestControl::new(crate::CancellationToken::default()),
         )
     }
@@ -207,18 +262,45 @@ impl TaskGraph {
         scenario: &mut Scenario,
         control: &crate::RequestControl,
     ) -> Result<Vec<TaskOutcome>, Vec<String>> {
+        self.run(registry, scenario, &TaskBudget::default(), control)
+    }
+
+    fn run(
+        &self,
+        registry: &Registry,
+        scenario: &mut Scenario,
+        budget: &TaskBudget,
+        control: &crate::RequestControl,
+    ) -> Result<Vec<TaskOutcome>, Vec<String>> {
         let order = self.validate(registry)?;
         let by_id: BTreeMap<&str, &TaskSpec> = self
             .tasks
             .iter()
             .map(|task| (task.id.as_str(), task))
             .collect();
-        let mut outcomes = Vec::new();
+        let mut outcomes: Vec<TaskOutcome> = Vec::new();
         let mut statuses: BTreeMap<String, TaskStatus> = BTreeMap::new();
         for id in order {
             let Some(task) = by_id.get(id.as_str()).copied() else {
                 continue;
             };
+            let failures = outcomes
+                .iter()
+                .filter(|outcome| outcome.status != TaskStatus::Completed)
+                .count();
+            if outcomes.len() >= budget.max_tasks || failures >= budget.max_failures {
+                outcomes.push(TaskOutcome {
+                    id: task.id.clone(),
+                    status: TaskStatus::BudgetExceeded,
+                    summary: String::new(),
+                    error: Some(format!(
+                        "budget stopped the graph ({} task(s), {failures} failure(s))",
+                        outcomes.len()
+                    )),
+                    result: None,
+                });
+                break;
+            }
             if control.check().is_err() {
                 outcomes.push(TaskOutcome {
                     id: task.id.clone(),
@@ -603,6 +685,35 @@ mod tests {
         assert!(access.result.is_some(), "{access:?}");
         assert_eq!(scenario.satellites.len(), 1);
         assert_eq!(scenario.stations.len(), 1);
+    }
+
+    #[test]
+    fn a_failure_budget_stops_the_next_independent_task() {
+        let graph = TaskGraph {
+            tasks: vec![
+                task(
+                    "bad",
+                    "satellite.add",
+                    json!({"name": "bad", "line1": "bad", "line2": "bad"}),
+                    &[],
+                ),
+                task("rename", "scenario.rename", json!({"name": "Changed"}), &[]),
+            ],
+        };
+        let mut scenario = Scenario::empty("budget");
+        let budget = TaskBudget::new(8, 1).expect("a budget");
+        let outcomes = graph
+            .execute_with_budget(&registry(), &mut scenario, &budget)
+            .expect("valid graph");
+        assert_eq!(outcomes[0].status, TaskStatus::Failed);
+        assert_eq!(outcomes[1].status, TaskStatus::BudgetExceeded);
+        assert_eq!(scenario.name, "budget");
+    }
+
+    #[test]
+    fn a_zero_budget_is_refused() {
+        assert!(TaskBudget::new(0, 1).is_err());
+        assert!(TaskBudget::new(8, 0).is_err());
     }
 
     #[test]

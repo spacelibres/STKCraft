@@ -1049,6 +1049,9 @@ fn planned_envelope(
                         stkcraft_agent_runtime::task::TaskStatus::Failed => "failed",
                         stkcraft_agent_runtime::task::TaskStatus::Blocked => "blocked",
                         stkcraft_agent_runtime::task::TaskStatus::Cancelled => "cancelled",
+                        stkcraft_agent_runtime::task::TaskStatus::BudgetExceeded => {
+                            "budget_exceeded"
+                        }
                     },
                     outcome.summary
                 )
