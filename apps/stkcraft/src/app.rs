@@ -29,7 +29,7 @@ use stkcraft_ui_viewport::scene::SceneData;
 use stkcraft_ui_viewport::{Camera, Frame, SceneCallback};
 
 use crate::assistant::Assistant;
-use crate::frame_builder::{build_frame, clamp_rate, step_duration};
+use crate::frame_builder::{FrameProblem, build_frame, clamp_rate, step_duration};
 use crate::prefs::{Prefs, system_locale};
 use crate::render;
 
@@ -68,7 +68,7 @@ pub struct App {
     /// The frame last built, so the overlay can report its contents.
     frame: Frame,
     /// Problems encountered building the last frame.
-    problems: Vec<String>,
+    problems: Vec<FrameProblem>,
     /// The access table, recomputed only when the user asks.
     accesses: Vec<stkcraft_astro_engine::SatelliteAccess>,
     /// Status text for the panel: what happened last, and whether it worked.
@@ -1002,7 +1002,23 @@ impl App {
                 .replace("{tracks}", &self.frame.tracks.len().to_string()),
         );
         for problem in &self.problems {
-            ui.colored_label(egui::Color32::from_rgb(230, 120, 120), problem);
+            let text = match problem {
+                FrameProblem::Station { name, error } => tr!("station \"{name}\": {error}")
+                    .replace("{name}", name)
+                    .replace("{error}", error),
+                FrameProblem::Satellite { name, error } => tr!("satellite \"{name}\": {error}")
+                    .replace("{name}", name)
+                    .replace("{error}", error),
+                FrameProblem::SatelliteAt {
+                    name,
+                    instant,
+                    error,
+                } => tr!("satellite \"{name}\" at {instant}: {error}")
+                    .replace("{name}", name)
+                    .replace("{instant}", instant)
+                    .replace("{error}", error),
+            };
+            ui.colored_label(egui::Color32::from_rgb(230, 120, 120), text);
         }
     }
 }

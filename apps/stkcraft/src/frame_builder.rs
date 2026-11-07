@@ -39,6 +39,37 @@ pub const STATION_COLOR: [f32; 3] = [0.95, 0.75, 0.25];
 /// The colour an uncoloured satellite falls back to, linear RGB.
 pub const DEFAULT_SATELLITE_COLOR: [f32; 3] = [0.95, 0.35, 0.25];
 
+/// Something the frame could not draw, as data rather than a finished sentence.
+///
+/// The names are data and the error is the engine's English text; the window owns the sentence, so
+/// the "station …:" prefix can be translated while the engine's detail stays what it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrameProblem {
+    /// A station could not be placed.
+    Station {
+        /// The station's display name.
+        name: String,
+        /// Why it could not be placed.
+        error: String,
+    },
+    /// A satellite's element set could not build a propagator.
+    Satellite {
+        /// The satellite's display name.
+        name: String,
+        /// Why the propagator was refused.
+        error: String,
+    },
+    /// A satellite could not be propagated at the displayed instant.
+    SatelliteAt {
+        /// The satellite's display name.
+        name: String,
+        /// The displayed instant, as the frame labels it.
+        instant: String,
+        /// Why propagation failed.
+        error: String,
+    },
+}
+
 /// Build the frame to draw at an instant.
 ///
 /// # Errors
@@ -47,7 +78,7 @@ pub const DEFAULT_SATELLITE_COLOR: [f32; 3] = [0.95, 0.35, 0.25];
 /// is *omitted with a recorded problem* rather than failing the whole frame: one decayed element
 /// set must not blank the window. The list of problems is returned alongside so the overlay can
 /// say what is missing.
-pub fn build_frame(scenario: &Scenario, at: Epoch) -> (Frame, Vec<String>) {
+pub fn build_frame(scenario: &Scenario, at: Epoch) -> (Frame, Vec<FrameProblem>) {
     let mut problems = Vec::new();
     let mut frame = Frame::empty(render::format_instant(at));
     frame.earth_radius_km = stkcraft_ui_viewport::EARTH_EQUATORIAL_RADIUS_KM;
@@ -59,7 +90,10 @@ pub fn build_frame(scenario: &Scenario, at: Epoch) -> (Frame, Vec<String>) {
                 position_km: [position[0] as f32, position[1] as f32, position[2] as f32],
                 color: STATION_COLOR,
             }),
-            Err(error) => problems.push(format!("station \"{}\": {error}", station.name)),
+            Err(error) => problems.push(FrameProblem::Station {
+                name: station.name.clone(),
+                error: error.to_string(),
+            }),
         }
     }
 
@@ -67,7 +101,10 @@ pub fn build_frame(scenario: &Scenario, at: Epoch) -> (Frame, Vec<String>) {
         let mut propagator = match Propagator::new(&satellite.element_set) {
             Ok(p) => p,
             Err(error) => {
-                problems.push(format!("satellite \"{}\": {error}", satellite.name));
+                problems.push(FrameProblem::Satellite {
+                    name: satellite.name.clone(),
+                    error: error.to_string(),
+                });
                 continue;
             }
         };
@@ -80,10 +117,11 @@ pub fn build_frame(scenario: &Scenario, at: Epoch) -> (Frame, Vec<String>) {
                 color,
             }),
             Err(error) => {
-                problems.push(format!(
-                    "satellite \"{}\" at {}: {error}",
-                    satellite.name, frame.epoch_label
-                ));
+                problems.push(FrameProblem::SatelliteAt {
+                    name: satellite.name.clone(),
+                    instant: frame.epoch_label.clone(),
+                    error: error.to_string(),
+                });
                 continue;
             }
         }
