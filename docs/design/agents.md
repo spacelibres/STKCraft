@@ -14,8 +14,10 @@ knowledge library, while the agent runtime drives the protocol. Skills are lazil
 The model remains outside the numerical kernel, and the viewport displays engine-produced positions.
 
 The runtime currently runs one model/tool loop. Its ability to issue several tool calls is not a
-multi-agent scheduler. Specialist roles, task graphs, durable recovery and global budgets remain
-separate milestones below. Do not infer their availability from the existence of the MCP server.
+multi-agent scheduler. A deterministic `TaskGraph` executor now validates dependencies, cycles and
+depth and runs commands in topological order (`stkcraft workflow`); a planner that proposes such a
+graph, budgets, parallelism, cancellation and durable task state remain separate milestones. Do not
+infer their availability from the existence of the MCP server.
 
 ## One role, one contract
 
